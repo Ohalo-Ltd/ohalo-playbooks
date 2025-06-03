@@ -3,3 +3,13 @@
 
 # Python cache files
 __pycache__/
+
+# Terraform
+.terraform/
+*terraform.*
+
+# Lambda zip
+lambda_function.zip
+
+# Lambda deployment package
+package/
