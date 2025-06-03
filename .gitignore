@@ -13,3 +13,6 @@ lambda_function.zip
 
 # Lambda deployment package
 package/
+
+# Local MacOS files
+.DS_Store
