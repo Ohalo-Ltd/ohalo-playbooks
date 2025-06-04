@@ -1,7 +1,7 @@
 import boto3
 import requests
 
-APP_URL = "https://73f6-78-83-61-108.ngrok-free.app"
+APP_URL = ""  # Replace with your app URL
 
 
 def lambda_handler(event, context):
