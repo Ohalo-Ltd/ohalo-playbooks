@@ -16,3 +16,6 @@ package/
 
 # Local MacOS files
 .DS_Store
+
+# Lambda output file
+output.json
