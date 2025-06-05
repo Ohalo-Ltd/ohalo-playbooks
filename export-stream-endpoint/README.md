@@ -1,10 +1,12 @@
-# FastAPI JSONL Dummy Exporter with AWS Lambda + Terraform
+# FastAPI JSONL Dummy Exporter with AWS Lambda, Glue, S3, Athena + Terraform
 
 This repository demonstrates how to:
 
 1. Build a **minimal dummy FastAPI app** that streams JSONL.
 2. Expose the app via **ngrok**.
 3. Connect it to an **AWS Lambda function** using **Terraform** to fetch and upload the data to **S3**.
+4. Run a AWS Glue Crawler that collects the data from S3 and puts it in a Data Catalogue.
+5. Query that Data Catalogue data using Amazon Athena.
 
 ---
 
