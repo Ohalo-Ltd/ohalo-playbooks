@@ -17,6 +17,49 @@ This repository demonstrates how to:
 - AWS CLI
 - Terraform
 
+## List of required AWS permissions
+
+### AWS Glue & Glue Data Catalog
+- glue:GetDatabase
+- glue:GetDatabases
+- glue:GetTable
+- glue:GetTables
+- glue:GetPartition
+- glue:GetPartitions
+- glue:CreateJob
+- glue:StartJobRun
+- glue:GetJobRun
+- glue:GetJobRuns
+- glue:UpdateJob
+- glue:DeleteJob
+
+### AWS Athena
+- athena:StartQueryExecution
+- athena:GetQueryExecution
+- athena:GetQueryResults
+- athena:ListQueryExecutions
+- athena:GetWorkGroup
+- athena:ListWorkGroups
+
+### Amazon S3
+- s3:GetObject
+- s3:PutObject
+- s3:ListBucket 
+- s3:CreateBucket
+- s3:DeleteObject
+
+### AWS Lambda
+- lambda:InvokeFunction
+- lambda:ListFunctions
+- lambda:GetFunction
+- lambda:CreateFunction
+- lambda:UpdateFunctionCode
+- lambda:UpdateFunctionConfiguration
+
+### IAM PassRole
+- iam:PassRole
+- iam:CreateRole
+
 ## Step 1: Run the FastAPI App Locally
 
 ### Create virtual environment
