@@ -2,11 +2,12 @@
 
 This repository demonstrates how to:
 
-1. Build a **minimal dummy FastAPI app** that streams JSONL.
-2. Expose the app via **ngrok**.
-3. Connect it to an **AWS Lambda function** using **Terraform** to fetch and upload the data to **S3**.
-4. Run a AWS Glue Crawler that collects the data from S3 and puts it in a Data Catalogue.
-5. Query that Data Catalogue data using Amazon Athena.
+1. (Option 1) Build a **minimal dummy FastAPI app** that streams JSONL.
+2. (Option 1) Expose the app via **ngrok**.
+3. (Option 2) Create a DXR Ephemeral VM
+4. Connect it to an **AWS Lambda function** using **Terraform** to fetch and upload the data to **S3**.
+5. Run a AWS Glue Crawler that collects the data from S3 and puts it in a Data Catalogue.
+6. Query that Data Catalogue data using Amazon Athena.
 
 ---
 
@@ -60,7 +61,7 @@ This repository demonstrates how to:
 - iam:PassRole
 - iam:CreateRole
 
-## Step 1: Run the FastAPI App Locally
+## Step 1: (Option 1) Run the FastAPI App Locally
 
 ### Create virtual environment
 ```
@@ -74,12 +75,19 @@ pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
-## Step 2: Expose the running application with ngrok
+## Step 2: (Option 1) Expose the running application with ngrok
 
 The following command should give you a URL like `https://f156-78-83-61-108.ngrok-free.app`.
 ```
 ngrok http http://localhost:8000
 ```
+
+## Step 1 & 2: (Option 2) Create a DXR Ephemeral VM
+
+Requirements:
+- Create a VM
+- Scan a datasource with your user
+- Generate a PIT token with the user
 
 ## Step 3: (optional) Modify the AWS Lambda function
 
@@ -124,10 +132,11 @@ terraform apply
 ```
 aws lambda invoke \
     --function-name export-jsonl-lambda \
-    --payload '{"app_url": "YOUR_APP_URL"}' \
+    --payload '{"app_url": "YOUR_APP_URL", "pit_token": "YOUR_PIT_TOKEN"}' \
     --cli-binary-format raw-in-base64-out \
     output.json
 ```
+**Note:** The `pit_token` parameter is required only for Option 2. You can leave it blank for Option 1.
 
 ### Run the Glue crawler
 ```
