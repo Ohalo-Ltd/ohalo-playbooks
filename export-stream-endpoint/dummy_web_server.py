@@ -13,6 +13,6 @@ def generate_jsonl():
         time.sleep(0.5)
 
 
-@app.get("/export")
+@app.get("/api/indexed-files")
 def export_jsonl():
     return StreamingResponse(generate_jsonl(), media_type="application/jsonl")
