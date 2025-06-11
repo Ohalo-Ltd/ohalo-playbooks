@@ -1,4 +1,4 @@
-# FastAPI JSONL Dummy Exporter with AWS Lambda, Glue, S3, Athena + Terraform
+# Exporter with AWS Lambda, Glue, S3, Athena + Terraform
 
 This repository demonstrates how to:
 
@@ -175,7 +175,7 @@ aws athena get-query-execution \
 ```
 
 Finally, you can retrieve the query result:
-(note that the format is a bit strange, so we add some parsing logic)
+(note that the format is a bit strange, so we add some parsing logic and this is subject to change)
 ```
 aws athena get-query-results \
     --query-execution-id 01234567-89ab-cdef-0123-456789abcdef \
