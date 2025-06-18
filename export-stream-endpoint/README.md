@@ -89,7 +89,7 @@ ngrok http http://localhost:8000
 Requirements:
 - Create a VM
 - Scan a datasource with your user
-- Generate a PIT token with the user
+- Generate a PAT token with the user
 
 ## Step 3: (optional) Modify the AWS Lambda function
 
@@ -134,11 +134,11 @@ terraform apply
 ```
 aws lambda invoke \
     --function-name export-jsonl-lambda \
-    --payload '{"app_url": "YOUR_APP_URL", "pit_token": "YOUR_PIT_TOKEN"}' \
+    --payload '{"app_url": "YOUR_APP_URL", "pat_token": "YOUR_PAT_TOKEN"}' \
     --cli-binary-format raw-in-base64-out \
     output.json
 ```
-**Note:** The `pit_token` parameter is required only for Option 2. You can leave it blank for Option 1.
+**Note:** The `pat_token` parameter is required only for Option 2. You can leave it blank for Option 1.
 
 ### Run the Glue crawler
 ```

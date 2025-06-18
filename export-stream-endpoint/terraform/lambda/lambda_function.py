@@ -7,13 +7,13 @@ def lambda_handler(event, context):
     if not app_url:
         return {"statusCode": 400, "body": "Missing 'app_url' in event payload"}
 
-    pit_token = event.get("pit_token")
-    if not pit_token:
-        return {"statusCode": 400, "body": "Missing 'pit_token' in event payload"}
+    pat_token = event.get("pat_token")
+    if not pat_token:
+        return {"statusCode": 400, "body": "Missing 'pat_token' in event payload"}
 
     s3 = boto3.client("s3")
 
-    headers = {"Authorization": f"Bearer {pit_token}"}
+    headers = {"Authorization": f"Bearer {pat_token}"}
     export_url = f"{app_url}/api/indexed-files"
     bucket = "my-export-data-bucket"
     key = "exports/data.jsonl"
