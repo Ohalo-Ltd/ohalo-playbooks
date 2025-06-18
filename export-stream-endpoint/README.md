@@ -9,6 +9,8 @@ This repository demonstrates how to:
 5. Run a AWS Glue Crawler that collects the data from S3 and puts it in a Data Catalogue.
 6. Query that Data Catalogue data using Amazon Athena.
 
+![Process diagram](./process.png)
+
 ---
 
 ## Requirements
