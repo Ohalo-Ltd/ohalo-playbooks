@@ -1,0 +1,10 @@
+# Blacklisted label configuration
+# This file defines which DataXray labels will cause an email to be blocked
+# and the error message to display when that happens
+
+# Add more in the same format as below:
+
+blocked_labels:
+  - name: "Mission Sensitive"
+    message: "Mission-sensitive document found"
+  

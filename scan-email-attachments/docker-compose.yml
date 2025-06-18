@@ -1,0 +1,30 @@
+services:
+  smtp-proxy:
+    build: .
+    ports:
+      - "1025:1025"
+    environment:
+      - DATAXRAY_BASE_URL=${DATAXRAY_BASE_URL}
+      - DATAXRAY_API_KEY=${DATAXRAY_API_KEY}
+      - DATASOURCE_ID=${DATASOURCE_ID}
+      - SMTP_PROXY_HOST=0.0.0.0
+      - SMTP_PROXY_PORT=1025
+      - MAILHOG_HOST=mailhog
+      - MAILHOG_PORT=1025
+      - LOG_LEVEL=INFO
+    depends_on:
+      - mailhog
+    networks:
+      - email-demo
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "1026:1025"  # SMTP port for internal communication
+      - "8025:8025"  # Web UI port
+    networks:
+      - email-demo
+
+networks:
+  email-demo:
+    driver: bridge
