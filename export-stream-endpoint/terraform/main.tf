@@ -22,9 +22,35 @@ resource "aws_iam_role" "lambda_exec" {
 }
 
 # IAM policy for Lambda to write to S3
-resource "aws_iam_role_policy_attachment" "lambda_s3" {
-  role       = aws_iam_role.lambda_exec.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+resource "aws_iam_policy" "lambda_s3_limited" {
+  name        = "LambdaS3LimitedAccess"
+  description = "Allow Lambda to List, Get, and Put objects only in my-export-data-bucket"
+  policy      = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "s3:ListBucket"
+        ],
+        Resource = "arn:aws:s3:::my-export-data-bucket"
+      },
+      {
+        Effect = "Allow",
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject"
+        ],
+        Resource = "arn:aws:s3:::my-export-data-bucket/*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_policy_attachment" "lambda_s3_limited_attach" {
+  name       = "lambda-s3-limited-policy-attach"
+  roles      = [aws_iam_role.lambda_exec.name]
+  policy_arn = aws_iam_policy.lambda_s3_limited.arn
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_logs" {
