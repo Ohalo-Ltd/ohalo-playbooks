@@ -1,4 +1,5 @@
 # Exporter with AWS Lambda, Glue, S3, Athena + Terraform
+Data X-Ray version: **7.19.0**
 
 This repository demonstrates how to:
 

@@ -1,4 +1,5 @@
 # Data X-Ray Email Security Integration Playbook
+Data X-Ray version: **7.19.0**
 
 🚀 **Quick Start**: Run `./start_playbook.sh` to launch the complete playbook environment! Configure label rules in `src/smtp_proxy/blocked_labels.yaml`.
 
