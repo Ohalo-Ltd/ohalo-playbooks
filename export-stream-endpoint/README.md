@@ -2,21 +2,18 @@
 
 This repository demonstrates how to:
 
-1. (Option 1) Build a **minimal dummy FastAPI app** that streams JSONL.
-2. (Option 1) Expose the app via **ngrok**.
-3. (Option 2) Create a DXR Ephemeral VM
-4. Connect it to an **AWS Lambda function** using **Terraform** to fetch and upload the data to **S3**.
-5. Run a AWS Glue Crawler that collects the data from S3 and puts it in a Data Catalogue.
-6. Query that Data Catalogue data using Amazon Athena.
+1. Connect an existing Data X-Ray installation to an **AWS Lambda function** using **Terraform** to fetch and upload the data to **S3**.
+2. Run a AWS Glue Crawler that collects the data from S3 and puts it in a Data Catalogue.
+3. Query that Data Catalogue data using Amazon Athena.
 
 ![Process diagram](./process.png)
 
 ---
 
-## Requirements
+## Prerequisites
 
-- Python 3.12+
-- [ngrok](https://ngrok.com/download)
+- Have a machine with Data X-Ray installed
+- Python 3.10+
 - AWS CLI
 - Terraform
 
@@ -63,33 +60,9 @@ This repository demonstrates how to:
 - iam:PassRole
 - iam:CreateRole
 
-## Step 1: (Option 1) Run the FastAPI App Locally
+## Step 1: Make sure your Data X-Ray instance has scanned data
 
-### Create virtual environment
-```
-python -m venv .env
-source .env/bin/activate
-pip install -r requirements.txt
-```
-
-### Run the dummy export application locally
-```
-uvicorn main:app --reload
-```
-
-## Step 2: (Option 1) Expose the running application with ngrok
-
-The following command should give you a URL like `https://f156-78-83-61-108.ngrok-free.app`.
-```
-ngrok http http://localhost:8000
-```
-
-## Step 1 & 2: (Option 2) Create a DXR Ephemeral VM
-
-Requirements:
-- Create a VM
-- Scan a datasource with your user
-- Generate a PAT token with the user
+## Step 2: Generate a PAT token from the DXR Console with your user
 
 ## Step 3: (optional) Modify the AWS Lambda function
 
@@ -130,7 +103,7 @@ terraform init
 terraform apply
 ```
 
-### Run the Lambda function
+## Step 5: Run the Lambda function
 ```
 aws lambda invoke \
     --function-name export-jsonl-lambda \
@@ -140,7 +113,7 @@ aws lambda invoke \
 ```
 **Note:** The `pat_token` parameter is required only for Option 2. You can leave it blank for Option 1.
 
-### Run the Glue crawler
+## Step 6: Run the Glue crawler
 ```
 aws glue start-crawler --name export-jsonl-crawler
 ```
@@ -153,7 +126,7 @@ aws glue get-crawler \
 ```
 Possible values are `STOPPING`, `READY`, and `RUNNING`.
 
-### Query the data using Amazon Athena
+## Step 7: Query the data using Amazon Athena
 ```
 aws athena start-query-execution \
     --query-string "SELECT * FROM exported_exports LIMIT 100;" \
@@ -184,7 +157,7 @@ aws athena get-query-results \
     --output json | jq -r '[.ResultSet.Rows[] | [.Data[].VarCharValue] ] | .[0], (.[1:][] | @tsv)'
 ```
 
-### Cleanup resources
+## Step 8: (optional) Cleanup resources
 ```
 terraform destroy
 ```
