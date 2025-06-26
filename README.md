@@ -23,5 +23,12 @@ git clone https://github.com/your-org/ohalo-playbooks.git
 cd ohalo-playbooks/<playbook-name>
 ```
 
+## Legal Disclaimer
+This repository and the contents within are provided "as is" and without any warranty, express or implied. Use of the playbooks is at your own risk. Ohalo Ltd. is not responsible for any loss, damage, or issues that may arise from the use, modification, or distribution of this code.
+
+By using this repository, you agree to assume full responsibility for any consequences that result from its use.
+
+---
+
 For questions or contributions, please open an issue or submit a pull request.
 **Happy coding!**
