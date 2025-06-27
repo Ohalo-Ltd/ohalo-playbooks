@@ -1,0 +1,11 @@
+config:
+  aws:region: us-east-1
+  odc-aws:projectName: odc-aws
+  odc-aws:environment: dev
+  odc-aws:bucketVersioning: true
+  odc-aws:notificationPrefix: ""
+  odc-aws:notificationSuffix: ""
+  odc-aws:lambdaRuntime: python3.10
+  odc-aws:lambdaMemorySize: "128"
+  odc-aws:lambdaTimeout: "30"
+encryptionsalt: v1:p3FhHcdt69c=:v1:Bg2UUd0XPQkGM+Pb:Pm8TrvzbdbtSxSjDrDk46GXYm1yM6A==
