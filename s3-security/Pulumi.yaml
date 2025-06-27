@@ -1,0 +1,6 @@
+name: odc-aws
+description: Open Data Cube AWS Infrastructure
+runtime:
+  name: python
+  options:
+    virtualenv: .venv
