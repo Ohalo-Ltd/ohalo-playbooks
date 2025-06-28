@@ -20,12 +20,6 @@ alert_topic_arn = os.environ.get("ALERT_SNS_TOPIC_ARN")
 # Whether to delete files from source bucket after processing
 remove_from_source = os.environ.get("REMOVE_FROM_SOURCE", "false").lower() == "true"
 
-# Configuration for labels loaded from environment variables
-allowed_labels_str = os.environ.get("ALLOWED_LABELS", "Allowed")
-ALLOWED_LABELS = [
-    label.strip() for label in allowed_labels_str.split(",") if label.strip()
-]
-
 blocked_labels_str = os.environ.get("BLOCKED_LABELS", "")
 BLOCKED_LABELS = [
     label.strip() for label in blocked_labels_str.split(",") if label.strip()
@@ -131,13 +125,6 @@ def lambda_handler(event, context):
 
     for i, result in enumerate(results):
         decoded_file_key = decoded_file_keys[i]
-
-        # Check if file should go to allowed bucket based on labels
-        is_allowed = (
-            any(label.name in ALLOWED_LABELS for label in result.labels)
-            if ALLOWED_LABELS
-            else False
-        )
 
         # Check if file should be quarantined based on blocked labels
         is_blocked = (

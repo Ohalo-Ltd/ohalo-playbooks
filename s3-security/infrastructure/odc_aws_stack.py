@@ -13,7 +13,6 @@ from infrastructure.config import (
     dxr_api_url,
     dxr_api_key,
     dxr_datasource_id,
-    allowed_labels,
     blocked_labels,
     remove_from_source,
     lambda_runtime,
@@ -171,7 +170,6 @@ class OdcAwsStack:
                     "DXR_API_URL": dxr_api_url,
                     "DXR_API_KEY": dxr_api_key,
                     "DXR_DATASOURCE_ID": dxr_datasource_id,
-                    "ALLOWED_LABELS": allowed_labels,
                     "BLOCKED_LABELS": blocked_labels,
                     "REMOVE_FROM_SOURCE": str(remove_from_source).lower(),
                 }

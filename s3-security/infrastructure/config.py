@@ -34,7 +34,6 @@ dxr_api_key = os.environ.get("DXR_API_KEY") or config.get_secret("dxrApiKey") or
 dxr_datasource_id = os.environ.get("DXR_DATASOURCE_ID") or config.get("dxrDatasourceId") or ""
 
 # Label Configuration - prioritize environment variables over Pulumi config
-allowed_labels = os.environ.get("ALLOWED_LABELS") or config.get("allowedLabels") or ""
 blocked_labels = os.environ.get("BLOCKED_LABELS") or config.get("blockedLabels") or ""
 remove_from_source_str = os.environ.get("REMOVE_FROM_SOURCE")
 remove_from_source = (remove_from_source_str.lower() == "true" if remove_from_source_str else 
