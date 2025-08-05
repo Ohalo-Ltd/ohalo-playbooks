@@ -1,0 +1,18 @@
+# Core web framework
+fastapi>=0.104.0
+uvicorn>=0.24.0
+
+# Configuration and validation
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# AI and ML
+openai>=1.35.0
+tiktoken>=0.5.0
+pydantic-ai>=0.0.14
+
+# Database
+psycopg2-binary>=2.9.9
+
+# Data X-Ray integration
+dxrpy>=0.2.12
