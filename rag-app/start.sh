@@ -103,6 +103,7 @@ done
 # Start frontend
 echo -e "${GREEN}Starting frontend server...${NC}"
 cd frontend
+npm ci
 npm run dev &
 FRONTEND_PID=$!
 cd ..
