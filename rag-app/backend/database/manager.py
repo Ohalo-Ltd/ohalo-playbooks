@@ -9,6 +9,9 @@ import psycopg2
 from urllib.parse import urlparse
 
 from core.config import Settings
+from core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class DatabaseManager:
@@ -54,19 +57,19 @@ class DatabaseManager:
             groups = user_info.get("groups", [])
             groups_str = ",".join(groups) if groups else ""
             # Set RLS context variables (user employee_id is set)
-            print(f"[RLS DEBUG] SQL: SET app.user_email = {email}")
+            logger.debug(f"[RLS DEBUG] SQL: SET app.user_email = {email}")
             cursor.execute(f"SET app.user_email = %s", (email,))
-            print(f"[RLS DEBUG] SQL: SET app.employee_id = {employee_id}")
+            logger.debug(f"[RLS DEBUG] SQL: SET app.employee_id = {employee_id}")
             cursor.execute(f"SET app.employee_id = %s", (employee_id,))
-            print(f"[RLS DEBUG] SQL: SET app.department = {department}")
+            logger.debug(f"[RLS DEBUG] SQL: SET app.department = {department}")
             cursor.execute(f"SET app.department = %s", (department,))
-            print(f"[RLS DEBUG] SQL: SET app.groups = {groups_str}")
+            logger.debug(f"[RLS DEBUG] SQL: SET app.groups = {groups_str}")
             cursor.execute(f"SET app.groups = %s", (groups_str,))
             connection.commit()
             # Debug: print RLS context after setting
             cursor.execute("SELECT current_setting('app.user_email', true), current_setting('app.employee_id', true), current_setting('app.groups', true)")
             rls_ctx = cursor.fetchone()
-            print(f"[RLS DEBUG] After set_rls_context: user_email={rls_ctx[0]}, employee_id={rls_ctx[1]}, groups={rls_ctx[2]}")
+            logger.debug(f"[RLS DEBUG] After set_rls_context: user_email={rls_ctx[0]}, employee_id={rls_ctx[1]}, groups={rls_ctx[2]}")
 
     def search_similar_chunks(
         self, 
@@ -95,7 +98,7 @@ class DatabaseManager:
             # Print first 5 values of embedding and threshold
             emb_preview = query_embedding[:5] if query_embedding else []
             param_summary = f"query_embedding[:5]: {emb_preview}, similarity_threshold: {similarity_threshold}, limit: {limit}"
-            print(f"[RLS DEBUG] SQL: {sql.strip()} | PARAMS: {param_summary}")
+            logger.debug(f"[RLS DEBUG] SQL: {sql.strip()} | PARAMS: {param_summary}")
             params = (query_embedding, query_embedding, similarity_threshold, query_embedding, limit)
             cursor.execute(sql, params)
             results = []
@@ -109,7 +112,7 @@ class DatabaseManager:
                     "extracted_employee_id": row[5],
                     "similarity": float(row[6])
                 })
-            print(f"[RLS DEBUG] search_similar_chunks returned {len(results)} rows")
+            logger.debug(f"[RLS DEBUG] search_similar_chunks returned {len(results)} rows")
             return results
 
     def search_chunks(self, query_embedding: List[float], user_info: Dict[str, Any], limit: int = 5, similarity_threshold: float = 0.2) -> List[Dict[str, Any]]:
@@ -172,13 +175,13 @@ class DatabaseManager:
                 # Debug: print RLS context before query
                 cursor.execute("SELECT current_setting('app.user_email', true), current_setting('app.employee_id', true), current_setting('app.groups', true)")
                 rls_ctx = cursor.fetchone()
-                print(f"[RLS DEBUG] Before get_documents_for_user query: user_email={rls_ctx[0]}, employee_id={rls_ctx[1]}, groups={rls_ctx[2]}")
+                logger.debug(f"[RLS DEBUG] Before get_documents_for_user query: user_email={rls_ctx[0]}, employee_id={rls_ctx[1]}, groups={rls_ctx[2]}")
                 sql = """
                     SELECT id, title, category, extracted_employee_id, created_at
                     FROM documents
                     ORDER BY created_at DESC
                 """
-                print(f"[RLS DEBUG] SQL: {sql.strip()}")
+                logger.debug(f"[RLS DEBUG] SQL: {sql.strip()}")
                 cursor.execute(sql)
                 results = []
                 for row in cursor.fetchall():
@@ -189,7 +192,7 @@ class DatabaseManager:
                         "extracted_employee_id": row[3],
                         "created_at": row[4].isoformat() if row[4] else None
                     })
-                print(f"[RLS DEBUG] get_documents_for_user returned {len(results)} rows")
+                logger.debug(f"[RLS DEBUG] get_documents_for_user returned {len(results)} rows")
                 return results
 
     def get_unique_documents_for_user(self, user_info: Dict[str, Any], limit: int = 20) -> List[Dict[str, Any]]:
@@ -200,7 +203,7 @@ class DatabaseManager:
                 # Debug: print RLS context before query
                 cursor.execute("SELECT current_setting('app.user_email', true), current_setting('app.employee_id', true), current_setting('app.groups', true)")
                 rls_ctx = cursor.fetchone()
-                print(f"[RLS DEBUG] Before get_unique_documents_for_user query: user_email={rls_ctx[0]}, employee_id={rls_ctx[1]}, groups={rls_ctx[2]}")
+                logger.debug(f"[RLS DEBUG] Before get_unique_documents_for_user query: user_email={rls_ctx[0]}, employee_id={rls_ctx[1]}, groups={rls_ctx[2]}")
                 sql = """
                     SELECT DISTINCT 
                         d.id,
@@ -213,7 +216,7 @@ class DatabaseManager:
                     ORDER BY d.created_at DESC
                     LIMIT %s
                 """
-                print(f"[RLS DEBUG] SQL: {sql.strip()} | PARAMS: {limit}")
+                logger.debug(f"[RLS DEBUG] SQL: {sql.strip()} | PARAMS: {limit}")
                 cursor.execute(sql, (limit,))
                 results = []
                 for row in cursor.fetchall():
@@ -225,5 +228,5 @@ class DatabaseManager:
                         "created_at": row[4].isoformat() if row[4] else None,
                         "content": row[5]
                     })
-                print(f"[RLS DEBUG] get_unique_documents_for_user returned {len(results)} rows")
+                logger.debug(f"[RLS DEBUG] get_unique_documents_for_user returned {len(results)} rows")
                 return results

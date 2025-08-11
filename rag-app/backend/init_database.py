@@ -6,6 +6,9 @@ Sets up the database schema and users
 import sys
 from database import DatabaseInitializer
 from core.config import Settings
+from core.logging import get_logger
+
+logger = get_logger(__name__)
 
 def main():
     """Initialize the database"""
@@ -13,33 +16,33 @@ def main():
     # Check for --reset flag
     reset_requested = "--reset" in sys.argv
     
-    print("🚀 Starting database initialization...")
+    logger.info("🚀 Starting database initialization...")
     
     settings = Settings()
     initializer = DatabaseInitializer(settings)
     
     # Handle reset request
     if reset_requested:
-        print("🔄 Reset requested via --reset flag")
+        logger.info("🔄 Reset requested via --reset flag")
         if initializer.reset_database():
-            print("🔄 Database reset successful, proceeding with initialization...")
+            logger.info("🔄 Database reset successful, proceeding with initialization...")
         else:
-            print("❌ Database reset failed")
+            logger.error("❌ Database reset failed")
             return False
     else:
         # Check if already initialized
         if initializer.check_database_setup():
-            print("✅ Database is already initialized")
+            logger.info("✅ Database is already initialized")
             return True
     
     # Initialize database
     success = initializer.initialize_database()
     
     if success:
-        print("✅ Database initialization completed successfully!")
-        print("💡 You can now run document ingestion with: python ingest_documents.py")
+        logger.info("✅ Database initialization completed successfully!")
+        logger.info("💡 You can now run document ingestion with: python ingest_documents.py")
     else:
-        print("❌ Database initialization failed")
+        logger.error("❌ Database initialization failed")
     
     return success
 

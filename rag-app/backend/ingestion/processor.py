@@ -7,8 +7,11 @@ import sys
 import json
 from typing import List, Dict, Any
 from dataclasses import dataclass, field
+from core.logging import get_logger
 
 import openai
+
+logger = get_logger(__name__)
 from dxrpy import DXRClient
 from dxrpy.index import JsonSearchQuery, Hit
 from psycopg2.extras import execute_values
@@ -85,7 +88,7 @@ class DocumentProcessor:
                 cursor.execute("DELETE FROM document_chunks")
                 cursor.execute("DELETE FROM documents")
                 conn.commit()
-                print("🗑️  Cleared existing documents and chunks")
+                logger.info("🗑️  Cleared existing documents and chunks")
 
     def process_documents(self) -> ProcessingResult:
         """Process documents from DXR and store in database"""
@@ -98,7 +101,7 @@ class DocumentProcessor:
                 api_url=self.settings.dxr_api_url  # Use api_url instead of base_url
             )
 
-            print(f"🔍 Searching DXR datasource {self.settings.dxr_datasource_id}...")
+            logger.info(f"🔍 Searching DXR datasource {self.settings.dxr_datasource_id}...")
 
             # Search for all documents in the datasource
             query = JsonSearchQuery(
@@ -109,10 +112,10 @@ class DocumentProcessor:
             response = client.index.search(query)
 
             if not response.hits:
-                print("⚠️  No documents found in DXR datasource")
+                logger.warning("⚠️  No documents found in DXR datasource")
                 return result
 
-            print(f"📚 Found {len(response.hits)} documents")
+            logger.info(f"📚 Found {len(response.hits)} documents")
 
             # Process documents in batches
             with self.db_manager.get_connection() as conn:
@@ -122,7 +125,7 @@ class DocumentProcessor:
                     except Exception as e:
                         error_msg = f"Failed to process document {hit.metadata.get('title', 'unknown')}: {e}"
                         result.errors.append(error_msg)
-                        print(f"❌ {error_msg}")
+                        logger.error(f"❌ {error_msg}")
                         continue
 
                 conn.commit()
@@ -143,7 +146,7 @@ class DocumentProcessor:
         content = hit.metadata.get("dxr#raw_text")
 
         if not content or not str(content).strip():
-            print(f"⚠️  Skipping document with no content: {title}")
+            logger.warning(f"⚠️  Skipping document with no content: {title}")
             return
 
         # Ensure content is a string
@@ -174,7 +177,7 @@ class DocumentProcessor:
             document_id = db_result[0]
             result.documents_processed += 1
 
-            print(f"📄 Processing: {title} (Category: {category})")
+            logger.info(f"📄 Processing: {title} (Category: {category})")
 
             # Split content into chunks
             chunks = split_text_by_tokens(content, max_tokens=500, overlap_tokens=50)
@@ -201,7 +204,7 @@ class DocumentProcessor:
             )
 
             result.chunks_created += len(chunks)
-            print(f"  ✅ Created {len(chunks)} chunks")
+            logger.info(f"  ✅ Created {len(chunks)} chunks")
 
     def get_processing_stats(self) -> Dict[str, Any]:
         """Get current processing statistics"""

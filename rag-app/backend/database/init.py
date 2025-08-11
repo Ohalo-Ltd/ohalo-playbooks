@@ -10,6 +10,9 @@ import psycopg2
 from urllib.parse import urlparse
 
 from core.config import Settings
+from core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class DatabaseInitializer:
@@ -50,7 +53,7 @@ class DatabaseInitializer:
     def initialize_database(self) -> bool:
         """Initialize database schema and users"""
         try:
-            print("🗄️  Initializing database schema...")
+            logger.info("🗄️  Initializing database schema...")
             
             # Get the directory containing SQL files
             backend_dir = Path(__file__).parent.parent
@@ -60,7 +63,7 @@ class DatabaseInitializer:
             if schema_file.exists():
                 self._execute_sql_file(schema_file)
             else:
-                print(f"⚠️  Schema file not found: {schema_file}")
+                logger.warning(f"⚠️  Schema file not found: {schema_file}")
                 return False
             
             # Create application user
@@ -68,19 +71,19 @@ class DatabaseInitializer:
             if user_file.exists():
                 self._execute_sql_file(user_file)
             else:
-                print(f"⚠️  User creation file not found: {user_file}")
+                logger.warning(f"⚠️  User creation file not found: {user_file}")
                 return False
             
-            print("✅ Database initialization completed")
+            logger.info("✅ Database initialization completed")
             return True
             
         except Exception as e:
-            print(f"❌ Database initialization failed: {e}")
+            logger.error(f"❌ Database initialization failed: {e}")
             return False
 
     def _execute_sql_file(self, file_path: Path) -> None:
         """Execute SQL commands from a file"""
-        print(f"📄 Executing SQL file: {file_path.name}")
+        logger.info(f"📄 Executing SQL file: {file_path.name}")
         
         with open(file_path, 'r') as f:
             sql_content = f.read()
@@ -90,9 +93,9 @@ class DatabaseInitializer:
                 try:
                     # Execute the entire file as one block to handle DO $$ blocks correctly
                     cursor.execute(sql_content)
-                    print(f"✅ Successfully executed {file_path.name}")
+                    logger.info(f"✅ Successfully executed {file_path.name}")
                 except Exception as e:
-                    print(f"❌ Failed to execute {file_path.name}: {e}")
+                    logger.error(f"❌ Failed to execute {file_path.name}: {e}")
                     # Try to split and execute line by line for better error reporting
                     lines = sql_content.split('\n')
                     current_statement = []
@@ -115,7 +118,7 @@ class DatabaseInitializer:
                             try:
                                 cursor.execute(stmt)
                             except Exception as block_error:
-                                print(f"⚠️  SQL block failed: {block_error}")
+                                logger.warning(f"⚠️  SQL block failed: {block_error}")
                             current_statement = []
                         elif not in_dollar_quote and line.endswith(';'):
                             # Regular statement
@@ -123,7 +126,7 @@ class DatabaseInitializer:
                             try:
                                 cursor.execute(stmt)
                             except Exception as stmt_error:
-                                print(f"⚠️  SQL statement failed: {stmt_error}")
+                                logger.warning(f"⚠️  SQL statement failed: {stmt_error}")
                             current_statement = []
 
     def check_database_setup(self) -> bool:
@@ -151,13 +154,13 @@ class DatabaseInitializer:
                     return table_count == 2 and user_exists
                     
         except Exception as e:
-            print(f"❌ Database check failed: {e}")
+            logger.error(f"❌ Database check failed: {e}")
             return False
 
     def reset_database(self) -> bool:
         """Reset database by dropping and recreating tables"""
         try:
-            print("🗑️  Resetting database...")
+            logger.info("🗑️  Resetting database...")
             
             with self.get_admin_connection() as conn:
                 with conn.cursor() as cursor:
@@ -165,9 +168,9 @@ class DatabaseInitializer:
                     cursor.execute("DROP TABLE IF EXISTS document_chunks CASCADE")
                     cursor.execute("DROP TABLE IF EXISTS documents CASCADE")
                     
-            print("✅ Database reset completed")
+            logger.info("✅ Database reset completed")
             return True
             
         except Exception as e:
-            print(f"❌ Database reset failed: {e}")
+            logger.error(f"❌ Database reset failed: {e}")
             return False

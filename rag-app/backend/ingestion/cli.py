@@ -6,6 +6,9 @@ import sys
 from .config import IngestionSettings
 from .processor import DocumentProcessor
 from .database import IngestionDatabaseManager
+from core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def main():
@@ -25,12 +28,12 @@ def main():
         missing.append("OPENAI_API_KEY")
 
     if missing:
-        print(f"❌ Missing environment variables: {', '.join(missing)}")
-        print("Please set these variables in your .env file or environment")
+        logger.error(f"❌ Missing environment variables: {', '.join(missing)}")
+        logger.error("Please set these variables in your .env file or environment")
         return False
 
-    print("📥 Starting document ingestion from DXR...")
-    print("🔐 Using postgres superuser (bypasses RLS for data loading)")
+    logger.info("📥 Starting document ingestion from DXR...")
+    logger.info("🔐 Using postgres superuser (bypasses RLS for data loading)")
     
     # Create ingestion database manager (uses postgres superuser)
     db_manager = IngestionDatabaseManager(settings)
@@ -42,35 +45,35 @@ def main():
             result = cur.fetchone()
             if result:
                 user, is_super = result
-                print(f"🔐 Connected as: {user} (superuser: {is_super})")
+                logger.info(f"🔐 Connected as: {user} (superuser: {is_super})")
                 if not is_super:
-                    print("❌ Not connected as superuser! Cannot proceed.")
-                    print("   Ingestion requires superuser privileges to bypass RLS")
+                    logger.error("❌ Not connected as superuser! Cannot proceed.")
+                    logger.error("   Ingestion requires superuser privileges to bypass RLS")
                     return False
             else:
-                print("❌ Could not verify database user! Cannot proceed.")
+                logger.error("❌ Could not verify database user! Cannot proceed.")
                 return False
     
     # Create processor
     processor = DocumentProcessor(settings)
     
-    print("🗑️  Clearing existing documents...")
+    logger.info("🗑️  Clearing existing documents...")
     processor.clear_documents()
     
     # Process documents (superuser bypasses RLS automatically)
     result = processor.process_documents()
     
     if result.errors:
-        print(f"⚠️  Completed with {len(result.errors)} errors:")
+        logger.warning(f"⚠️  Completed with {len(result.errors)} errors:")
         for error in result.errors[:5]:  # Show first 5 errors
-            print(f"   • {error}")
+            logger.warning(f"   • {error}")
         if len(result.errors) > 5:
-            print(f"   ... and {len(result.errors) - 5} more errors")
+            logger.warning(f"   ... and {len(result.errors) - 5} more errors")
     
-    print("✅ Ingestion completed!")
-    print(f"📚 Documents processed: {result.documents_processed}")
-    print(f"🧩 Chunks created: {result.chunks_created}")
-    print("🎉 Ready for RAG queries!")
+    logger.info("✅ Ingestion completed!")
+    logger.info(f"📚 Documents processed: {result.documents_processed}")
+    logger.info(f"🧩 Chunks created: {result.chunks_created}")
+    logger.info("🎉 Ready for RAG queries!")
     
     return True
 

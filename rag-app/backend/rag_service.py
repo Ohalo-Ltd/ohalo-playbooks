@@ -8,8 +8,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from collections import defaultdict
 import asyncio
+from core.logging import get_logger
 
 import openai
+
+logger = get_logger(__name__)
 from pydantic import BaseModel
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIModel
@@ -81,8 +84,8 @@ class RAGService:
                 - Use a higher threshold (e.g., 0.5-0.8) for very specific, targeted questions.
             """
             user_email = self._current_user_email
-            print(
-                f"[DEBUG] search_documents_tool called with query='{data.query}', user_email='{user_email}', similarity_threshold={data.similarity_threshold}"
+            logger.debug(
+                f"search_documents_tool called with query='{data.query}', user_email='{user_email}', similarity_threshold={data.similarity_threshold}"
             )
             if not user_email:
                 return "User email not found in context."
@@ -90,9 +93,9 @@ class RAGService:
             user_info = self._get_user_info(user_email)
 
             # Decompose the query into multiple related queries
-            print(f"[DEBUG] Decomposing query: {data.query}")
+            logger.debug(f"Decomposing query: {data.query}")
             decomposition = await self._decompose_query(data.query)
-            print(f"[DEBUG] Decomposed queries: {decomposition.decomposed_queries}")
+            logger.debug(f"Decomposed queries: {decomposition.decomposed_queries}")
 
             # Search with each decomposed query
             query_results = []
@@ -107,8 +110,8 @@ class RAGService:
 
             # Rank and merge results from all queries
             merged_chunks = self._rank_and_merge_results(query_results)
-            print(
-                f"[DEBUG] Merged {len(merged_chunks)} chunks from {len(decomposition.decomposed_queries)} queries"
+            logger.debug(
+                f"Merged {len(merged_chunks)} chunks from {len(decomposition.decomposed_queries)} queries"
             )
 
             return self._format_context(merged_chunks)
@@ -222,7 +225,7 @@ class RAGService:
             )
             return result.data
         except Exception as e:
-            print(f"[ERROR] Query decomposition failed: {e}")
+            logger.error(f"Query decomposition failed: {e}")
             # Fallback to original query
             return QueryDecomposition(
                 decomposed_queries=[query, query, query],
@@ -368,6 +371,6 @@ class RAGService:
             yield f"data: {json.dumps({'done': True})}\n\n"
 
         except Exception as e:
-            print(f"[ERROR] chat_stream exception: {e}")
+            logger.error(f"chat_stream exception: {e}")
             error_msg = f"Error processing request: {str(e)}"
             yield f"data: {json.dumps({'error': error_msg})}\n\n"
