@@ -2,7 +2,7 @@
 Main FastAPI application entry point
 """
 
-from api import app, settings
+from api.app import app, settings
 
 if __name__ == "__main__":
     import uvicorn
