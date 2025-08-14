@@ -5,7 +5,20 @@ import os
 # Buckets
 source_bucket = aws.s3.Bucket("source-bucket", bucket="dxr-s3security-demo-documents")
 allowed_bucket = aws.s3.Bucket("allowed-bucket", bucket="dxr-s3security-demo-allowed")
-quarantine_bucket = aws.s3.Bucket("quarantine-bucket", bucket="dxr-s3security-demo-quarantine")
+import uuid
+
+# Generate unique suffix for bucket names
+unique_suffix = uuid.uuid4().hex[:8]
+
+# Bucket names: configurable via env, fallback to unique names
+source_bucket_name = os.getenv("SOURCE_BUCKET_NAME", f"dxr-s3security-demo-documents-{unique_suffix}")
+allowed_bucket_name = os.getenv("ALLOWED_BUCKET_NAME", f"dxr-s3security-demo-allowed-{unique_suffix}")
+quarantine_bucket_name = os.getenv("QUARANTINE_BUCKET_NAME", f"dxr-s3security-demo-quarantine-{unique_suffix}")
+
+# Buckets
+source_bucket = aws.s3.Bucket("source-bucket", bucket=source_bucket_name)
+allowed_bucket = aws.s3.Bucket("allowed-bucket", bucket=allowed_bucket_name)
+quarantine_bucket = aws.s3.Bucket("quarantine-bucket", bucket=quarantine_bucket_name)
 
 # Lambda role
 lambda_role = aws.iam.Role(
