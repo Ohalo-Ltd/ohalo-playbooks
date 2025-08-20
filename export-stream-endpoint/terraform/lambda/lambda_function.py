@@ -14,7 +14,7 @@ def lambda_handler(event, context):
     s3 = boto3.client("s3")
 
     headers = {"Authorization": f"Bearer {pat_token}"}
-    export_url = f"{app_url}/api/vbeta/indexed-files"
+    export_url = f"{app_url}/api/vbeta/files"
     bucket = "my-export-data-bucket"
     key = "exports/data.jsonl"
 
