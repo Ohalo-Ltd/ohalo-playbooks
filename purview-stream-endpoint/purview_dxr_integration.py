@@ -81,6 +81,8 @@ logger = logging.getLogger("purview-dxr")
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "60"))
 SYNC_DELETE = os.getenv("SYNC_DELETE", "0").lower() in ("1", "true", "yes")
 DISABLE_GOVERNANCE = os.getenv("DISABLE_GOVERNANCE", "0").lower() in ("1", "true", "yes")
+ENABLE_LABEL_STATS = os.getenv("ENABLE_LABEL_STATS", "1").lower() in ("1", "true", "yes")
+LABEL_STATS_LIMIT = int(os.getenv("LABEL_STATS_LIMIT", "1000"))
 
 # ------------ Governance (Catalog Admin) API helpers ------------
 GOV_API_VERSION = "2023-09-01"
@@ -403,12 +405,9 @@ def get_purview_client() -> DataMapClient:
 CUSTOM_TYPE_NAME = "unstructured_dataset"
 
 def ensure_types_and_relationships() -> None:
-    # Check for unstructured_dataset; if missing, (re)submit typedefs
-    check = _atlas_get(f"/datamap/api/atlas/v2/types/typedef/name/{CUSTOM_TYPE_NAME}")
-    if check.status_code == 200:
-        return
-    if check.status_code not in (200, 404):
-        check.raise_for_status()
+    # If types already exist, add missing attributes as needed (non-destructive update)
+    existing_ds = _atlas_get("/datamap/api/atlas/v2/types/entitydef/name/unstructured_datasource")
+    existing_ud = _atlas_get(f"/datamap/api/atlas/v2/types/typedef/name/{CUSTOM_TYPE_NAME}")
 
     # Entity defs
     unstructured_dataset_def = {
@@ -437,6 +436,11 @@ def ensure_types_and_relationships() -> None:
             {"name": "datasourceId", "typeName": "string", "isOptional": False},
             {"name": "connectorTypeName", "typeName": "string", "isOptional": True},
             {"name": "dxrTenant", "typeName": "string", "isOptional": True},
+            # Hit stats (populated via DXR dashboard/label-statistics)
+            {"name": "hitLabelIds", "typeName": "array<string>", "isOptional": True},
+            {"name": "hitLabelNames", "typeName": "array<string>", "isOptional": True},
+            {"name": "hitDocumentCounts", "typeName": "array<int>", "isOptional": True},
+            {"name": "statsUpdatedAt", "typeName": "string", "isOptional": True},
         ],
     }
 
@@ -458,13 +462,44 @@ def ensure_types_and_relationships() -> None:
         "propagateTags": "NONE"
     }
 
-    payload = {"entityDefs": [unstructured_datasource_def, unstructured_dataset_def],
-               "relationshipDefs": [rel_ds_has_dataset]}
-    resp = _atlas_post("/datamap/api/atlas/v2/types/typedefs", payload)
-    if resp.status_code not in (200, 201):
-        logger.error("Failed to create typedefs: %s %s", resp.status_code, resp.text)
-        resp.raise_for_status()
-    logger.info("Ensured custom types & relationship")
+    # Determine whether to create or update entity defs
+    defs_to_submit = []
+    # Update/merge unstructured_datasource if exists
+    if existing_ds.status_code == 200:
+        try:
+            cur = existing_ds.json() or {}
+            existing_names = {a.get("name") for a in (cur.get("attributeDefs") or [])}
+        except Exception:
+            existing_names = set()
+        # Merge only missing attributes
+        new_attrs = [a for a in unstructured_datasource_def["attributeDefs"] if a["name"] not in existing_names]
+        if new_attrs:
+            merged = dict(cur)
+            merged["attributeDefs"] = (cur.get("attributeDefs") or []) + new_attrs
+            defs_to_submit.append({"name": unstructured_datasource_def["name"],
+                                   "superTypes": unstructured_datasource_def["superTypes"],
+                                   "attributeDefs": merged["attributeDefs"]})
+    else:
+        # Create fresh
+        defs_to_submit.append(unstructured_datasource_def)
+
+    # Update/merge unstructured_dataset if missing (rare) – otherwise keep as is
+    if existing_ud.status_code != 200:
+        defs_to_submit.append(unstructured_dataset_def)
+
+    if defs_to_submit:
+        payload = {"entityDefs": defs_to_submit, "relationshipDefs": [rel_ds_has_dataset]}
+        resp = _atlas_post("/datamap/api/atlas/v2/types/typedefs", payload)
+        if resp.status_code not in (200, 201):
+            logger.error("Failed to create/update typedefs: %s %s", resp.status_code, resp.text)
+            resp.raise_for_status()
+        logger.info("Ensured/updated custom types & relationship")
+    else:
+        # Relationship may still need ensuring
+        payload = {"relationshipDefs": [rel_ds_has_dataset]}
+        resp = _atlas_post("/datamap/api/atlas/v2/types/typedefs", payload)
+        if resp.status_code in (200, 201):
+            logger.info("Ensured relationship definition")
 
 
 def _to_qualified_name(tag: Dict[str, Any]) -> str:
@@ -652,6 +687,76 @@ def ensure_unstructured_datasets_collection(parent_reference: str) -> str:
             logger.error("Failed to ensure UD collection '%s': gov=%s acct=%s govBody=%s acctBody=%s", ref, r.status_code, last.status_code, b1, b2)
             last.raise_for_status()
     return ref
+
+# ------------ DXR Label Statistics (per-datasource) ------------
+
+def get_label_statistics_for_datasource(dsid: str, limit: int) -> List[Dict[str, Any]]:
+    url = f"{DXR_APP_URL}/api/dashboard/label-statistics?datasources={dsid}&limit={limit}"
+    headers = {
+        "Authorization": f"Bearer {DXR_PAT_TOKEN}",
+        "Accept": "application/json, text/plain, */*",
+        "Referer": DXR_APP_URL,
+    }
+    try:
+        resp = HTTP.get(url, headers=headers, timeout=30)
+    except Exception as e:
+        logger.error("Label stats request failed for ds=%s: %s", dsid, e)
+        return []
+    if resp.status_code >= 400:
+        logger.warning("Label stats HTTP %s for ds=%s: %s", resp.status_code, dsid, resp.text[:200])
+        return []
+    try:
+        data = resp.json()
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+def update_unstructured_datasource_hit_stats(client: DataMapClient, tenant: str, ds_items: List[Dict[str, Any]], child_collections: Dict[str, str] | None = None) -> None:
+    if not ds_items:
+        return
+    # Build updates per collection for efficient upsert
+    per_coll: Dict[str, List[AtlasEntity]] = defaultdict(list)
+    now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    for item in ds_items:
+        dsid = str(item.get("id"))
+        qn = _qn_datasource(tenant, dsid)
+        stats = get_label_statistics_for_datasource(dsid, LABEL_STATS_LIMIT)
+        # Keep only labels with documentCount > 0
+        lbl_ids: List[str] = []
+        lbl_names: List[str] = []
+        lbl_counts: List[int] = []
+        for row in stats or []:
+            try:
+                cnt = int(row.get("documentCount", 0))
+            except Exception:
+                cnt = 0
+            if cnt > 0:
+                lbl_ids.append(str(row.get("labelId")))
+                lbl_names.append(str(row.get("labelName", "")))
+                lbl_counts.append(cnt)
+        attrs = {
+            "qualifiedName": qn,
+            "hitLabelIds": lbl_ids,
+            "hitLabelNames": lbl_names,
+            "hitDocumentCounts": lbl_counts,
+            "statsUpdatedAt": now_iso,
+        }
+        per_coll[(child_collections or {}).get(dsid) or os.environ.get("PURVIEW_COLLECTION_ID") or ""].append(
+            AtlasEntity(type_name="unstructured_datasource", attributes=attrs)
+        )
+
+    # Submit per collection (empty key means no explicit collection_id)
+    for coll, entities in per_coll.items():
+        if not entities:
+            continue
+        payload = AtlasEntitiesWithExtInfo(entities=entities)
+        try:
+            if coll:
+                client.entity.batch_create_or_update(payload, collection_id=coll)
+            else:
+                client.entity.batch_create_or_update(payload)
+        except Exception as e:
+            logger.warning("Update hit stats upsert failed for collection=%s: %s", coll or "(none)", e)
 
 def create_relationship(rel_type: str, end1_qn: str, end1_type: str, end2_qn: str, end2_type: str) -> None:
     payload = {
