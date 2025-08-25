@@ -1,0 +1,18 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "dxrpy>=0.2.12",
+    "fastapi>=0.116.1",
+    "openai>=1.101.0",
+    "psycopg2-binary>=2.9.10",
+    "pydantic>=2.11.7",
+    "pydantic-ai>=0.7.4",
+    "pydantic-settings>=2.10.1",
+    "pyyaml>=6.0.2",
+    "tiktoken>=0.11.0",
+    "uvicorn>=0.35.0",
+]

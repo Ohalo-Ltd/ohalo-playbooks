@@ -52,14 +52,14 @@ done
 # Setup virtual environment
 if [ ! -d "venv" ]; then
     echo "📦 Creating virtual environment..."
-    python3 -m venv venv
-    source venv/bin/activate
-    pip install -r requirements.txt
+    uv venv .venv
+    source .venv/bin/activate
+    uv sync
 else
     echo "✅ Activating virtual environment..."
-    source venv/bin/activate
+    source .venv/bin/activate
     # Quick dependency check
-    python -c "import tiktoken, openai, dxrpy, psycopg2" 2>/dev/null || pip install -r requirements.txt
+    uv run python -c "import tiktoken, openai, dxrpy, psycopg2" 2>/dev/null || uv sync
 fi
 
 # Load environment
@@ -100,7 +100,7 @@ fi
 
 # Initialize database using new architecture
 echo "🔍 Checking database setup..."
-python init_database.py || {
+uv run init_database.py || {
     echo "❌ Database initialization failed"
     exit 1
 }
@@ -111,7 +111,7 @@ DOC_COUNT=$(docker compose exec -T postgres psql -U postgres -d ragapp -c "SELEC
 
 if [ "$DOC_COUNT" = "0" ]; then
     echo "📥 No documents found. Ingesting documents automatically..."
-    python ingest_documents.py || {
+    uv run ingest_documents.py || {
         echo "⚠️  Document ingestion failed, but continuing to start API..."
     }
 fi
@@ -122,4 +122,4 @@ echo "📍 API will be available at: http://localhost:8000"
 echo "🔒 Using Row Level Security for document access"
 echo "🛑 Press Ctrl+C to stop everything"
 echo ""
-python -m api.main
+uv run -m api.main
