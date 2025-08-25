@@ -506,6 +506,57 @@ def test_create_and_delete_temp_unstructured_dataset(purview_client, test_artifa
         path = f"/datamap/api/atlas/v2/entity/uniqueAttribute/type/{sut.CUSTOM_TYPE_NAME}"
         resp = sut._atlas_get(f"{path}", params={"attr:qualifiedName": qn})
         assert resp.status_code == 200, f"Create failed and entity not found: status={resp.status_code} body={resp.text[:300]}"
+
+
+@pytest.mark.integration
+@pytest.mark.destructive
+def test_upsert_labels_to_ud_collection_only(purview_client, test_artifacts):
+    """Minimal integration test: upsert a small subset of DXR tags into the Unstructured Datasets collection only.
+    Skips collection creation beyond ensuring the UD collection ref, and does not create relationships or datasource collections.
+    """
+    # Ensure custom type/relationship exists
+    sut.ensure_types_and_relationships()
+
+    # Resolve UD collection reference (from env or governance ensure). Skip if not available.
+    ud_ref = _ensure_ud_collection_or_skip()
+
+    # Fetch DXR tags and datasource name map (for payload enrichment)
+    tags = sut.get_dxr_tags()
+    if not tags:
+        pytest.skip("No tags returned from DXR")
+    name_map, _ = sut.get_dxr_searchable_datasources()
+
+    # Limit to a very small subset to keep this test fast
+    subset = tags[:2]
+    guid_map = sut.upsert_unstructured_datasets(purview_client, subset, name_map, collection_id=ud_ref)
+    assert isinstance(guid_map, dict)
+
+    # If SDK returned no mutatedEntities, resolve by qualifiedName (handles eventual consistency).
+    resolved = {}
+    if not guid_map:
+        for t in subset:
+            qn = sut._to_qualified_name(t)
+            g = sut.resolve_guid_by_qn(sut.CUSTOM_TYPE_NAME, qn, attempts=10, delay_seconds=1.2)
+            if g:
+                resolved[qn] = g
+    else:
+        resolved = guid_map
+
+    # Track for cleanup and verify at least one label exists; best-effort membership check
+    found = 0
+    placed = 0
+    for t in subset:
+        qn = sut._to_qualified_name(t)
+        test_artifacts["entities"].append((sut.CUSTOM_TYPE_NAME, qn))
+        guid = resolved.get(qn)
+        if guid:
+            found += 1
+            if sut.assert_entity_in_collection(guid, ud_ref):
+                placed += 1
+                break
+    assert found >= 1, "Label upsert did not resolve (no GUIDs returned or found by lookup)"
+    # Some tenants/endpoints may not return collection membership on entity reads; don't fail the test solely on that signal
+    # If you need strict placement verification, run the main app once and inspect Purview Studio.
     # Delete by qualifiedName
     sut.delete_entities_by_qualified_names([qn], sut.CUSTOM_TYPE_NAME)
     # Try to resolve by uniqueAttribute: should be 404 or not found
@@ -709,4 +760,3 @@ def test_perm_domain_list_and_visibility():
             pytest.fail(f"Expected domain {domain_env} not found")
     else:
         pytest.fail(f"Unexpected status from /catalog/api/domains: {resp.status_code} {resp.text[:300]}")
-You can

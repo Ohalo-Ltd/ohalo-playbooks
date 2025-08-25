@@ -548,6 +548,15 @@ def _make_collection_ref_for_datasource(dsname: str, dsid: str, max_len: int = 3
         ref = (ref + "xxx")[:3]
     return ref
 
+def _normalize_collection_ref(raw: str, max_len: int = 36) -> str:
+    """Normalize a collection referenceName: slug, enforce 3..36 chars."""
+    ref = _slug(raw)
+    if len(ref) > max_len:
+        ref = ref[:max_len]
+    if len(ref) < 3:
+        ref = (ref + "xxx")[:3]
+    return ref
+
 def ensure_collections(domain_name: str, datasource_items: List[Dict[str, Any]]) -> Dict[str, str]:
     """
     Ensure the parent collection for the domain exists (unless PURVIEW_PARENT_COLLECTION_ID is provided),
@@ -614,7 +623,9 @@ def ensure_collections(domain_name: str, datasource_items: List[Dict[str, Any]])
 
 def ensure_unstructured_datasets_collection(parent_reference: str) -> str:
     """Ensure a single collection for unstructured datasets exists under the given parent and return its referenceName."""
-    ref = UNSTRUCTURED_DATASETS_COLLECTION_REF or _slug(UNSTRUCTURED_DATASETS_COLLECTION_NAME)
+    # Use provided ref if set, but normalize to a valid referenceName. Otherwise slug the friendly name.
+    ref_raw = UNSTRUCTURED_DATASETS_COLLECTION_REF or UNSTRUCTURED_DATASETS_COLLECTION_NAME
+    ref = _normalize_collection_ref(ref_raw)
     body = {
         "friendlyName": UNSTRUCTURED_DATASETS_COLLECTION_NAME,
         "parentCollection": {"referenceName": parent_reference},
@@ -738,15 +749,9 @@ def upsert_unstructured_datasets(client: DataMapClient, tags: List[Dict[str, Any
         out: Dict[str, str] = {}
         for tag in candidates:
             qn = _to_qualified_name(tag)
-            path = f"/datamap/api/atlas/v2/entity/uniqueAttribute/type/{CUSTOM_TYPE_NAME}"
-            resp = _atlas_get(path, params={"attr:qualifiedName": qn})
-            if resp.status_code == 200:
-                try:
-                    guid = resp.json().get("guid")
-                    if guid:
-                        out[qn] = guid
-                except Exception:
-                    continue
+            guid = resolve_guid_by_qn(CUSTOM_TYPE_NAME, qn, attempts=8, delay_seconds=1.5)
+            if guid:
+                out[qn] = guid
         return out
 
     try:
@@ -772,8 +777,16 @@ def upsert_unstructured_datasets(client: DataMapClient, tags: List[Dict[str, Any
             guid_map = _resolve_guids_by_qn(tags)
         return guid_map
     except Exception as e:
-        # Fallback: resolve by unique attribute; this covers cases where SDK errors on empty response bodies.
-        logger.warning("batch_create_or_update raised (%s). Falling back to unique-attribute lookups for tags.", e)
+        # Log richer details for HTTP errors, then fall back to unique-attribute lookups.
+        try:
+            from azure.core.exceptions import HttpResponseError
+            if isinstance(e, HttpResponseError) and getattr(e, "response", None) is not None:
+                status = getattr(e.response, "status_code", None)
+                body = getattr(e.response, "text", "")
+                logger.error("Upsert unstructured_datasets failed: status=%s body=%s", status, str(body)[:300])
+        except Exception:
+            pass
+        logger.warning("batch_create_or_update(tags) raised (%s). Falling back to unique-attribute lookups.", e)
         return _resolve_guids_by_qn(tags)
 
 def upsert_unstructured_datasources(client: DataMapClient, tenant: str, ds_full: List[Dict[str, Any]], *, by_collection: Dict[str, List[Dict[str, Any]]] | None = None) -> Dict[str, str]:
@@ -951,10 +964,26 @@ def get_entity_collection_info(guid: str) -> Dict[str, Any] | None:
 
 
 def assert_entity_in_collection(guid: str, expected_collection_name: str) -> bool:
-    """Return True if the entity appears to belong to expected_collection_name.
-    We check several possible shapes: direct `collectionName`, `collectionId` (string name in some tenants),
-    or nested under a `collections` field.
+    """Return True if the entity appears to belong to the expected collection.
+    Accepts either a collection referenceName (e.g., sdaqff) or a friendlyName (e.g., Unstructured Datasets).
+    We check several possible shapes in the entity payload and also normalize expected by resolving the
+    friendlyName from the account-host collections API when possible.
     """
+    # Build accepted names for comparison: provided value and its friendlyName (if resolvable)
+    expected = set([expected_collection_name])
+    try:
+        r = _acct_collections_get(expected_collection_name)
+        if r.status_code == 200:
+            try:
+                data = r.json() or {}
+                fn = data.get("friendlyName")
+                if isinstance(fn, str) and fn:
+                    expected.add(fn)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     info = get_entity_collection_info(guid)
     if not info:
         return False
@@ -963,7 +992,7 @@ def assert_entity_in_collection(guid: str, expected_collection_name: str) -> boo
     # direct name/id checks
     for key in ("collectionName", "collection", "collectionId"):
         val = data.get(key)
-        if isinstance(val, str) and val == expected_collection_name:
+        if isinstance(val, str) and val in expected:
             return True
 
     # Some responses include a list of collections
@@ -974,7 +1003,7 @@ def assert_entity_in_collection(guid: str, expected_collection_name: str) -> boo
                 return True
             if isinstance(c, dict):
                 name = c.get("name") or c.get("collectionName") or c.get("referenceName")
-                if name == expected_collection_name:
+                if name in expected:
                     return True
     return False
 
