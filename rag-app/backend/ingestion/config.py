@@ -18,9 +18,6 @@ class IngestionSettings(BaseSettings):
     dxr_datasource_id: str = ""
     openai_api_key: str = ""
 
-    # DXR Extractor
-    dxr_extractor_id: str = "1"
-
     class Config:
         env_file = ".env"
         case_sensitive = False

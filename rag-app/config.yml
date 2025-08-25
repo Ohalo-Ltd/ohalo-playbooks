@@ -1,0 +1,38 @@
+# RAG Application Configuration
+# This file defines users and custom metadata extraction mappings
+
+# User configuration
+users:
+  sarah.mitchell@enterprise.com:
+    email: sarah.mitchell@enterprise.com
+    name: Sarah Mitchell
+    role: Project Manager
+    employee_id: E99055
+    groups:
+      - pm
+      - management
+  charlie@corp.com:
+    email: charlie@corp.com
+    name: Charlie Davis
+    role: HR-Manager
+    employee_id: E67890
+    groups:
+      - hr
+      - hr_manager
+      - can_see_all_reviews
+
+# Extracted metadata mapping configuration
+# Maps DXR extracted_metadata IDs to database columns
+extracted_metadata:
+  - id: 56
+    column_name: extracted_employee_id
+    column_type: TEXT
+  - id: 3
+    column_name: total_value
+    column_type: NUMERIC
+  - id: 5
+    column_name: document_classification
+    column_type: JSONB
+  - id: 7
+    column_name: priority_level
+    column_type: TEXT

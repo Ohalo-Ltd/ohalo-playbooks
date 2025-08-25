@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from typing import Dict, Any
 
 from core.config import Settings
-from auth.mock_idp import router as idp_router, USER_PROFILES
+from auth.mock_idp import router as idp_router, _get_user_profiles
 from database import DatabaseManager
 from api.middleware import SecurityHeadersMiddleware
 from rag_service import RAGService, ChatRequest
@@ -44,7 +44,7 @@ def get_user_info(email: str = Query(..., description="User email for authentica
     Dependency to get user info from mock IdP
     In a real system, this would validate JWT tokens
     """
-    user_profile = USER_PROFILES.get(email)
+    user_profile = _get_user_profiles().get(email)
     if not user_profile:
         raise HTTPException(status_code=401, detail="Invalid user credentials")
     return user_profile

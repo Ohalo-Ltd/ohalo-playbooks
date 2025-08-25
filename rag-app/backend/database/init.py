@@ -10,6 +10,7 @@ import psycopg2
 from urllib.parse import urlparse
 
 from core.config import Settings
+from core.config import yaml_config
 from core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -18,10 +19,12 @@ logger = get_logger(__name__)
 class DatabaseInitializer:
     """Handles database initialization and schema setup"""
 
-    def __init__(self, settings: Settings | None = None):
+    def __init__(self, settings: Settings | None = None, selected_policy: str | None = None):
         self.settings = settings or Settings()
         # Use postgres superuser for initialization
         self.admin_url = "postgresql://postgres:password@localhost:5432/ragapp"
+        # Optional selected policy path relative to backend/ (e.g. database/policies/hr.sql)
+        self.selected_policy = selected_policy
         
     def _get_admin_connection_params(self) -> dict:
         """Get connection params for postgres superuser"""
@@ -59,21 +62,33 @@ class DatabaseInitializer:
             backend_dir = Path(__file__).parent.parent
             
             # Run main schema initialization
-            schema_file = backend_dir / "database" / "schema.sql"
+            schema_file = backend_dir / "database" / "init" / "schema.sql"
             if schema_file.exists():
                 self._execute_sql_file(schema_file)
             else:
                 logger.warning(f"⚠️  Schema file not found: {schema_file}")
                 return False
             
+            # Add dynamic columns based on configuration
+            self._add_dynamic_columns()
+            
             # Create application user
-            user_file = backend_dir / "database" / "create_user.sql"
+            user_file = backend_dir / "database" / "init" / "create_user.sql"
             if user_file.exists():
                 self._execute_sql_file(user_file)
             else:
                 logger.warning(f"⚠️  User creation file not found: {user_file}")
                 return False
-            
+
+            # If a selected policy was supplied, try to execute it from backend/<selected_policy>
+            if self.selected_policy:
+                policy_path = backend_dir / self.selected_policy
+                if policy_path.exists():
+                    logger.info(f"📄 Applying selected policy: {policy_path.name}")
+                    self._execute_sql_file(policy_path)
+                else:
+                    logger.warning(f"⚠️  Selected policy not found: {policy_path}")
+
             logger.info("✅ Database initialization completed")
             return True
             
@@ -128,6 +143,44 @@ class DatabaseInitializer:
                             except Exception as stmt_error:
                                 logger.warning(f"⚠️  SQL statement failed: {stmt_error}")
                             current_statement = []
+
+    def _add_dynamic_columns(self) -> None:
+        """Add dynamic columns to documents table based on configuration"""
+        try:
+            app_config = yaml_config
+            columns = app_config.get_metadata_columns_for_database()
+            
+            if not columns:
+                logger.info("📋 No custom metadata columns configured")
+                return
+            
+            logger.info(f"📋 Adding {len(columns)} custom metadata columns...")
+            
+            with self.get_admin_connection() as conn:
+                with conn.cursor() as cursor:
+                    for column_name, column_type in columns:
+                        # Check if column already exists
+                        cursor.execute("""
+                            SELECT EXISTS (
+                                SELECT 1 FROM information_schema.columns 
+                                WHERE table_name = 'documents' 
+                                AND column_name = %s
+                            )
+                        """, (column_name,))
+                        
+                        exists = cursor.fetchone()[0]
+                        
+                        if not exists:
+                            # Add the column
+                            sql = f'ALTER TABLE documents ADD COLUMN "{column_name}" {column_type}'
+                            cursor.execute(sql)
+                            logger.info(f"  ✅ Added column: {column_name} ({column_type})")
+                        else:
+                            logger.info(f"  ℹ️  Column already exists: {column_name}")
+                            
+        except Exception as e:
+            logger.error(f"❌ Failed to add dynamic columns: {e}")
+            raise
 
     def check_database_setup(self) -> bool:
         """Check if database is properly set up"""

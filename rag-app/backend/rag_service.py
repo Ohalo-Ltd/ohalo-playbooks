@@ -214,8 +214,8 @@ class RAGService:
 
     def _get_user_info(self, email: str) -> Dict[str, Any]:
         """Get user info from mock IdP - in reality this would validate JWT"""
-        from auth.mock_idp import USER_PROFILES
-        return USER_PROFILES.get(email, {})
+        from auth.mock_idp import _get_user_profiles
+        return _get_user_profiles().get(email, {})
 
     async def _decompose_query(self, query: str) -> QueryDecomposition:
         """Decompose a user query into multiple related queries"""

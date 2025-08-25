@@ -3,11 +3,11 @@ Document processor for data ingestion from DXR
 Handles fetching documents from DXR API and processing them for storage
 """
 
-import sys
 import json
 from typing import List, Dict, Any
 from dataclasses import dataclass, field
 from core.logging import get_logger
+from core.config import yaml_config
 
 import openai
 
@@ -62,8 +62,9 @@ class DocumentProcessor:
         return emails
 
     def _parse_extracted_employee_id(self, hit) -> str | None:
-        """Parse extracted employee_id from DXR metadata using extractor id"""
-        extractor_id = getattr(self.settings, "dxr_extractor_id", "1")
+        """Parse extracted employee_id from DXR metadata using extractor id (legacy support)"""
+        # Default to extractor ID "1" for backward compatibility
+        extractor_id = "1"
         extracted_key = f"extracted_metadata#{extractor_id}"
         extracted_json = hit.metadata.get(extracted_key)
         if extracted_json:
@@ -73,6 +74,32 @@ class DocumentProcessor:
             except Exception:
                 pass
         return None
+
+    def _extract_custom_metadata(self, hit) -> Dict[str, Any]:
+        """Extract custom metadata based on configuration"""
+        metadata_configs = yaml_config.get_extracted_metadata_config()
+        extracted_values = {}
+        for extractor_id, config in metadata_configs.items():
+            extracted_key = f"extracted_metadata#{extractor_id}"
+            extracted_json = hit.metadata.get(extracted_key)
+            if extracted_json:
+                try:
+                    if config.column_type.upper() in ["JSON", "JSONB"]:
+                        extracted_values[config.column_name] = extracted_json
+                    else:
+                        extracted = json.loads(extracted_json)
+                        if isinstance(extracted, dict):
+                            if config.column_name == "extracted_employee_id":
+                                value = extracted.get("employee_id")
+                            else:
+                                value = extracted.get("value", extracted)
+                        else:
+                            value = extracted
+                        if value is not None:
+                            extracted_values[config.column_name] = value
+                except Exception as e:
+                    logger.warning(f"⚠️  Failed to parse extracted metadata for {extractor_id}: {e}")
+        return extracted_values
 
     def _get_embeddings(self, texts: List[str]) -> List[List[float]]:
         """Get embeddings for a list of texts"""
@@ -157,18 +184,43 @@ class DocumentProcessor:
         entitled_emails = self._parse_entitled_emails(
             hit.metadata.get("computed.metadata#WHO_CAN_ACCESS")
         )
-        extracted_employee_id = self._parse_extracted_employee_id(hit)
+        
+        # Extract custom metadata based on configuration
+        custom_metadata = self._extract_custom_metadata(hit)
+        
+        # Legacy support: if extracted_employee_id is not in custom metadata, use old method
+        if "extracted_employee_id" not in custom_metadata:
+            extracted_employee_id = self._parse_extracted_employee_id(hit)
+            if extracted_employee_id:
+                custom_metadata["extracted_employee_id"] = extracted_employee_id
 
-        # Insert document
+        # Build dynamic INSERT statement
+        base_columns = ["title", "content", "category", "entitled_emails"]
+        base_values = [title, content, category, entitled_emails]
+        
+        # Add custom metadata columns and values
+        custom_columns = []
+        custom_values = []
+        for column_name, value in custom_metadata.items():
+            custom_columns.append(column_name)
+            custom_values.append(value)
+        
+        all_columns = base_columns + custom_columns
+        all_values = base_values + custom_values
+        
+        # Create placeholders for the query
+        placeholders = ", ".join(["%s"] * len(all_columns))
+        columns_str = ", ".join(all_columns)
+        
+        # Insert document with dynamic columns
         with conn.cursor() as cursor:
-            cursor.execute(
-                """
-                INSERT INTO documents (title, content, category, entitled_emails, extracted_employee_id)
-                VALUES (%s, %s, %s, %s, %s)
+            insert_sql = f"""
+                INSERT INTO documents ({columns_str})
+                VALUES ({placeholders})
                 RETURNING id
-            """,
-                (title, content, category, entitled_emails, extracted_employee_id),
-            )
+            """
+            
+            cursor.execute(insert_sql, all_values)
 
             db_result = cursor.fetchone()
             if not db_result:
@@ -178,6 +230,8 @@ class DocumentProcessor:
             result.documents_processed += 1
 
             logger.info(f"📄 Processing: {title} (Category: {category})")
+            if custom_metadata:
+                logger.info(f"  📋 Custom metadata: {list(custom_metadata.keys())}")
 
             # Split content into chunks
             chunks = split_text_by_tokens(content, max_tokens=500, overlap_tokens=50)

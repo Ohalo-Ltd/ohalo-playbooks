@@ -4,6 +4,14 @@ A simple demonstration of Retrieval-Augmented Generation (RAG) with Data X-Ray i
 
 To get started with the demo:
 
+Configure your environment variables:
+
+```bash
+cp backend/.env.example backend/.env && cp frontend/.env.local.example frontend/.env.local
+```
+
+Start the demo:
+
 ```bash
 ./start.sh
 ```

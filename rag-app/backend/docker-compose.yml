@@ -10,8 +10,9 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
-      - ./database/create_user.sql:/docker-entrypoint-initdb.d/02-create_user.sql
+      - ./database/init/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./database/init/create_user.sql:/docker-entrypoint-initdb.d/02-create_user.sql
+      - ./database/policies:/docker-entrypoint-initdb.d/policies
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d ragapp"]
       interval: 5s
