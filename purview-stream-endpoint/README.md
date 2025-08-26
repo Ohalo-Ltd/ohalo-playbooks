@@ -41,8 +41,7 @@ Required:
  - `PURVIEW_COLLECTION_ID`: Collection referenceName for direct upserts (used mainly when `DISABLE_GOVERNANCE=1`)
  - `PURVIEW_DOMAIN_ID`: Domain referenceName (6-char) used as the parent for child collections
 - `PURVIEW_PARENT_COLLECTION_ID`: Parent collection referenceName; if set, takes precedence over `PURVIEW_DOMAIN_ID`
-- `UNSTRUCTURED_DATASETS_COLLECTION_NAME`: Name for the single collection holding all tag assets (default "Unstructured Datasets")
-- `UNSTRUCTURED_DATASETS_COLLECTION_REF`: ReferenceName (slug) for that collection if you want to pin it
+- `UNSTRUCTURED_DATASETS_COLLECTION_NAME`: Friendly name for the single collection holding all tag assets (default "Unstructured Datasets"). The referenceName is derived automatically per parent collection and no longer configurable.
 - `DXR_TAGS_PATH`: Defaults to `/api/tags`
 - `DXR_SEARCHABLE_DATASOURCES_PATH`: Defaults to `/api/datasources/searchable`
 - `DXR_TENANT`: Tenant label used in qualified names (default `default`)
@@ -69,25 +68,36 @@ RUN_ONCE=1
 ## Run
 - Single cycle (good for CI or manual runs):
 ```bash
-source .venv/bin/activate
-source .env  # or export env vars
-python purview-stream-endpoint/purview_dxr_integration.py  # with RUN_ONCE=1 set
+cd purview-stream-endpoint
+./run_once.sh           # uses .env; add --fast to limit scope/timeouts
 ```
 - Continuous polling service:
 ```bash
-source .venv/bin/activate
-source .env
-unset RUN_ONCE  # or ensure it is empty
-python purview-stream-endpoint/purview_dxr_integration.py
+cd purview-stream-endpoint
+python purview_dxr_integration.py
 ```
 
+## Developer Modules
+For easier comprehension and extension, core functionality has been extracted into small modules under `pvlib/`:
+- `pvlib/config.py`: Env loading, logging, HTTP session helpers
+- `pvlib/dxr.py`: DXR API calls (tags, searchable datasources, label statistics)
+- `pvlib/atlas.py`: Purview data-plane auth, REST helpers, entity lookups and utilities
+- `pvlib/typedefs.py`: Ensures custom entity/relationship types and merges new attributes
+- `pvlib/governance.py`: Governance headers/base and Collections API helpers (shared-service and account-host)
+- `pvlib/collections.py`: Collection helpers (slug/ref builders, ensure collections/UD collection)
+- `pvlib/entities.py`: Upsert helpers for datasets and datasources
+- `pvlib/relationships.py`: Create/update/delete relationships, mapping helpers
+- `pvlib/stats.py`: Datasource/label hit statistics upserts and hit-based relationship wiring
+
+The top-level `purview_dxr_integration.py` will gradually be refactored to use these modules directly.
+
 ## Pre‑flight Checks
-Use the top-level helper to validate Purview connectivity and basic permissions:
+Use the helper to validate Purview connectivity and basic permissions:
 ```bash
-source .env
+cd purview-stream-endpoint
 ./sanity-check.sh
 ```
-This acquires a token, attempts to list collections, and checks typedef visibility.
+This acquires tokens, attempts to list collections, checks typedef visibility, and probes domain access.
 
 ## Notes on Collections and Domain
 - The code checks your domain by slug (`/catalog/api/domains/{slug}`). If it’s not found, create it in Purview Studio and grant your service principal Domain Administrator (or higher) and Data Curator on the target hierarchy.

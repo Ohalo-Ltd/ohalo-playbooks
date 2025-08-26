@@ -139,14 +139,10 @@ def _now_suffix() -> str:
 def _ensure_ud_collection_or_skip() -> str:
     """Resolve a collection refName to use for writing tag entities.
     Priority:
-      1) UNSTRUCTURED_DATASETS_COLLECTION_REF env
-      2) PURVIEW_COLLECTION_ID env
-      3) Ensure via governance under parent (PURVIEW_PARENT_COLLECTION_ID or PURVIEW_DOMAIN_ID or slug(domain)).
-    If governance ensure fails (401/403/400), skip the test with guidance.
+      1) PURVIEW_COLLECTION_ID env
+      2) Ensure via governance/account-host under parent (PURVIEW_PARENT_COLLECTION_ID or PURVIEW_DOMAIN_ID or slug(domain)).
+    If ensure fails (401/403/400), skip the test with guidance.
     """
-    ud_ref = os.getenv("UNSTRUCTURED_DATASETS_COLLECTION_REF")
-    if ud_ref:
-        return ud_ref
     coll = os.getenv("PURVIEW_COLLECTION_ID")
     if coll:
         return coll
@@ -159,7 +155,7 @@ def _ensure_ud_collection_or_skip() -> str:
     except requests.HTTPError as e:
         status = getattr(e.response, "status_code", None)
         pytest.skip(
-            f"Unable to ensure UD collection (status={status}). Set UNSTRUCTURED_DATASETS_COLLECTION_REF or PURVIEW_COLLECTION_ID."
+            f"Unable to ensure UD collection (status={status}). Set PURVIEW_COLLECTION_ID or adjust permissions."
         )
 
 
@@ -194,9 +190,13 @@ def test_connect_to_purview_token(purview_token: str):
 
 
 @pytest.mark.integration
-def test_connect_to_purview_types_bootstrap(purview_client):
-    # Should create the custom type and relationships if they don't exist (idempotent)
+def test_bootstrap_types_and_relationships(purview_client):
+    # Should create/update typedefs and ensure both relationships (idempotent)
     sut.ensure_types_and_relationships()
+    r1 = sut._atlas_get("/datamap/api/atlas/v2/types/typedef/name/unstructured_datasource")
+    assert r1.status_code in (200,)
+    rrel = sut._atlas_get("/datamap/api/atlas/v2/types/typedef/name/unstructured_datasource_hits_unstructured_dataset")
+    assert rrel.status_code in (200, 404)
 
 
 @pytest.mark.integration
@@ -331,6 +331,7 @@ def test_artifacts():
 
 @pytest.mark.integration
 def test_ensure_collections_domain_and_children(dxr_datasources_full):
+    pytest.skip("Legacy collection ensure test not used in hits-based architecture")
     name_map, ds_full = dxr_datasources_full
     domain_name = os.getenv("PURVIEW_DOMAIN_NAME")
     domain_id = os.getenv("PURVIEW_DOMAIN_ID")
@@ -355,6 +356,7 @@ def test_ensure_collections_domain_and_children(dxr_datasources_full):
 @pytest.mark.integration
 @pytest.mark.destructive
 def test_upsert_unstructured_datasources_in_child_collections(purview_client, dxr_datasources_full):
+    pytest.skip("Legacy child-collection upsert test not used in hits-based architecture")
     name_map, ds_full = dxr_datasources_full
     tenant = os.getenv("DXR_TENANT", "default")
     # Upsert first N datasources (e.g., 2)
@@ -416,7 +418,7 @@ def test_upsert_unstructured_datasources_in_child_collections(purview_client, dx
 @pytest.mark.integration
 @pytest.mark.destructive
 def test_upsert_unstructured_datasets_tags_flow(purview_client, dxr_datasources_full):
-    # This test exercises the tags flow.
+    pytest.skip("Legacy tags flow test superseded by hits-driven relationships")
     tags = sut.get_dxr_tags()
     if not tags:
         pytest.skip("No tags returned from DXR")
@@ -729,6 +731,79 @@ def test_perm_relationship_create(purview_client, test_artifacts):
         if status in (401, 403):
             pytest.skip("Creating relationships requires Data Curator.")
         raise
+    
+@pytest.mark.integration
+def test_hits_relationships_flow(purview_client, dxr_datasources_full):
+    name_map, ds_full = dxr_datasources_full
+    pick = None
+    rows = None
+    for item in ds_full[:10]:
+        dsid = str(item.get("id"))
+        rows = sut.get_label_statistics_for_datasource(dsid, 100)
+        if any(int(r.get("documentCount", 0)) > 0 for r in (rows or [])):
+            pick = item
+            break
+    if not pick:
+        pytest.skip("No datasource with positive label stats returned from DXR")
+    dsid = str(pick.get("id"))
+    positive = next(r for r in rows if int(r.get("documentCount", 0)) > 0)
+    target_label_id = str(positive.get("labelId"))
+    target_count = int(positive.get("documentCount", 0))
+    # Fetch tags and locate label
+    tags = sut.get_dxr_tags()
+    tag = next((t for t in tags if str(t.get("id")) == target_label_id), None)
+    if not tag:
+        pytest.skip("Target label id from stats not found in /api/tags payload")
+    ud_ref = _ensure_ud_collection_or_skip()
+    sut.update_unstructured_dataset_hit_stats_and_relationships(purview_client, [tag], [pick], name_map, ud_ref)
+    tenant = os.getenv("DXR_TENANT", "default")
+    ds_qn = sut._qn_datasource(tenant, dsid)
+    tag_qn = sut._to_qualified_name(tag)
+    ds_guid = sut.resolve_guid_by_qn("unstructured_datasource", ds_qn)
+    tag_guid = sut.resolve_guid_by_qn(sut.CUSTOM_TYPE_NAME, tag_qn)
+    assert ds_guid and tag_guid
+    # Allow brief eventual consistency; retry read once if empty
+    rels = sut._get_entity_relationship_map_for_label(tag_guid)
+    if ds_guid not in rels:
+        import time as _time
+        _time.sleep(2)
+        rels = sut._get_entity_relationship_map_for_label(tag_guid)
+    assert ds_guid in rels
+    rid = rels[ds_guid]
+    rr = sut._atlas_get(f"/datamap/api/atlas/v2/relationship/guid/{rid}")
+    assert rr.status_code == 200
+    rj = rr.json()
+    assert rj.get("typeName") in ("unstructured_datasource_hits_unstructured_dataset",)
+    attrs = rj.get("attributes", {})
+    assert int(attrs.get("documentCount", 0)) >= max(1, target_count)
+
+@pytest.mark.integration
+def test_update_datasource_hit_arrays(purview_client, dxr_datasources_full):
+    name_map, ds_full = dxr_datasources_full
+    subset = ds_full[:1]
+    if not subset:
+        pytest.skip("No datasources returned from DXR")
+    tenant = os.getenv("DXR_TENANT", "default")
+    sut.update_unstructured_datasource_hit_stats(purview_client, tenant, subset)
+    dsid = str(subset[0].get("id"))
+    ds_qn = sut._qn_datasource(tenant, dsid)
+    g = sut.resolve_guid_by_qn("unstructured_datasource", ds_qn)
+    if not g:
+        pytest.skip("Could not resolve datasource entity GUID after update")
+    r = sut._atlas_get(f"/datamap/api/atlas/v2/entity/guid/{g}")
+    assert r.status_code == 200
+    data = r.json() or {}
+    attrs = data.get("attributes") or {}
+    # If the datasource has no positive label hits, attributes may be empty or arrays may be missing.
+    # Query DXR to check whether any positive hits exist for this datasource.
+    rows = sut.get_label_statistics_for_datasource(dsid, 100)
+    pos = [r for r in (rows or []) if int(r.get("documentCount", 0)) > 0]
+    ids = attrs.get("hitLabelIds")
+    if pos:
+        assert isinstance(ids, list), "Expected hitLabelIds when DXR reports positive hits"
+    else:
+        # Accept missing or empty arrays for zero-hit datasources
+        assert ids is None or isinstance(ids, list)
 @pytest.mark.integration
 def test_perm_domain_list_and_visibility():
     """

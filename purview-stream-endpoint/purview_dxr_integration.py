@@ -44,19 +44,12 @@ from __future__ import annotations
 
 import os
 import time
-import json
 import logging
 from typing import Dict, Any, List
 from typing import Tuple, Set
 from collections import defaultdict
-import re
 
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-
-from azure.identity import ClientSecretCredential
-from azure.core.exceptions import HttpResponseError
 from azure.purview.datamap import DataMapClient
 from azure.purview.datamap.models import (
     AtlasEntity,
@@ -65,7 +58,27 @@ from azure.purview.datamap.models import (
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# New modular helpers
+from pvlib import config as pvconfig
+from pvlib import dxr as pvdxr
+from pvlib import atlas as pvatlas
+from pvlib import typedefs as pvtypes
+from pvlib import entities as pvent
+from pvlib import relationships as pvrels
+from pvlib import stats as pvstats
+from pvlib import governance as pvgo
+from pvlib import collections as pvcoll
+
+# Load .env from current working directory (if present),
+# and also from this file's directory so running from repo root works
+try:
+    _HERE = os.path.dirname(os.path.abspath(__file__))
+    # First load any process-level .env (cwd), then overlay with folder-local
+    load_dotenv()
+    load_dotenv(os.path.join(_HERE, ".env"))
+except Exception:
+    # If dotenv is unavailable or any path issues occur, proceed with OS env only
+    pass
 
 #
 # PURVIEW_GOV_RESOURCE (optional) e.g., https://api.purview-service.microsoft.com/.default
@@ -78,141 +91,37 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("purview-dxr")
 
+# Reuse shared session/timeouts and normalizers from pvlib.config
+HTTP = pvconfig.HTTP
+HTTP_TIMEOUT_SECONDS = pvconfig.HTTP_TIMEOUT_SECONDS
+
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "60"))
 SYNC_DELETE = os.getenv("SYNC_DELETE", "0").lower() in ("1", "true", "yes")
 DISABLE_GOVERNANCE = os.getenv("DISABLE_GOVERNANCE", "0").lower() in ("1", "true", "yes")
 ENABLE_LABEL_STATS = os.getenv("ENABLE_LABEL_STATS", "1").lower() in ("1", "true", "yes")
-LABEL_STATS_LIMIT = int(os.getenv("LABEL_STATS_LIMIT", "1000"))
+# Use a large default so we don't miss labels; can override via env
+LABEL_STATS_LIMIT = int(os.getenv("LABEL_STATS_LIMIT", "100000"))
 
 # ------------ Governance (Catalog Admin) API helpers ------------
 GOV_API_VERSION = "2023-09-01"
 
-def _governance_base() -> str:
-    """
-    Base for Governance (Catalog Admin) API calls.
+_governance_base = pvgo.governance_base
 
-    Important: Governance APIs are hosted on the shared service domain
-    (https://api.purview-service.microsoft.com) and NOT on the account endpoint
-    (https://<account>.purview.azure.com). Allow overriding via PURVIEW_GOV_BASE.
-    """
-    gov_base = os.environ.get("PURVIEW_GOV_BASE")
-    if gov_base:
-        return gov_base.rstrip("/")
-    return "https://api.purview-service.microsoft.com"
-
-def _governance_headers() -> Dict[str, str]:
-    """
-    Acquire a token for the Governance (Catalog Admin) API and build headers.
-    We prefer the well-known Purview data-plane resource first to maximize compatibility,
-    then try the shared service resource. Users can override via PURVIEW_GOV_RESOURCE.
-    """
-    from azure.identity import ClientSecretCredential
-    from azure.core.exceptions import ClientAuthenticationError
-
-    cred = ClientSecretCredential(tenant_id=TENANT_ID, client_id=CLIENT_ID, client_secret=CLIENT_SECRET)
-
-    # Build scopes to try, in order:
-    # 1) explicit override (if provided)
-    # 2) api.purview-service.microsoft.com (shared service governance)
-    # 3) purview.azure.net (data plane) — fallback if tenant hasn't consented to shared service app
-    scopes_to_try: List[str] = []
-
-    gov_resource = os.environ.get("PURVIEW_GOV_RESOURCE")
-    if gov_resource:
-        scope = gov_resource.strip()
-        if not scope.endswith("/.default"):
-            scope = scope[:-1] + ".default" if scope.endswith("/") else scope + "/.default"
-        scopes_to_try.append(scope)
-
-    # Prefer shared-service governance resource, then fall back to data plane
-    scopes_to_try.append("https://api.purview-service.microsoft.com/.default")
-    scopes_to_try.append("https://purview.azure.net/.default")
-
-    last_exc: Exception | None = None
-    token: str | None = None
-    for scope in scopes_to_try:
-        try:
-            token = cred.get_token(scope).token
-            break
-        except ClientAuthenticationError as exc:
-            # Expected on tenants where the resource isn't present/consented; try the next scope.
-            last_exc = exc
-            continue
-
-    if not token:
-        # All scopes failed
-        if last_exc:
-            raise last_exc
-        raise SystemExit("Failed to acquire token for governance API (all scopes tried)")
-
-    return {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
+_governance_headers = pvgo.governance_headers
 
 # ------------ Collections API helpers (governance vs account-host fallback) ------------
 
-def _gov_collections_put(name: str, body: Dict[str, Any]) -> requests.Response:
-    base = _governance_base()
-    headers = _governance_headers()
-    url = f"{base}/catalog/api/collections/{name}?api-version={GOV_API_VERSION}"
-    return requests.put(url, headers=headers, json=body)
+_gov_collections_put = pvgo.gov_collections_put
 
-def _gov_collections_get(name: str) -> requests.Response:
-    base = _governance_base()
-    headers = _governance_headers()
-    url = f"{base}/catalog/api/collections/{name}?api-version={GOV_API_VERSION}"
-    return requests.get(url, headers=headers)
+_gov_collections_get = pvgo.gov_collections_get
 
-ACCOUNT_COLLECTIONS_API_VERSION = "2019-11-01-preview"
+_acct_collections_put = pvgo.acct_collections_put
+_acct_collections_get = pvgo.acct_collections_get
 
-def _acct_collections_put(name: str, body: Dict[str, Any]) -> requests.Response:
-    """Account-host Collections API using data-plane token."""
-    url = f"{PURVIEW_ENDPOINT}/account/collections/{name}?api-version={ACCOUNT_COLLECTIONS_API_VERSION}"
-    headers = _atlas_headers()
-    return requests.put(url, headers=headers, json=body)
+_normalize_purview_endpoint = pvconfig.normalize_purview_endpoint
+_normalize_base_url = pvconfig.normalize_base_url
 
-def _acct_collections_get(name: str) -> requests.Response:
-    url = f"{PURVIEW_ENDPOINT}/account/collections/{name}?api-version={ACCOUNT_COLLECTIONS_API_VERSION}"
-    headers = _atlas_headers()
-    return requests.get(url, headers=headers)
-
-def _normalize_purview_endpoint(raw: str) -> str:
-    """Ensure endpoint has scheme and points to an account-specific host.
-    Accepts forms like 'contoso.purview.azure.com' or 'https://contoso.purview.azure.com'.
-    Rejects 'purview.azure.net' (AAD resource) and bare 'purview.azure.com' without account.
-    """
-    if not raw:
-        raise SystemExit("PURVIEW_ENDPOINT is required.")
-    ep = raw.strip()
-    if not ep.startswith("http"):
-        ep = "https://" + ep
-    # Strip trailing slashes
-    ep = ep.rstrip("/")
-    # Quick sanity checks
-    host = ep.split("//", 1)[1]
-    if host == "purview.azure.net":
-        raise SystemExit(
-            "PURVIEW_ENDPOINT must be your account endpoint (e.g., https://<account>.purview.azure.com), not purview.azure.net"
-        )
-    if host.endswith("purview.azure.com") and host.count(".") < 3:
-        # expect <account>.purview.azure.com => at least 3 dots in host
-        raise SystemExit(
-            "PURVIEW_ENDPOINT looks incomplete. Expected format: https://<account>.purview.azure.com"
-        )
-    return ep
-
-def _normalize_base_url(raw: str) -> str:
-    """Ensure base URL has scheme and no trailing slash."""
-    if not raw:
-        raise SystemExit("DXR_APP_URL is required.")
-    url = raw.strip()
-    if not url.startswith("http"):
-        url = "https://" + url
-    url = url.rstrip("/")
-    return url
-
+# Keep legacy env wiring; modules also read directly from env
 DXR_APP_URL = _normalize_base_url(os.environ.get("DXR_APP_URL"))
 DXR_PAT_TOKEN = os.environ.get("DXR_PAT_TOKEN")
 # Remove DXR_FILES_PATH, add DXR_TAGS_PATH and DXR_SEARCHABLE_DATASOURCES_PATH
@@ -227,7 +136,6 @@ PURVIEW_COLLECTION_ID = os.environ.get("PURVIEW_COLLECTION_ID")  # optional (def
 PURVIEW_DOMAIN_ID = os.environ.get("PURVIEW_DOMAIN_ID")  # optional: domain referenceName (alias for parent selection)
 PURVIEW_PARENT_COLLECTION_ID = os.environ.get("PURVIEW_PARENT_COLLECTION_ID")  # optional: parent refName under which to create child collections
 UNSTRUCTURED_DATASETS_COLLECTION_NAME = os.environ.get("UNSTRUCTURED_DATASETS_COLLECTION_NAME", "Unstructured Datasets")
-UNSTRUCTURED_DATASETS_COLLECTION_REF = os.environ.get("UNSTRUCTURED_DATASETS_COLLECTION_REF")  # optional fixed refName for UD collection
 PURVIEW_DOMAIN_NAME = os.environ.get("PURVIEW_DOMAIN_NAME")
 
 REQUIRED_ENV = [
@@ -288,218 +196,45 @@ def ensure_domain_exists(domain_name: str) -> None:
 
 # ------------ HTTP Client (DXR) ------------
 
-def _build_http_session() -> requests.Session:
-    s = requests.Session()
-    retries = Retry(total=5, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504])
-    s.mount("https://", HTTPAdapter(max_retries=retries))
-    s.mount("http://", HTTPAdapter(max_retries=retries))
-    return s
-
-HTTP = _build_http_session()
+# HTTP session and timeout provided by pvlib.config
 
 def _get_access_token() -> str:
-    cred = ClientSecretCredential(tenant_id=TENANT_ID, client_id=CLIENT_ID, client_secret=CLIENT_SECRET)
-    token = cred.get_token("https://purview.azure.net/.default").token
-    return token
+    # Delegate to pvlib.atlas
+    return pvatlas._get_access_token()
 
 # ------------ Atlas REST helpers ------------
 def _atlas_headers() -> Dict[str, str]:
-    token = _get_access_token()
-    return {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
+    return pvatlas._atlas_headers()
 
 def _atlas_get(path: str, params: Dict[str, Any] | None = None) -> requests.Response:
-    url = f"{PURVIEW_ENDPOINT}{path}"
-    return requests.get(url, headers=_atlas_headers(), params=params)
+    return pvatlas._atlas_get(path, params)
 
 def _atlas_post(path: str, payload: Dict[str, Any]) -> requests.Response:
-    url = f"{PURVIEW_ENDPOINT}{path}"
-    return requests.post(url, headers=_atlas_headers(), json=payload)
+    return pvatlas._atlas_post(path, payload)
 
 def _atlas_delete(path: str, params: Dict[str, Any] | None = None) -> requests.Response:
-    url = f"{PURVIEW_ENDPOINT}{path}"
-    return requests.delete(url, headers=_atlas_headers(), params=params)
+    return pvatlas._atlas_delete(path, params)
 
 
 
 
 def get_dxr_tags() -> List[Dict[str, Any]]:
-    """Call DXR /api/tags endpoint and return a list of tag dicts."""
-    url = f"{DXR_APP_URL}{DXR_TAGS_PATH}"
-    headers = {
-        "Authorization": f"Bearer {DXR_PAT_TOKEN}",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9,ja;q=0.8",
-        "Referer": DXR_APP_URL,
-    }
-    try:
-        resp = HTTP.get(url, headers=headers, timeout=30)
-    except Exception as e:
-        logger.error("Request to %s failed with exception: %s", url, e)
-        raise
-    if resp.status_code == 401 or resp.status_code == 403:
-        raise SystemExit(
-            f"Unauthorized (status {resp.status_code}) from DXR endpoint. "
-            "Check DXR_PAT_TOKEN and permissions."
-        )
-    if resp.status_code >= 400:
-        logger.error("Failed to fetch tags: HTTP %s %s", resp.status_code, resp.text[:500])
-        resp.raise_for_status()
-    try:
-        data = resp.json()
-        if isinstance(data, list):
-            return data
-        if isinstance(data, dict) and "items" in data and isinstance(data["items"], list):
-            return data["items"]
-        logger.warning("Unexpected DXR tags response shape: %s", type(data))
-        return []
-    except Exception as e:
-        logger.warning("Failed to parse DXR tags response as JSON: %s", e)
-        return []
+    return pvdxr.get_dxr_tags()
 
 
 def get_dxr_searchable_datasources() -> Tuple[Dict[str, str], List[Dict[str, Any]]]:
-    """Call DXR /api/datasources/searchable and return a dict mapping id (str) to name, and the full list."""
-    url = f"{DXR_APP_URL}{DXR_SEARCHABLE_DATASOURCES_PATH}"
-    headers = {
-        "Authorization": f"Bearer {DXR_PAT_TOKEN}",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9,ja;q=0.8",
-        "Referer": DXR_APP_URL,
-    }
-    try:
-        resp = HTTP.get(url, headers=headers, timeout=30)
-    except Exception as e:
-        logger.error("Request to %s failed with exception: %s", url, e)
-        return {}, []
-    if resp.status_code == 401 or resp.status_code == 403:
-        logger.error("Unauthorized (status %s) fetching datasources", resp.status_code)
-        return {}, []
-    if resp.status_code >= 400:
-        logger.error("Failed to fetch datasources: HTTP %s %s", resp.status_code, resp.text[:500])
-        return {}, []
-    try:
-        data = resp.json()
-        if isinstance(data, list):
-            name_map = {str(item.get("id")): item.get("name", "") for item in data if "id" in item}
-            return name_map, data
-        if isinstance(data, dict) and "items" in data and isinstance(data["items"], list):
-            name_map = {str(item.get("id")): item.get("name", "") for item in data["items"] if "id" in item}
-            return name_map, data["items"]
-        logger.warning("Unexpected DXR datasources response shape: %s", type(data))
-        return {}, []
-    except Exception as e:
-        logger.warning("Failed to parse DXR datasources response as JSON: %s", e)
-        return {}, []
+    return pvdxr.get_dxr_searchable_datasources()
 
 # ------------ Purview (Data Map) ------------
 
 def get_purview_client() -> DataMapClient:
-    cred = ClientSecretCredential(tenant_id=TENANT_ID, client_id=CLIENT_ID, client_secret=CLIENT_SECRET)
-    return DataMapClient(endpoint=PURVIEW_ENDPOINT, credential=cred)
+    return pvatlas.get_purview_client()
 
 
-CUSTOM_TYPE_NAME = "unstructured_dataset"
+CUSTOM_TYPE_NAME = pvtypes.CUSTOM_TYPE_NAME
 
 def ensure_types_and_relationships() -> None:
-    # If types already exist, add missing attributes as needed (non-destructive update)
-    existing_ds = _atlas_get("/datamap/api/atlas/v2/types/entitydef/name/unstructured_datasource")
-    existing_ud = _atlas_get(f"/datamap/api/atlas/v2/types/typedef/name/{CUSTOM_TYPE_NAME}")
-
-    # Entity defs
-    unstructured_dataset_def = {
-        "name": "unstructured_dataset",
-        "superTypes": ["DataSet"],
-        "attributeDefs": [
-            {"name": "type", "typeName": "string", "isOptional": True},
-            {"name": "parametersParameters", "typeName": "array<string>", "isOptional": True},
-            {"name": "parametersValues", "typeName": "array<string>", "isOptional": True},
-            {"name": "parametersTypes", "typeName": "array<string>", "isOptional": True},
-            {"name": "parametersMatchStrategies", "typeName": "array<string>", "isOptional": True},
-            {"name": "parametersOperators", "typeName": "array<string>", "isOptional": True},
-            {"name": "parametersGroupIds", "typeName": "array<int>", "isOptional": True},
-            {"name": "parametersGroupOrders", "typeName": "array<int>", "isOptional": True},
-            {"name": "datasourceIds", "typeName": "array<string>", "isOptional": True},
-            {"name": "datasourceNames", "typeName": "array<string>", "isOptional": True},
-            {"name": "dxrTenant", "typeName": "string", "isOptional": True},
-            {"name": "tagId", "typeName": "string", "isOptional": True},
-        ],
-    }
-
-    unstructured_datasource_def = {
-        "name": "unstructured_datasource",
-        "superTypes": ["DataSet"],
-        "attributeDefs": [
-            {"name": "datasourceId", "typeName": "string", "isOptional": False},
-            {"name": "connectorTypeName", "typeName": "string", "isOptional": True},
-            {"name": "dxrTenant", "typeName": "string", "isOptional": True},
-            # Hit stats (populated via DXR dashboard/label-statistics)
-            {"name": "hitLabelIds", "typeName": "array<string>", "isOptional": True},
-            {"name": "hitLabelNames", "typeName": "array<string>", "isOptional": True},
-            {"name": "hitDocumentCounts", "typeName": "array<int>", "isOptional": True},
-            {"name": "statsUpdatedAt", "typeName": "string", "isOptional": True},
-        ],
-    }
-
-    rel_ds_has_dataset = {
-        "name": "unstructured_datasource_has_unstructured_dataset",
-        "relationshipCategory": "COMPOSITION",
-        "endDef1": {
-            "type": "unstructured_datasource",
-            "name": "datasets",
-            "isContainer": True,
-            "cardinality": "SET"
-        },
-        "endDef2": {
-            "type": "unstructured_dataset",
-            "name": "datasource",
-            "isContainer": False,
-            "cardinality": "SINGLE"
-        },
-        "propagateTags": "NONE"
-    }
-
-    # Determine whether to create or update entity defs
-    defs_to_submit = []
-    # Update/merge unstructured_datasource if exists
-    if existing_ds.status_code == 200:
-        try:
-            cur = existing_ds.json() or {}
-            existing_names = {a.get("name") for a in (cur.get("attributeDefs") or [])}
-        except Exception:
-            existing_names = set()
-        # Merge only missing attributes
-        new_attrs = [a for a in unstructured_datasource_def["attributeDefs"] if a["name"] not in existing_names]
-        if new_attrs:
-            merged = dict(cur)
-            merged["attributeDefs"] = (cur.get("attributeDefs") or []) + new_attrs
-            defs_to_submit.append({"name": unstructured_datasource_def["name"],
-                                   "superTypes": unstructured_datasource_def["superTypes"],
-                                   "attributeDefs": merged["attributeDefs"]})
-    else:
-        # Create fresh
-        defs_to_submit.append(unstructured_datasource_def)
-
-    # Update/merge unstructured_dataset if missing (rare) – otherwise keep as is
-    if existing_ud.status_code != 200:
-        defs_to_submit.append(unstructured_dataset_def)
-
-    if defs_to_submit:
-        payload = {"entityDefs": defs_to_submit, "relationshipDefs": [rel_ds_has_dataset]}
-        resp = _atlas_post("/datamap/api/atlas/v2/types/typedefs", payload)
-        if resp.status_code not in (200, 201):
-            logger.error("Failed to create/update typedefs: %s %s", resp.status_code, resp.text)
-            resp.raise_for_status()
-        logger.info("Ensured/updated custom types & relationship")
-    else:
-        # Relationship may still need ensuring
-        payload = {"relationshipDefs": [rel_ds_has_dataset]}
-        resp = _atlas_post("/datamap/api/atlas/v2/types/typedefs", payload)
-        if resp.status_code in (200, 201):
-            logger.info("Ensured relationship definition")
+    pvtypes.ensure_types_and_relationships()
 
 
 def _to_qualified_name(tag: Dict[str, Any]) -> str:
@@ -509,38 +244,11 @@ def _to_qualified_name(tag: Dict[str, Any]) -> str:
 
 def _qn_datasource(tenant: str, dsid: str) -> str:
     return f"dxrds://{tenant}/{dsid}"
-def _account_get(path: str) -> requests.Response:
-    """
-    Back-compat wrapper routed to the Governance (Catalog Admin) API.
-    Example: _account_get("/collections") -> GET {base}/catalog/api/collections?api-version=...
-    """
-    base = _governance_base()
-    headers = _governance_headers()
-    p = path if path.startswith("/") else f"/{path}"
-    url = f"{base}/catalog/api{p}?api-version={GOV_API_VERSION}"
-    return requests.get(url, headers=headers)
+_account_get = pvgo.account_get
 
-def _account_put(path: str, payload: Dict[str, Any]) -> requests.Response:
-    """
-    Back-compat wrapper routed to the Governance (Catalog Admin) API.
-    Example: _account_put("/collections/{name}", {...})
-    """
-    base = _governance_base()
-    headers = _governance_headers()
-    p = path if path.startswith("/") else f"/{path}"
-    url = f"{base}/catalog/api{p}?api-version={GOV_API_VERSION}"
-    return requests.put(url, headers=headers, json=payload)
+_account_put = pvgo.account_put
 
-def _account_delete(path: str) -> requests.Response:
-    """
-    Back-compat wrapper routed to the Governance (Catalog Admin) API.
-    Example: _account_delete("/collections/{name}")
-    """
-    base = _governance_base()
-    headers = _governance_headers()
-    p = path if path.startswith("/") else f"/{path}"
-    url = f"{base}/catalog/api{p}?api-version={GOV_API_VERSION}"
-    return requests.delete(url, headers=headers)
+_account_delete = pvgo.account_delete
 
 _slug_re = re.compile(r"[^a-z0-9-]+")
 
@@ -583,110 +291,16 @@ def _make_collection_ref_for_datasource(dsname: str, dsid: str, max_len: int = 3
         ref = (ref + "xxx")[:3]
     return ref
 
-def _normalize_collection_ref(raw: str, max_len: int = 36) -> str:
-    """Normalize a collection referenceName: slug, enforce 3..36 chars."""
-    ref = _slug(raw)
-    if len(ref) > max_len:
-        ref = ref[:max_len]
-    if len(ref) < 3:
-        ref = (ref + "xxx")[:3]
-    return ref
+_normalize_collection_ref = pvcoll._normalize_collection_ref
 
 def ensure_collections(domain_name: str, datasource_items: List[Dict[str, Any]]) -> Dict[str, str]:
-    """
-    Ensure the parent collection for the domain exists (unless PURVIEW_PARENT_COLLECTION_ID is provided),
-    and child collections for each datasource under the chosen parent.
-    Uses the Catalog Admin API endpoints for collections (/catalog/api/collections/{name}?api-version=2023-09-01).
-    """
-    # Determine parent collection referenceName
-    if PURVIEW_PARENT_COLLECTION_ID:
-        parent_name = PURVIEW_PARENT_COLLECTION_ID
-    elif PURVIEW_DOMAIN_ID:
-        # Domain IDs cannot serve as parent collections for the account-host API.
-        # We'll try governance path to materialize a parent collection from the domain name slug.
-        parent_name = _slug(domain_name)
-        parent_body = {"friendlyName": domain_name}
-        resp = _gov_collections_put(parent_name, parent_body)
-        if resp.status_code not in (200, 201):
-            # Fallback only works with a collection as parent. Ask user to set PURVIEW_PARENT_COLLECTION_ID.
-            logger.warning("Governance parent ensure failed (%s). Set PURVIEW_PARENT_COLLECTION_ID to an existing collection refName.", resp.status_code)
-            raise requests.HTTPError(response=resp)
-    else:
-        # Try to ensure a parent collection derived from domain slug via governance
-        parent_name = _slug(domain_name)
-        parent_body = {"friendlyName": domain_name}
-        resp = _gov_collections_put(parent_name, parent_body)
-        if resp.status_code not in (200, 201):
-            logger.warning("Governance parent ensure failed (%s). Set PURVIEW_PARENT_COLLECTION_ID to an existing collection refName to proceed.", resp.status_code)
-            raise requests.HTTPError(response=resp)
+    return pvcoll.ensure_collections(domain_name, datasource_items)
 
-    child_map: Dict[str, str] = {}
-    def _acct_put_with_variants(name: str, dsname: str, parent: str) -> requests.Response:
-        variants = [
-            {"friendlyName": dsname, "parentCollection": {"referenceName": parent}},
-            {"name": dsname, "parentCollection": {"referenceName": parent}},
-            {"friendlyName": dsname, "parentCollection": {"type": "CollectionReference", "referenceName": parent}},
-            {"name": dsname, "parentCollection": {"type": "CollectionReference", "referenceName": parent}},
-        ]
-        last = None
-        for body in variants:
-            r = _acct_collections_put(name, body)
-            if r.status_code in (200, 201):
-                return r
-            last = r
-        assert last is not None
-        return last
 
-    for item in datasource_items:
-        dsid = str(item.get("id"))
-        dsname = item.get("name", dsid)
-        child_name = _make_collection_ref_for_datasource(dsname, dsid)
-        body = {"friendlyName": dsname, "parentCollection": {"referenceName": parent_name}}
-        # Try governance first
-        r = _gov_collections_put(child_name, body)
-        if r.status_code not in (200, 201):
-            # Fallback to account-host Collections API
-            r2 = _acct_put_with_variants(child_name, dsname, parent_name)
-            if r2.status_code not in (200, 201):
-                # include short body previews to aid troubleshooting
-                b1 = getattr(r, "text", "")[:180]
-                b2 = getattr(r2, "text", "")[:180]
-                logger.error("Failed to ensure child collection '%s': gov=%s acct=%s govBody=%s acctBody=%s", child_name, r.status_code, r2.status_code, b1, b2)
-                r2.raise_for_status()
-        child_map[dsid] = child_name
-    return child_map
+# UD collection ref is derived in pvlib.collections
 
 def ensure_unstructured_datasets_collection(parent_reference: str) -> str:
-    """Ensure a single collection for unstructured datasets exists under the given parent and return its referenceName."""
-    # Use provided ref if set, but normalize to a valid referenceName. Otherwise slug the friendly name.
-    ref_raw = UNSTRUCTURED_DATASETS_COLLECTION_REF or UNSTRUCTURED_DATASETS_COLLECTION_NAME
-    ref = _normalize_collection_ref(ref_raw)
-    body = {
-        "friendlyName": UNSTRUCTURED_DATASETS_COLLECTION_NAME,
-        "parentCollection": {"referenceName": parent_reference},
-    }
-    # Try governance first
-    r = _gov_collections_put(ref, body)
-    if r.status_code not in (200, 201):
-        # Fallback to account-host Collections API with variants
-        variants = [
-            {"friendlyName": UNSTRUCTURED_DATASETS_COLLECTION_NAME, "parentCollection": {"referenceName": parent_reference}},
-            {"name": UNSTRUCTURED_DATASETS_COLLECTION_NAME, "parentCollection": {"referenceName": parent_reference}},
-            {"friendlyName": UNSTRUCTURED_DATASETS_COLLECTION_NAME, "parentCollection": {"type": "CollectionReference", "referenceName": parent_reference}},
-            {"name": UNSTRUCTURED_DATASETS_COLLECTION_NAME, "parentCollection": {"type": "CollectionReference", "referenceName": parent_reference}},
-        ]
-        last = None
-        for body2 in variants:
-            r2 = _acct_collections_put(ref, body2)
-            if r2.status_code in (200, 201):
-                return ref
-            last = r2
-        if last is not None:
-            b1 = getattr(r, "text", "")[:180]
-            b2 = getattr(last, "text", "")[:180]
-            logger.error("Failed to ensure UD collection '%s': gov=%s acct=%s govBody=%s acctBody=%s", ref, r.status_code, last.status_code, b1, b2)
-            last.raise_for_status()
-    return ref
+    return pvcoll.ensure_unstructured_datasets_collection(parent_reference, UNSTRUCTURED_DATASETS_COLLECTION_NAME)
 
 # ------------ DXR Label Statistics (per-datasource) ------------
 
@@ -698,7 +312,7 @@ def get_label_statistics_for_datasource(dsid: str, limit: int) -> List[Dict[str,
         "Referer": DXR_APP_URL,
     }
     try:
-        resp = HTTP.get(url, headers=headers, timeout=30)
+        resp = HTTP.get(url, headers=headers, timeout=HTTP_TIMEOUT_SECONDS)
     except Exception as e:
         logger.error("Label stats request failed for ds=%s: %s", dsid, e)
         return []
@@ -758,6 +372,122 @@ def update_unstructured_datasource_hit_stats(client: DataMapClient, tenant: str,
         except Exception as e:
             logger.warning("Update hit stats upsert failed for collection=%s: %s", coll or "(none)", e)
 
+def _fetch_label_stats(ds_items: List[Dict[str, Any]]) -> tuple[dict[str, list[dict[str, Any]]], dict[str, dict[str, Any]]]:
+    """Fetch label statistics per datasource and build reverse map per label.
+    Returns (per_ds_hits, per_label_hits) where:
+      per_ds_hits[dsid] = list of rows {labelId,labelName,documentCount}
+      per_label_hits[labelId] = { 'labelName': str, 'by_ds': { dsid: count, ... } }
+    """
+    per_ds: dict[str, list[dict[str, Any]]] = {}
+    per_label: dict[str, dict[str, Any]] = {}
+    for item in ds_items or []:
+        dsid = str(item.get("id"))
+        rows = get_label_statistics_for_datasource(dsid, LABEL_STATS_LIMIT)
+        hits = []
+        for row in rows or []:
+            try:
+                cnt = int(row.get("documentCount", 0))
+            except Exception:
+                cnt = 0
+            if cnt <= 0:
+                continue
+            lid = str(row.get("labelId"))
+            lname = str(row.get("labelName", ""))
+            hits.append({"labelId": lid, "labelName": lname, "documentCount": cnt})
+            pl = per_label.setdefault(lid, {"labelName": lname, "by_ds": {}})
+            pl["by_ds"][dsid] = cnt
+        per_ds[dsid] = hits
+    return per_ds, per_label
+
+def update_unstructured_dataset_hit_stats_and_relationships(client: DataMapClient, tags: List[Dict[str, Any]], ds_items: List[Dict[str, Any]], ds_name_map: Dict[str, str], ud_collection: str | None) -> None:
+    """Update label-side hit stats and ensure relationships only for datasources with hits.
+    Removes relationships that no longer have hits. Ensures minimal entities exist before linking."""
+    if not tags:
+        return
+    # Ensure types/relationships exist (idempotent)
+    try:
+        ensure_types_and_relationships()
+    except Exception:
+        pass
+    per_ds, per_label = _fetch_label_stats(ds_items)
+    now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    # Build upserts for label entities
+    entities: List[AtlasEntity] = []
+    for tag in tags:
+        tag_id = str(tag.get("id"))
+        qn = _to_qualified_name(tag)
+        inv = per_label.get(tag_id) or {"by_ds": {}, "labelName": tag.get("name", "")}
+        dsids = list(inv["by_ds"].keys())
+        counts = [inv["by_ds"][d] for d in dsids]
+        dsnames = [ds_name_map.get(d, "") for d in dsids]
+        attrs = {
+            "qualifiedName": qn,
+            # Include required attributes to allow create-if-missing
+            "name": str(tag.get("name") or tag_id),
+            "type": str(tag.get("type") or "SMART"),
+            "dxrTenant": str(tag.get("tenant") or os.getenv("DXR_TENANT", "default")),
+            "tagId": tag_id,
+            "hitDatasourceIds": dsids,
+            "hitDatasourceNames": dsnames,
+            "hitDocumentCounts": counts,
+            "statsUpdatedAt": now_iso,
+        }
+        entities.append(AtlasEntity(type_name=CUSTOM_TYPE_NAME, attributes=attrs))
+
+    if entities:
+        payload = AtlasEntitiesWithExtInfo(entities=entities)
+        try:
+            if ud_collection:
+                client.entity.batch_create_or_update(payload, collection_id=ud_collection)
+            else:
+                client.entity.batch_create_or_update(payload)
+        except Exception as e:
+            logger.warning("Label-side stats upsert failed: %s", e)
+
+    # Ensure datasource entities exist minimally for linkage
+    try:
+        tenant = os.getenv("DXR_TENANT", "default")
+        if ds_items:
+            # Ensure datasource entities exist; write into UD collection if no explicit collection is available
+            upsert_unstructured_datasources(client, tenant, ds_items, collection_id=ud_collection)
+    except Exception as e:
+        logger.debug("Ensuring datasource entities before linking failed: %s", e)
+
+    # Relationship management per label: create/update for hits; delete absent
+    tenant = os.getenv("DXR_TENANT", "default")
+    for tag in tags:
+        tag_id = str(tag.get("id"))
+        qn_tag = _to_qualified_name(tag)
+        tag_guid = resolve_guid_by_qn(CUSTOM_TYPE_NAME, qn_tag)
+        if not tag_guid:
+            continue
+        current = per_label.get(tag_id, {}).get("by_ds", {})
+        existing = _get_entity_relationship_map_for_label(tag_guid)
+        # Create or update relationships for current hits
+        dsid_to_guid = {}
+        for dsid, cnt in current.items():
+            ds_qn = _qn_datasource(tenant, dsid)
+            guid = resolve_guid_by_qn("unstructured_datasource", ds_qn)
+            dsid_to_guid[dsid] = guid
+            if not guid:
+                continue
+            attrs = {"documentCount": int(cnt), "statsUpdatedAt": now_iso}
+            _create_or_update_relationship_with_attrs(
+                "unstructured_datasource_hits_unstructured_dataset",
+                ds_qn, "unstructured_datasource",
+                qn_tag, CUSTOM_TYPE_NAME,
+                attrs,
+            )
+        # Delete relationships for datasources no longer in current hits
+        keep_guids = {g for g in dsid_to_guid.values() if g}
+        for dsg, relg in existing.items():
+            if dsg not in keep_guids:
+                # Verify relationship type before deletion
+                rr = _atlas_get(f"/datamap/api/atlas/v2/relationship/guid/{relg}")
+                if rr.status_code == 200 and (rr.json() or {}).get("typeName") == "unstructured_datasource_hits_unstructured_dataset":
+                    _delete_relationship_by_guid(relg)
+
 def create_relationship(rel_type: str, end1_qn: str, end1_type: str, end2_qn: str, end2_type: str) -> None:
     payload = {
         "typeName": rel_type,
@@ -772,6 +502,85 @@ def create_relationship(rel_type: str, end1_qn: str, end1_type: str, end2_qn: st
         return
     logger.warning("Relationship create failed (%s): %s", resp.status_code, resp.text[:300])
 
+def _atlas_put(path: str, payload: Dict[str, Any]) -> requests.Response:
+    url = f"{PURVIEW_ENDPOINT}{path}"
+    return requests.put(url, headers=_atlas_headers(), json=payload, timeout=HTTP_TIMEOUT_SECONDS)
+
+def _get_entity_relationship_map_for_label(label_guid: str) -> Dict[str, str]:
+    """Return mapping of related datasource GUID -> relationship GUID for a given label entity.
+    Best-effort parsing of Atlas entity payload."""
+    rels: Dict[str, str] = {}
+    try:
+        r = _atlas_get(f"/datamap/api/atlas/v2/entity/guid/{label_guid}")
+        if r.status_code != 200:
+            return rels
+        data = r.json() or {}
+        ra = data.get("relationshipAttributes") or {}
+        # end name could be 'datasource', 'datasources', or 'hitDatasources' depending on typedefs
+        ds_rel = ra.get("hitDatasources") or ra.get("datasources") or ra.get("datasource")
+        items = []
+        if isinstance(ds_rel, list):
+            items = ds_rel
+        elif isinstance(ds_rel, dict):
+            items = [ds_rel]
+        for it in items:
+            ds_guid = it.get("guid") or (it.get("entity") or {}).get("guid")
+            rel_guid = it.get("relationshipGuid") or it.get("relationshipId") or (it.get("relationship") or {}).get("guid")
+            if ds_guid and rel_guid:
+                rels[str(ds_guid)] = str(rel_guid)
+    except Exception:
+        return rels
+    return rels
+
+def _create_or_update_relationship_with_attrs(rel_type: str, end1_qn: str, end1_type: str, end2_qn: str, end2_type: str, attrs: Dict[str, Any]) -> None:
+    payload = {
+        "typeName": rel_type,
+        "attributes": attrs,
+        "end1": {"typeName": end1_type, "uniqueAttributes": {"qualifiedName": end1_qn}},
+        "end2": {"typeName": end2_type, "uniqueAttributes": {"qualifiedName": end2_qn}},
+    }
+    resp = _atlas_post("/datamap/api/atlas/v2/relationship", payload)
+    if resp.status_code in (200, 201):
+        return
+    if resp.status_code == 409:
+        # Find existing relationship and update attributes
+        label_guid = resolve_guid_by_qn(end2_type, end2_qn) if end2_type == "unstructured_dataset" else resolve_guid_by_qn(end1_type, end1_qn)
+        if not label_guid:
+            return
+        rels = _get_entity_relationship_map_for_label(label_guid)
+        # Resolve datasource guid to pick correct relationship
+        ds_qn = end1_qn if end1_type == "unstructured_datasource" else end2_qn
+        ds_guid = resolve_guid_by_qn("unstructured_datasource", ds_qn)
+        if not ds_guid:
+            return
+        rel_guid = rels.get(ds_guid)
+        if not rel_guid:
+            return
+        # GET existing, ensure type matches, then update attributes
+        r = _atlas_get(f"/datamap/api/atlas/v2/relationship/guid/{rel_guid}")
+        if r.status_code != 200:
+            return
+        try:
+            rel_obj = r.json() or {}
+        except Exception:
+            rel_obj = {}
+        if rel_obj.get("typeName") and rel_obj.get("typeName") != rel_type:
+            return
+        rel_obj["attributes"] = rel_obj.get("attributes", {}) | attrs
+        pr = _atlas_put(f"/datamap/api/atlas/v2/relationship/guid/{rel_guid}", rel_obj)
+        if pr.status_code not in (200, 201):
+            logger.debug("Relationship attribute update failed: %s %s", pr.status_code, pr.text[:200])
+        return
+    logger.debug("Relationship create failed (%s): %s", resp.status_code, resp.text[:200])
+
+def _delete_relationship_by_guid(rel_guid: str) -> None:
+    try:
+        r = _atlas_delete(f"/datamap/api/atlas/v2/relationship/guid/{rel_guid}")
+        if r.status_code not in (200, 204):
+            logger.debug("Delete relationship %s -> %s %s", rel_guid, r.status_code, r.text[:200])
+    except Exception:
+        pass
+
 
 def build_entities_payload_for_tags(tags: List[Dict[str, Any]], ds_map: Dict[str, str]) -> AtlasEntitiesWithExtInfo:
     entities: List[AtlasEntity] = []
@@ -779,7 +588,8 @@ def build_entities_payload_for_tags(tags: List[Dict[str, Any]], ds_map: Dict[str
     for tag in tags:
         qn = _to_qualified_name(tag)
         tag_id = str(tag.get("id"))
-        name = tag.get("name")
+        # Some tenants may not return 'name' consistently; provide a sensible fallback
+        name = tag.get("name") or tag.get("labelName") or f"dxr_label_{tag_id}"
         description = tag.get("description")
         type_ = tag.get("type")
         # Extract parameters arrays from first savedQueryDtoList's query.query_items
@@ -845,185 +655,20 @@ def build_entities_payload_for_tags(tags: List[Dict[str, Any]], ds_map: Dict[str
 
 
 def upsert_unstructured_datasets(client: DataMapClient, tags: List[Dict[str, Any]], ds_map: Dict[str, str], *, collection_id: str | None = None) -> Dict[str, str]:
-    if not tags:
-        logger.info("No tags to upsert this cycle.")
-        return {}
-    payload = build_entities_payload_for_tags(tags, ds_map)
-    # Helper to resolve by qualifiedName if needed
-    def _resolve_guids_by_qn(candidates: List[Dict[str, Any]]) -> Dict[str, str]:
-        out: Dict[str, str] = {}
-        for tag in candidates:
-            qn = _to_qualified_name(tag)
-            guid = resolve_guid_by_qn(CUSTOM_TYPE_NAME, qn, attempts=8, delay_seconds=1.5)
-            if guid:
-                out[qn] = guid
-        return out
+    return pvent.upsert_unstructured_datasets(client, tags, ds_map, collection_id=collection_id)
 
-    try:
-        target_collection = collection_id or os.environ.get("PURVIEW_COLLECTION_ID")
-        if target_collection:
-            result = client.entity.batch_create_or_update(payload, collection_id=target_collection)
-        else:
-            result = client.entity.batch_create_or_update(payload)
-        created = len(result.get("mutatedEntities", {}).get("CREATE", [])) if isinstance(result, dict) else None
-        updated = len(result.get("mutatedEntities", {}).get("UPDATE", [])) if isinstance(result, dict) else None
-        logger.info("Upserted unstructured_datasets: created=%s updated=%s", created, updated)
-        guid_map: Dict[str, str] = {}
-        if isinstance(result, dict):
-            for sec in ("CREATE", "UPDATE"):
-                for ent in result.get("mutatedEntities", {}).get(sec, []):
-                    qn = ent.get("attributes", {}).get("qualifiedName")
-                    guid = ent.get("guid")
-                    if qn and guid:
-                        guid_map[qn] = guid
-        # If SDK returned success but we couldn't extract GUIDs, fall back to unique-attribute lookups
-        if not guid_map:
-            logger.debug("SDK upsert returned no GUIDs in payload; resolving by qualifiedName.")
-            guid_map = _resolve_guids_by_qn(tags)
-        return guid_map
-    except Exception as e:
-        # Log richer details for HTTP errors, then fall back to unique-attribute lookups.
-        try:
-            from azure.core.exceptions import HttpResponseError
-            if isinstance(e, HttpResponseError) and getattr(e, "response", None) is not None:
-                status = getattr(e.response, "status_code", None)
-                body = getattr(e.response, "text", "")
-                logger.error("Upsert unstructured_datasets failed: status=%s body=%s", status, str(body)[:300])
-        except Exception:
-            pass
-        logger.warning("batch_create_or_update(tags) raised (%s). Falling back to unique-attribute lookups.", e)
-        return _resolve_guids_by_qn(tags)
-
-def upsert_unstructured_datasources(client: DataMapClient, tenant: str, ds_full: List[Dict[str, Any]], *, by_collection: Dict[str, List[Dict[str, Any]]] | None = None) -> Dict[str, str]:
-    def _build_entities(items: List[Dict[str, Any]]) -> AtlasEntitiesWithExtInfo:
-        entities: List[AtlasEntity] = []
-        for item in items:
-            dsid = str(item.get("id"))
-            name = item.get("name", dsid)
-            ctype = item.get("connectorTypeName") or item.get("connectorType") or ""
-            attrs = {
-                "qualifiedName": _qn_datasource(tenant, dsid),
-                "name": name,
-                "datasourceId": dsid,
-                "connectorTypeName": ctype,
-                "dxrTenant": tenant,
-            }
-            entities.append(AtlasEntity(type_name="unstructured_datasource", attributes=attrs))
-        return AtlasEntitiesWithExtInfo(entities=entities)
-
-    if not ds_full:
-        return {}
-
-    def _resolve_guids_by_qn(items: List[Dict[str, Any]]) -> Dict[str, str]:
-        out: Dict[str, str] = {}
-        for it in items:
-            dsid = str(it.get("id"))
-            qn = _qn_datasource(tenant, dsid)
-            path = "/datamap/api/atlas/v2/entity/uniqueAttribute/type/unstructured_datasource"
-            resp = _atlas_get(path, params={"attr:qualifiedName": qn})
-            if resp.status_code == 200:
-                try:
-                    guid = resp.json().get("guid")
-                    if guid:
-                        out[qn] = guid
-                except Exception:
-                    continue
-        return out
-
-    guid_map: Dict[str, str] = {}
-    try:
-        # Group by collection if provided; otherwise single batch (possibly with PURVIEW_COLLECTION_ID)
-        if by_collection:
-            for coll, items in by_collection.items():
-                if not items:
-                    continue
-                payload = _build_entities(items)
-                result = client.entity.batch_create_or_update(payload, collection_id=coll)
-                if isinstance(result, dict):
-                    for sec in ("CREATE", "UPDATE"):
-                        for ent in result.get("mutatedEntities", {}).get(sec, []):
-                            qn = ent.get("attributes", {}).get("qualifiedName")
-                            gid = ent.get("guid")
-                            if qn and gid:
-                                guid_map[qn] = gid
-        else:
-            payload = _build_entities(ds_full)
-            collection_id = os.environ.get("PURVIEW_COLLECTION_ID")
-            if collection_id:
-                result = client.entity.batch_create_or_update(payload, collection_id=collection_id)
-            else:
-                result = client.entity.batch_create_or_update(payload)
-            if isinstance(result, dict):
-                for sec in ("CREATE", "UPDATE"):
-                    for ent in result.get("mutatedEntities", {}).get(sec, []):
-                        qn = ent.get("attributes", {}).get("qualifiedName")
-                        gid = ent.get("guid")
-                        if qn and gid:
-                            guid_map[qn] = gid
-        if not guid_map:
-            logger.debug("SDK upsert returned no GUIDs for datasources; resolving by qualifiedName.")
-            guid_map = _resolve_guids_by_qn(ds_full)
-        return guid_map
-    except Exception as e:
-        logger.warning("batch_create_or_update(datasources) raised (%s). Falling back to unique-attribute lookups.", e)
-        return _resolve_guids_by_qn(ds_full)
+def upsert_unstructured_datasources(
+    client: DataMapClient,
+    tenant: str,
+    ds_full: List[Dict[str, Any]],
+    *,
+    by_collection: Dict[str, List[Dict[str, Any]]] | None = None,
+    collection_id: str | None = None,
+) -> Dict[str, str]:
+    return pvent.upsert_unstructured_datasources(client, tenant, ds_full, by_collection=by_collection, collection_id=collection_id)
 
 def resolve_guid_by_qn(type_name: str, qualified_name: str, attempts: int = 8, delay_seconds: float = 1.5) -> str | None:
-    """
-    Best-effort GUID resolver with retries. Tries the Atlas unique-attribute lookup first,
-    then falls back to an advanced search on qualifiedName. Useful to smooth over eventual consistency after upserts.
-    """
-    # Normalize inputs
-    t = (type_name or "").strip()
-    qn = (qualified_name or "").strip()
-    if not t or not qn:
-        return None
-
-    # 1) Retry uniqueAttribute lookup
-    for i in range(max(1, attempts)):
-        try:
-            resp = _atlas_get(f"/datamap/api/atlas/v2/entity/uniqueAttribute/type/{t}", params={"attr:qualifiedName": qn})
-            if resp.status_code == 200:
-                try:
-                    data = resp.json()
-                    guid = data.get("guid")
-                    if guid:
-                        return guid
-                except Exception:
-                    pass
-            elif resp.status_code in (401, 403):
-                # permissions issue, don't hammer
-                break
-        except Exception:
-            pass
-        time.sleep(delay_seconds)
-
-    # 2) Fallback: advanced search on qualifiedName (exact match)
-    try:
-        payload = {
-            "typeName": t,
-            "excludeDeletedEntities": True,
-            "where": {
-                "attributeName": "qualifiedName",
-                "operator": "eq",
-                "attributeValue": qn,
-            },
-            "attributes": ["qualifiedName"],
-            "limit": 1,
-        }
-        resp2 = _atlas_post("/datamap/api/atlas/v2/search/advanced", payload)
-        if resp2.status_code == 200:
-            try:
-                data2 = resp2.json()
-                for ent in data2.get("entities", []) or []:
-                    g = ent.get("guid") or ent.get("entity", {}).get("guid")
-                    if g:
-                        return g
-            except Exception:
-                pass
-    except Exception:
-        pass
-    return None
+    return pvatlas.resolve_guid_by_qn(type_name, qualified_name, attempts, delay_seconds)
 
 # ---------- Entity collection helpers ----------
 ENTITY_API_VERSION = "2023-09-01"
@@ -1031,7 +676,7 @@ ENTITY_API_VERSION = "2023-09-01"
 def _entity_get(path: str, params: Dict[str, Any] | None = None) -> requests.Response:
     url = f"{PURVIEW_ENDPOINT}{path}"
     headers = _atlas_headers()
-    return requests.get(url, headers=headers, params=params)
+    return requests.get(url, headers=headers, params=params, timeout=HTTP_TIMEOUT_SECONDS)
 
 
 def get_entity_collection_info(guid: str) -> Dict[str, Any] | None:
@@ -1137,36 +782,7 @@ def list_existing_tag_qns_for_tenant(tenant: str) -> Set[str]:
     return qns
 
 def delete_entities_by_qualified_names(qns: List[str], type_name: str) -> None:
-    if not qns:
-        return
-    # Resolve QN -> GUID and delete in batches
-    batch = 50
-    to_delete_guids: List[str] = []
-    for i in range(0, len(qns), batch):
-        chunk = qns[i:i+batch]
-        for qn in chunk:
-            path = f"/datamap/api/atlas/v2/entity/uniqueAttribute/type/{type_name}"
-            resp = _atlas_get(f"{path}", params={"attr:qualifiedName": qn})
-            if resp.status_code == 200:
-                try:
-                    data = resp.json() or {}
-                except Exception:
-                    data = {}
-                # Try common shapes
-                guid = data.get("guid") or data.get("entity", {}).get("guid")
-                if guid:
-                    to_delete_guids.append(str(guid))
-                else:
-                    logger.debug("delete_entities_by_qualified_names: no guid found for QN %s (type %s)", qn, type_name)
-    # Bulk delete by GUIDs
-    for i in range(0, len(to_delete_guids), batch):
-        chunk = to_delete_guids[i:i+batch]
-        chunk_ids = [str(g) for g in chunk if g]
-        if not chunk_ids:
-            continue
-        r = _atlas_delete("/datamap/api/atlas/v2/entity/bulk", params={"guid": ",".join(chunk_ids)})
-        if r.status_code not in (200, 204):
-            logger.warning("Bulk delete returned %s: %s", r.status_code, r.text[:300])
+    return pvatlas.delete_entities_by_qualified_names(qns, type_name)
 
 
 # ------------ Main loop ------------
@@ -1176,6 +792,19 @@ def run_once() -> None:
     ensure_types_and_relationships()
     tags = get_dxr_tags()
     name_map, ds_full = get_dxr_searchable_datasources()
+    # Optional limiting for quicker test cycles
+    try:
+        tlim = int(os.getenv("DXR_TAGS_LIMIT", "0"))
+        if tlim > 0:
+            tags = tags[:tlim]
+    except Exception:
+        pass
+    try:
+        dlim = int(os.getenv("DXR_DATASOURCES_LIMIT", "0"))
+        if dlim > 0:
+            ds_full = ds_full[:dlim]
+    except Exception:
+        pass
     logger.info("Fetched %d tags from DXR", len(tags))
     logger.info("Fetched %d datasources from DXR", len(ds_full))
 
@@ -1212,16 +841,29 @@ def run_once() -> None:
     # Move tags to target collections if governance is enabled
     # Tags are written into the UD collection; no replication under datasource collections
 
-    # Relationships: datasource -> tag
-    for t in tags:
-        qn_tag = _to_qualified_name(t)
-        ds_ids = set()
-        for dto in (t.get("savedQueryDtoList") or []):
-            for dsid in (dto.get("datasourceIds") or []):
-                ds_ids.add(str(dsid))
-        for dsid in ds_ids:
-            qn_ds = _qn_datasource(tenant, dsid)
-            create_relationship("unstructured_datasource_has_unstructured_dataset", qn_ds, "unstructured_datasource", qn_tag, "unstructured_dataset")
+    # Stats-driven enrichment
+    if ENABLE_LABEL_STATS:
+        # 1) Update datasource-side stats arrays
+        try:
+            update_unstructured_datasource_hit_stats(client, tenant, ds_full, child_collections)
+        except Exception as e:
+            logger.warning("Update datasource hit stats failed: %s", e)
+        # 2) Update label-side stats arrays and ensure relationships only where hits exist
+        try:
+            update_unstructured_dataset_hit_stats_and_relationships(client, tags, ds_full, name_map, ud_collection)
+        except Exception as e:
+            logger.warning("Update dataset hit stats/relationships failed: %s", e)
+    else:
+        # Legacy relationship creation based on savedQueryDtoList
+        for t in tags:
+            qn_tag = _to_qualified_name(t)
+            ds_ids = set()
+            for dto in (t.get("savedQueryDtoList") or []):
+                for dsid in (dto.get("datasourceIds") or []):
+                    ds_ids.add(str(dsid))
+            for dsid in ds_ids:
+                qn_ds = _qn_datasource(tenant, dsid)
+                create_relationship("unstructured_datasource_has_unstructured_dataset", qn_ds, "unstructured_datasource", qn_tag, "unstructured_dataset")
 
     # Optional delete sync
     if SYNC_DELETE:
@@ -1253,3 +895,16 @@ def main() -> None:
 
 if __name__ == "__main__":
     entrypoint()
+
+# ---- pvlib wiring aliases (override in-module implementations) ----
+# These assignments ensure external callers/tests use the refactored implementations.
+update_unstructured_datasource_hit_stats = pvstats.update_unstructured_datasource_hit_stats
+update_unstructured_dataset_hit_stats_and_relationships = pvstats.update_unstructured_dataset_hit_stats_and_relationships
+create_relationship = pvrels.create_relationship
+_get_entity_relationship_map_for_label = pvrels._get_entity_relationship_map_for_label
+_create_or_update_relationship_with_attrs = pvrels._create_or_update_relationship_with_attrs
+_delete_relationship_by_guid = pvrels._delete_relationship_by_guid
+upsert_unstructured_datasets = pvent.upsert_unstructured_datasets
+upsert_unstructured_datasources = pvent.upsert_unstructured_datasources
+resolve_guid_by_qn = pvatlas.resolve_guid_by_qn
+delete_entities_by_qualified_names = pvatlas.delete_entities_by_qualified_names
