@@ -1,13 +1,13 @@
 # Purview Stream Endpoint
 
-Synchronizes Data X-Ray (DXR) tags and datasources into Microsoft Purview Data Map. It creates/updates custom Purview entities, organizes them into Collections under a Domain, and links datasources to the tags that reference them. Can run once (for CI) or as a polling service.
+Synchronizes Data X-Ray (DXR) classifications (labels) and datasources into Microsoft Purview Data Map using the new vbeta APIs. It creates/updates custom Purview entities, organizes them into Collections under a Domain, and links datasources to the labels that have hits in them. Can run once (for CI) or as a polling service.
 
 ## What It Does
-- Maps DXR tags to custom Purview entities (`unstructured_dataset`).
-- Maps DXR datasources to custom Purview entities (`unstructured_datasource`).
+- Maps DXR classifications (labels) to custom Purview entities (`unstructured_dataset`).
+- Maps DXR datasources (from files hits) to custom Purview entities (`unstructured_datasource`).
 - Ensures custom Atlas typedefs and a relationship exist.
 - Ensures a Domain exists and creates Collections: one parent (domain) and children per datasource.
-- Moves upserted entities into the correct Collections and creates datasource→tag relationships.
+- Writes label entities to a single “Unstructured Datasets” collection and creates datasource→label relationships.
 - Optional pruning of stale tag entities when `SYNC_DELETE` is enabled.
 
 ## Prerequisites
@@ -26,7 +26,7 @@ pip install azure-identity azure-purview-datamap requests python-dotenv
 ```
 
 ## Configuration
-Set environment variables (a local `.env` is supported via python-dotenv):
+Place a `.env` file in `purview-stream-endpoint/` (this folder). The tool auto-loads it.
 
 Required:
 - `DXR_APP_URL`: Base URL, e.g. `https://demo.dataxray.io`
@@ -41,13 +41,13 @@ Required:
  - `PURVIEW_COLLECTION_ID`: Collection referenceName for direct upserts (used mainly when `DISABLE_GOVERNANCE=1`)
  - `PURVIEW_DOMAIN_ID`: Domain referenceName (6-char) used as the parent for child collections
 - `PURVIEW_PARENT_COLLECTION_ID`: Parent collection referenceName; if set, takes precedence over `PURVIEW_DOMAIN_ID`
-- `UNSTRUCTURED_DATASETS_COLLECTION_NAME`: Friendly name for the single collection holding all tag assets (default "Unstructured Datasets"). The referenceName is derived automatically per parent collection and no longer configurable.
-- `DXR_TAGS_PATH`: Defaults to `/api/tags`
-- `DXR_SEARCHABLE_DATASOURCES_PATH`: Defaults to `/api/datasources/searchable`
+- `UNSTRUCTURED_DATASETS_COLLECTION_NAME`: Friendly name for the single collection holding all label assets (default "Unstructured Datasets"). The referenceName is derived automatically per parent collection and no longer configurable.
+- `DXR_CLASSIFICATIONS_PATH`: Defaults to `/api/vbeta/classifications`
+- `DXR_FILES_PATH`: Defaults to `/api/vbeta/files`
 - `DXR_TENANT`: Tenant label used in qualified names (default `default`)
 - `POLL_SECONDS`: Poll interval (default `60`)
 - `RUN_ONCE`: Set to `1` to run one cycle and exit
-- `SYNC_DELETE`: `1/true` to delete Purview tag entities not present in current DXR set
+- `SYNC_DELETE`: `1/true` to delete Purview label entities not present in current DXR set
 - `PURVIEW_GOV_RESOURCE`: OAuth resource override for governance APIs (advanced)
 - `PURVIEW_GOV_BASE`: Base URL override for governance APIs (advanced)
 - `DISABLE_GOVERNANCE`: `1/true` to skip domain/collection API calls and moves; entities are written to `PURVIEW_COLLECTION_ID` if set
@@ -65,11 +65,13 @@ POLL_SECONDS=60
 RUN_ONCE=1
 ```
 
-## Run
-- Single cycle (good for CI or manual runs):
+Note: If you previously had a `.env` at the repo root, move it into `purview-stream-endpoint/.env` so settings only apply to this project.
+
+## Run (Smoke)
+- Smoke run (quick sanity check with small limits):
 ```bash
 cd purview-stream-endpoint
-./run_once.sh           # uses .env; add --fast to limit scope/timeouts
+./run_once.sh           # uses .env here; add --full to disable limits
 ```
 - Continuous polling service:
 ```bash
@@ -80,14 +82,14 @@ python purview_dxr_integration.py
 ## Developer Modules
 For easier comprehension and extension, core functionality has been extracted into small modules under `pvlib/`:
 - `pvlib/config.py`: Env loading, logging, HTTP session helpers
-- `pvlib/dxr.py`: DXR API calls (tags, searchable datasources, label statistics)
+- `pvlib/dxr.py`: DXR API calls (classifications, files streaming for datasource hits)
 - `pvlib/atlas.py`: Purview data-plane auth, REST helpers, entity lookups and utilities
 - `pvlib/typedefs.py`: Ensures custom entity/relationship types and merges new attributes
 - `pvlib/governance.py`: Governance headers/base and Collections API helpers (shared-service and account-host)
 - `pvlib/collections.py`: Collection helpers (slug/ref builders, ensure collections/UD collection)
 - `pvlib/entities.py`: Upsert helpers for datasets and datasources
 - `pvlib/relationships.py`: Create/update/delete relationships, mapping helpers
-- `pvlib/stats.py`: Datasource/label hit statistics upserts and hit-based relationship wiring
+  (stats module removed; relationships are created from files hit discovery)
 
 The top-level `purview_dxr_integration.py` will gradually be refactored to use these modules directly.
 

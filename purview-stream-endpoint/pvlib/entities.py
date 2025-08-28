@@ -13,12 +13,12 @@ from .typedefs import CUSTOM_TYPE_NAME
 
 def upsert_unstructured_datasets(
     client: DataMapClient,
-    tags: List[Dict[str, Any]],
+    labels: List[Dict[str, Any]],
     ds_map: Dict[str, str],
     *,
     collection_id: str | None = None,
 ) -> Dict[str, str]:
-    if not tags:
+    if not labels:
         logger.info("No tags to upsert this cycle.")
         return {}
 
@@ -33,53 +33,30 @@ def upsert_unstructured_datasets(
         for tag in tags:
             qn = _to_qualified_name(tag)
             tag_id = str(tag.get("id"))
-            name = tag.get("name") or tag.get("labelName") or f"dxr_label_{tag_id}"
+            name = tag.get("name") or f"dxr_label_{tag_id}"
             description = tag.get("description")
-            type_ = tag.get("type") or "SMART"
-            parametersParameters: List[str] = []
-            parametersValues: List[str] = []
-            parametersTypes: List[str] = []
-            parametersMatchStrategies: List[str] = []
-            parametersOperators: List[str] = []
-            parametersGroupIds: List[int] = []
-            parametersGroupOrders: List[int] = []
-            for dto in (tag.get("savedQueryDtoList") or []):
-                q = (dto.get("query") or {}).get("query_items") or []
-                for it in q:
-                    parametersParameters.append(str(it.get("parameter")))
-                    parametersValues.append(str(it.get("value")))
-                    parametersTypes.append(str(it.get("type")))
-                    parametersMatchStrategies.append(str(it.get("match_strategy")))
-                    parametersOperators.append(str(it.get("operator")))
-                    parametersGroupIds.append(int(it.get("group_id", 0)))
-                    parametersGroupOrders.append(int(it.get("group_order", 0)))
-            datasource_ids_set = set()
-            for dto in (tag.get("savedQueryDtoList") or []):
-                for dsid in (dto.get("datasourceIds") or []):
-                    datasource_ids_set.add(str(dsid))
-            datasourceIds = list(datasource_ids_set)
-            datasourceNames = [ds_map_in.get(dsid, "") for dsid in datasourceIds]
+            label_type = tag.get("type") or "LABEL"
+            label_subtype = tag.get("subtype") or ""
+            created_at = tag.get("createdAt")
+            updated_at = tag.get("updatedAt")
             attrs = {
                 "qualifiedName": qn,
                 "name": name,
                 "description": description,
-                "type": type_,
-                "parametersParameters": parametersParameters,
-                "parametersValues": parametersValues,
-                "parametersTypes": parametersTypes,
-                "parametersMatchStrategies": parametersMatchStrategies,
-                "parametersOperators": parametersOperators,
-                "parametersGroupIds": parametersGroupIds,
-                "parametersGroupOrders": parametersGroupOrders,
-                "datasourceIds": datasourceIds,
-                "datasourceNames": datasourceNames,
+                # New label metadata
+                "labelId": tag_id,
+                "labelType": label_type,
+                "labelSubtype": label_subtype,
+                "createdAt": created_at,
+                "updatedAt": updated_at,
+                # Keep tenant & legacy tagId for continuity
                 "dxrTenant": tag.get("tenant", dxr_tenant),
                 "tagId": tag_id,
             }
             entities.append(AtlasEntity(type_name=CUSTOM_TYPE_NAME, attributes=attrs))
         return AtlasEntitiesWithExtInfo(entities=entities)
 
-    payload = build_entities_payload_for_tags(tags, ds_map)
+    payload = build_entities_payload_for_tags(labels, ds_map)
 
     def _resolve_guids_by_qn(candidates: List[Dict[str, Any]]) -> Dict[str, str]:
         out: Dict[str, str] = {}
@@ -105,7 +82,7 @@ def upsert_unstructured_datasets(
                     if qn and guid:
                         guid_map[qn] = guid
         if not guid_map:
-            guid_map = _resolve_guids_by_qn(tags)
+            guid_map = _resolve_guids_by_qn(labels)
         return guid_map
     except Exception as e:
         try:
@@ -116,7 +93,7 @@ def upsert_unstructured_datasets(
                 logger.error("Upsert unstructured_datasets failed: status=%s body=%s", status, str(body)[:300])
         except Exception:
             pass
-        return _resolve_guids_by_qn(tags)
+        return _resolve_guids_by_qn(labels)
 
 
 def upsert_unstructured_datasources(
@@ -202,4 +179,3 @@ def upsert_unstructured_datasources(
     except Exception as e:
         logger.warning("batch_create_or_update(datasources) raised (%s). Falling back to unique-attribute lookups.", e)
         return _resolve_guids_by_qn(ds_full)
-

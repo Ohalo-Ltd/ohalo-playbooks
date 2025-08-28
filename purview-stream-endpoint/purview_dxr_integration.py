@@ -20,8 +20,8 @@ App registration (service principal) steps:
 Environment variables required:
   DXR_APP_URL               e.g., https://my-dxr.example.com
   DXR_PAT_TOKEN             Personal Access Token to call DXR API
-  DXR_TAGS_PATH             (optional) path after base URL. default: /api/tags
-  DXR_SEARCHABLE_DATASOURCES_PATH (optional) path for datasources. default: /api/datasources/searchable
+  DXR_CLASSIFICATIONS_PATH  (optional) default: /api/vbeta/classifications
+  DXR_FILES_PATH            (optional) default: /api/vbeta/files
 
   PURVIEW_ENDPOINT          e.g., https://<account-name>.purview.azure.com or https://api.purview-service.microsoft.com
   AZURE_TENANT_ID           Entra tenant ID
@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import os
 import time
+import re
 import logging
 from typing import Dict, Any, List
 from typing import Tuple, Set
@@ -65,7 +66,6 @@ from pvlib import atlas as pvatlas
 from pvlib import typedefs as pvtypes
 from pvlib import entities as pvent
 from pvlib import relationships as pvrels
-from pvlib import stats as pvstats
 from pvlib import governance as pvgo
 from pvlib import collections as pvcoll
 
@@ -98,9 +98,6 @@ HTTP_TIMEOUT_SECONDS = pvconfig.HTTP_TIMEOUT_SECONDS
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "60"))
 SYNC_DELETE = os.getenv("SYNC_DELETE", "0").lower() in ("1", "true", "yes")
 DISABLE_GOVERNANCE = os.getenv("DISABLE_GOVERNANCE", "0").lower() in ("1", "true", "yes")
-ENABLE_LABEL_STATS = os.getenv("ENABLE_LABEL_STATS", "1").lower() in ("1", "true", "yes")
-# Use a large default so we don't miss labels; can override via env
-LABEL_STATS_LIMIT = int(os.getenv("LABEL_STATS_LIMIT", "100000"))
 
 # ------------ Governance (Catalog Admin) API helpers ------------
 GOV_API_VERSION = "2023-09-01"
@@ -121,12 +118,9 @@ _acct_collections_get = pvgo.acct_collections_get
 _normalize_purview_endpoint = pvconfig.normalize_purview_endpoint
 _normalize_base_url = pvconfig.normalize_base_url
 
-# Keep legacy env wiring; modules also read directly from env
+# DXR env normalization helpers (kept for convenience in this module)
 DXR_APP_URL = _normalize_base_url(os.environ.get("DXR_APP_URL"))
 DXR_PAT_TOKEN = os.environ.get("DXR_PAT_TOKEN")
-# Remove DXR_FILES_PATH, add DXR_TAGS_PATH and DXR_SEARCHABLE_DATASOURCES_PATH
-DXR_TAGS_PATH = os.environ.get("DXR_TAGS_PATH", "/api/tags")
-DXR_SEARCHABLE_DATASOURCES_PATH = os.environ.get("DXR_SEARCHABLE_DATASOURCES_PATH", "/api/datasources/searchable")
 
 PURVIEW_ENDPOINT = _normalize_purview_endpoint(os.environ.get("PURVIEW_ENDPOINT"))
 TENANT_ID = os.environ.get("AZURE_TENANT_ID")
@@ -218,12 +212,15 @@ def _atlas_delete(path: str, params: Dict[str, Any] | None = None) -> requests.R
 
 
 
-def get_dxr_tags() -> List[Dict[str, Any]]:
-    return pvdxr.get_dxr_tags()
+def get_dxr_classifications() -> List[Dict[str, Any]]:
+    return pvdxr.get_dxr_classifications()
 
 
-def get_dxr_searchable_datasources() -> Tuple[Dict[str, str], List[Dict[str, Any]]]:
-    return pvdxr.get_dxr_searchable_datasources()
+def list_file_datasources_for_label(label_id: str, label_name: str | None = None) -> Tuple[Dict[str, str], List[Dict[str, Any]]]:
+    return pvdxr.list_file_datasources_for_label(label_id, label_name)
+
+# Backwards-compat small aliases for legacy tests/helpers
+    
 
 # ------------ Purview (Data Map) ------------
 
@@ -302,191 +299,7 @@ def ensure_collections(domain_name: str, datasource_items: List[Dict[str, Any]])
 def ensure_unstructured_datasets_collection(parent_reference: str) -> str:
     return pvcoll.ensure_unstructured_datasets_collection(parent_reference, UNSTRUCTURED_DATASETS_COLLECTION_NAME)
 
-# ------------ DXR Label Statistics (per-datasource) ------------
-
-def get_label_statistics_for_datasource(dsid: str, limit: int) -> List[Dict[str, Any]]:
-    url = f"{DXR_APP_URL}/api/dashboard/label-statistics?datasources={dsid}&limit={limit}"
-    headers = {
-        "Authorization": f"Bearer {DXR_PAT_TOKEN}",
-        "Accept": "application/json, text/plain, */*",
-        "Referer": DXR_APP_URL,
-    }
-    try:
-        resp = HTTP.get(url, headers=headers, timeout=HTTP_TIMEOUT_SECONDS)
-    except Exception as e:
-        logger.error("Label stats request failed for ds=%s: %s", dsid, e)
-        return []
-    if resp.status_code >= 400:
-        logger.warning("Label stats HTTP %s for ds=%s: %s", resp.status_code, dsid, resp.text[:200])
-        return []
-    try:
-        data = resp.json()
-        return data if isinstance(data, list) else []
-    except Exception:
-        return []
-
-def update_unstructured_datasource_hit_stats(client: DataMapClient, tenant: str, ds_items: List[Dict[str, Any]], child_collections: Dict[str, str] | None = None) -> None:
-    if not ds_items:
-        return
-    # Build updates per collection for efficient upsert
-    per_coll: Dict[str, List[AtlasEntity]] = defaultdict(list)
-    now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    for item in ds_items:
-        dsid = str(item.get("id"))
-        qn = _qn_datasource(tenant, dsid)
-        stats = get_label_statistics_for_datasource(dsid, LABEL_STATS_LIMIT)
-        # Keep only labels with documentCount > 0
-        lbl_ids: List[str] = []
-        lbl_names: List[str] = []
-        lbl_counts: List[int] = []
-        for row in stats or []:
-            try:
-                cnt = int(row.get("documentCount", 0))
-            except Exception:
-                cnt = 0
-            if cnt > 0:
-                lbl_ids.append(str(row.get("labelId")))
-                lbl_names.append(str(row.get("labelName", "")))
-                lbl_counts.append(cnt)
-        attrs = {
-            "qualifiedName": qn,
-            "hitLabelIds": lbl_ids,
-            "hitLabelNames": lbl_names,
-            "hitDocumentCounts": lbl_counts,
-            "statsUpdatedAt": now_iso,
-        }
-        per_coll[(child_collections or {}).get(dsid) or os.environ.get("PURVIEW_COLLECTION_ID") or ""].append(
-            AtlasEntity(type_name="unstructured_datasource", attributes=attrs)
-        )
-
-    # Submit per collection (empty key means no explicit collection_id)
-    for coll, entities in per_coll.items():
-        if not entities:
-            continue
-        payload = AtlasEntitiesWithExtInfo(entities=entities)
-        try:
-            if coll:
-                client.entity.batch_create_or_update(payload, collection_id=coll)
-            else:
-                client.entity.batch_create_or_update(payload)
-        except Exception as e:
-            logger.warning("Update hit stats upsert failed for collection=%s: %s", coll or "(none)", e)
-
-def _fetch_label_stats(ds_items: List[Dict[str, Any]]) -> tuple[dict[str, list[dict[str, Any]]], dict[str, dict[str, Any]]]:
-    """Fetch label statistics per datasource and build reverse map per label.
-    Returns (per_ds_hits, per_label_hits) where:
-      per_ds_hits[dsid] = list of rows {labelId,labelName,documentCount}
-      per_label_hits[labelId] = { 'labelName': str, 'by_ds': { dsid: count, ... } }
-    """
-    per_ds: dict[str, list[dict[str, Any]]] = {}
-    per_label: dict[str, dict[str, Any]] = {}
-    for item in ds_items or []:
-        dsid = str(item.get("id"))
-        rows = get_label_statistics_for_datasource(dsid, LABEL_STATS_LIMIT)
-        hits = []
-        for row in rows or []:
-            try:
-                cnt = int(row.get("documentCount", 0))
-            except Exception:
-                cnt = 0
-            if cnt <= 0:
-                continue
-            lid = str(row.get("labelId"))
-            lname = str(row.get("labelName", ""))
-            hits.append({"labelId": lid, "labelName": lname, "documentCount": cnt})
-            pl = per_label.setdefault(lid, {"labelName": lname, "by_ds": {}})
-            pl["by_ds"][dsid] = cnt
-        per_ds[dsid] = hits
-    return per_ds, per_label
-
-def update_unstructured_dataset_hit_stats_and_relationships(client: DataMapClient, tags: List[Dict[str, Any]], ds_items: List[Dict[str, Any]], ds_name_map: Dict[str, str], ud_collection: str | None) -> None:
-    """Update label-side hit stats and ensure relationships only for datasources with hits.
-    Removes relationships that no longer have hits. Ensures minimal entities exist before linking."""
-    if not tags:
-        return
-    # Ensure types/relationships exist (idempotent)
-    try:
-        ensure_types_and_relationships()
-    except Exception:
-        pass
-    per_ds, per_label = _fetch_label_stats(ds_items)
-    now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-    # Build upserts for label entities
-    entities: List[AtlasEntity] = []
-    for tag in tags:
-        tag_id = str(tag.get("id"))
-        qn = _to_qualified_name(tag)
-        inv = per_label.get(tag_id) or {"by_ds": {}, "labelName": tag.get("name", "")}
-        dsids = list(inv["by_ds"].keys())
-        counts = [inv["by_ds"][d] for d in dsids]
-        dsnames = [ds_name_map.get(d, "") for d in dsids]
-        attrs = {
-            "qualifiedName": qn,
-            # Include required attributes to allow create-if-missing
-            "name": str(tag.get("name") or tag_id),
-            "type": str(tag.get("type") or "SMART"),
-            "dxrTenant": str(tag.get("tenant") or os.getenv("DXR_TENANT", "default")),
-            "tagId": tag_id,
-            "hitDatasourceIds": dsids,
-            "hitDatasourceNames": dsnames,
-            "hitDocumentCounts": counts,
-            "statsUpdatedAt": now_iso,
-        }
-        entities.append(AtlasEntity(type_name=CUSTOM_TYPE_NAME, attributes=attrs))
-
-    if entities:
-        payload = AtlasEntitiesWithExtInfo(entities=entities)
-        try:
-            if ud_collection:
-                client.entity.batch_create_or_update(payload, collection_id=ud_collection)
-            else:
-                client.entity.batch_create_or_update(payload)
-        except Exception as e:
-            logger.warning("Label-side stats upsert failed: %s", e)
-
-    # Ensure datasource entities exist minimally for linkage
-    try:
-        tenant = os.getenv("DXR_TENANT", "default")
-        if ds_items:
-            # Ensure datasource entities exist; write into UD collection if no explicit collection is available
-            upsert_unstructured_datasources(client, tenant, ds_items, collection_id=ud_collection)
-    except Exception as e:
-        logger.debug("Ensuring datasource entities before linking failed: %s", e)
-
-    # Relationship management per label: create/update for hits; delete absent
-    tenant = os.getenv("DXR_TENANT", "default")
-    for tag in tags:
-        tag_id = str(tag.get("id"))
-        qn_tag = _to_qualified_name(tag)
-        tag_guid = resolve_guid_by_qn(CUSTOM_TYPE_NAME, qn_tag)
-        if not tag_guid:
-            continue
-        current = per_label.get(tag_id, {}).get("by_ds", {})
-        existing = _get_entity_relationship_map_for_label(tag_guid)
-        # Create or update relationships for current hits
-        dsid_to_guid = {}
-        for dsid, cnt in current.items():
-            ds_qn = _qn_datasource(tenant, dsid)
-            guid = resolve_guid_by_qn("unstructured_datasource", ds_qn)
-            dsid_to_guid[dsid] = guid
-            if not guid:
-                continue
-            attrs = {"documentCount": int(cnt), "statsUpdatedAt": now_iso}
-            _create_or_update_relationship_with_attrs(
-                "unstructured_datasource_hits_unstructured_dataset",
-                ds_qn, "unstructured_datasource",
-                qn_tag, CUSTOM_TYPE_NAME,
-                attrs,
-            )
-        # Delete relationships for datasources no longer in current hits
-        keep_guids = {g for g in dsid_to_guid.values() if g}
-        for dsg, relg in existing.items():
-            if dsg not in keep_guids:
-                # Verify relationship type before deletion
-                rr = _atlas_get(f"/datamap/api/atlas/v2/relationship/guid/{relg}")
-                if rr.status_code == 200 and (rr.json() or {}).get("typeName") == "unstructured_datasource_hits_unstructured_dataset":
-                    _delete_relationship_by_guid(relg)
+    
 
 def create_relationship(rel_type: str, end1_qn: str, end1_type: str, end2_qn: str, end2_type: str) -> None:
     payload = {
@@ -582,76 +395,7 @@ def _delete_relationship_by_guid(rel_guid: str) -> None:
         pass
 
 
-def build_entities_payload_for_tags(tags: List[Dict[str, Any]], ds_map: Dict[str, str]) -> AtlasEntitiesWithExtInfo:
-    entities: List[AtlasEntity] = []
-    dxr_tenant = os.environ.get("DXR_TENANT", "default")
-    for tag in tags:
-        qn = _to_qualified_name(tag)
-        tag_id = str(tag.get("id"))
-        # Some tenants may not return 'name' consistently; provide a sensible fallback
-        name = tag.get("name") or tag.get("labelName") or f"dxr_label_{tag_id}"
-        description = tag.get("description")
-        type_ = tag.get("type")
-        # Extract parameters arrays from first savedQueryDtoList's query.query_items
-        parametersParameters = []
-        parametersValues = []
-        parametersTypes = []
-        parametersMatchStrategies = []
-        parametersOperators = []
-        parametersGroupIds = []
-        parametersGroupOrders = []
-        # Collect datasourceIds from all savedQueryDtoList entries
-        datasource_ids_set = set()
-        saved_query_dtos = tag.get("savedQueryDtoList") or []
-        if saved_query_dtos:
-            # For parameters arrays, use first query's query_items if present
-            first_query_dto = saved_query_dtos[0]
-            query = first_query_dto.get("query", {})
-            query_items = query.get("query_items", []) if isinstance(query, dict) else []
-            for item in query_items:
-                parametersParameters.append(str(item.get("parameter", "")))
-                parametersValues.append(str(item.get("value", "")))
-                parametersTypes.append(str(item.get("type", "")))
-                parametersMatchStrategies.append(str(item.get("match_strategy", "")))
-                parametersOperators.append(str(item.get("operator", "")))
-                # group_id and group_order as ints if possible
-                try:
-                    gid = int(item.get("group_id")) if item.get("group_id") is not None else None
-                except Exception:
-                    gid = None
-                try:
-                    gorder = int(item.get("group_order")) if item.get("group_order") is not None else None
-                except Exception:
-                    gorder = None
-                parametersGroupIds.append(gid if gid is not None else 0)
-                parametersGroupOrders.append(gorder if gorder is not None else 0)
-            # Collect all datasourceIds from all savedQueryDtoList entries
-            for dto in saved_query_dtos:
-                ds_ids = dto.get("datasourceIds") or []
-                for dsid in ds_ids:
-                    datasource_ids_set.add(str(dsid))
-        datasourceIds = list(datasource_ids_set)
-        datasourceNames = [ds_map.get(dsid, "") for dsid in datasourceIds]
-        attrs = {
-            "qualifiedName": qn,
-            "name": name,
-            "description": description,
-            "type": type_,
-            "parametersParameters": parametersParameters,
-            "parametersValues": parametersValues,
-            "parametersTypes": parametersTypes,
-            "parametersMatchStrategies": parametersMatchStrategies,
-            "parametersOperators": parametersOperators,
-            "parametersGroupIds": parametersGroupIds,
-            "parametersGroupOrders": parametersGroupOrders,
-            "datasourceIds": datasourceIds,
-            "datasourceNames": datasourceNames,
-            "dxrTenant": tag.get("tenant", dxr_tenant),
-            "tagId": tag_id,
-        }
-        entity = AtlasEntity(type_name=CUSTOM_TYPE_NAME, attributes=attrs)
-        entities.append(entity)
-    return AtlasEntitiesWithExtInfo(entities=entities)
+    
 
 
 def upsert_unstructured_datasets(client: DataMapClient, tags: List[Dict[str, Any]], ds_map: Dict[str, str], *, collection_id: str | None = None) -> Dict[str, str]:
@@ -785,89 +529,176 @@ def delete_entities_by_qualified_names(qns: List[str], type_name: str) -> None:
     return pvatlas.delete_entities_by_qualified_names(qns, type_name)
 
 
+def _create_relationship_retry(rel_type: str, end1_qn: str, end1_type: str, end2_qn: str, end2_type: str, *, attempts: int = 6, delay_seconds: float = 1.2) -> bool:
+    """Create relationship with retries, resolving GUIDs explicitly to avoid eventual-consistency lookups by unique attributes."""
+    end1_guid = None
+    end2_guid = None
+    # First, resolve both GUIDs with retries
+    for i in range(max(1, attempts)):
+        if not end1_guid:
+            end1_guid = resolve_guid_by_qn(end1_type, end1_qn, attempts=1, delay_seconds=delay_seconds)
+        if not end2_guid:
+            end2_guid = resolve_guid_by_qn(end2_type, end2_qn, attempts=1, delay_seconds=delay_seconds)
+        if end1_guid and end2_guid:
+            break
+        time.sleep(delay_seconds)
+    if not (end1_guid and end2_guid):
+        logger.warning("Unable to resolve GUIDs for relationship %s: end1=%s (%s) end2=%s (%s)", rel_type, end1_qn, end1_type, end2_qn, end2_type)
+        return False
+
+    # Create relationship by GUID (more reliable than uniqueAttributes during indexing)
+    payload = {
+        "typeName": rel_type,
+        "end1": {"typeName": end1_type, "guid": end1_guid},
+        "end2": {"typeName": end2_type, "guid": end2_guid},
+    }
+    for i in range(max(1, attempts)):
+        r = _atlas_post("/datamap/api/atlas/v2/relationship", payload)
+        if r.status_code in (200, 201, 409):
+            if i > 0:
+                logger.debug("Relationship %s created/exists after %d retries: %s -> %s", rel_type, i, end1_qn, end2_qn)
+            return True
+        body = r.text[:500] if hasattr(r, 'text') else ''
+        logger.debug("Relationship create attempt %d failed (%s): %s", i + 1, r.status_code, body)
+        time.sleep(delay_seconds)
+    body = r.text[:500] if 'r' in locals() and hasattr(r, 'text') else ''
+    logger.warning("Failed to create relationship %s after %d attempts: %s -> %s (last status=%s body=%s)", rel_type, attempts, end1_qn, end2_qn, r.status_code if 'r' in locals() else 'n/a', body)
+    return False
+
+def _link_label_to_datasource(qn_tag: str, qn_ds: str) -> None:
+    # Create the standard 'has' relationship first — visible from both sides and widely supported
+    ok_has = _create_relationship_retry(
+        "unstructured_datasource_has_unstructured_dataset",
+        qn_ds,
+        "unstructured_datasource",
+        qn_tag,
+        "unstructured_dataset",
+        attempts=6,
+        delay_seconds=1.0,
+    )
+    # Optionally try the 'hits' relationship for richer label-side UI; ignore failures
+    _create_relationship_retry(
+        "unstructured_datasource_hits_unstructured_dataset",
+        qn_ds,
+        "unstructured_datasource",
+        qn_tag,
+        "unstructured_dataset",
+        attempts=3,
+        delay_seconds=1.0,
+    )
+
+
 # ------------ Main loop ------------
 
 def run_once() -> None:
     client = get_purview_client()
     ensure_types_and_relationships()
-    tags = get_dxr_tags()
-    name_map, ds_full = get_dxr_searchable_datasources()
+    classifications = get_dxr_classifications()
+    # Only keep labels; ignore annotators and other types
+    labels = [c for c in (classifications or []) if str(c.get("type")).upper() == "LABEL"]
     # Optional limiting for quicker test cycles
     try:
         tlim = int(os.getenv("DXR_TAGS_LIMIT", "0"))
         if tlim > 0:
-            tags = tags[:tlim]
+            labels = labels[:tlim]
     except Exception:
         pass
-    try:
-        dlim = int(os.getenv("DXR_DATASOURCES_LIMIT", "0"))
-        if dlim > 0:
-            ds_full = ds_full[:dlim]
-    except Exception:
-        pass
-    logger.info("Fetched %d tags from DXR", len(tags))
-    logger.info("Fetched %d datasources from DXR", len(ds_full))
+    logger.info("Fetched %d classifications; %d labels after filter", len(classifications), len(labels))
 
     tenant = os.getenv("DXR_TENANT", "default")
 
+    # Discover datasources with hits per classification via files API
+    all_ds_by_id: Dict[str, Dict[str, Any]] = {}
+    ds_name_map: Dict[str, str] = {}
+    label_to_dsids: Dict[str, Set[str]] = {}
+    for c in labels:
+        lid = str(c.get("id"))
+        name_map, ds_items = list_file_datasources_for_label(lid, c.get("name"))
+        logger.info("Label %s (%s): discovered %d datasources with hits", c.get("name", lid), lid, len(ds_items))
+        ds_name_map.update(name_map)
+        label_to_dsids[lid] = set()
+        for it in ds_items:
+            dsid = str(it.get("id"))
+            all_ds_by_id[dsid] = it
+            label_to_dsids[lid].add(dsid)
+
+    ds_full = list(all_ds_by_id.values())
+    logger.info("Resolved %d unique datasources across labels", len(ds_full))
+
+    parent_ref = PURVIEW_PARENT_COLLECTION_ID or PURVIEW_DOMAIN_ID or _slug(PURVIEW_DOMAIN_NAME)
+    # Ensure UD collection under parent_ref when possible
     if not DISABLE_GOVERNANCE:
-        # Ensure collections: either under explicit parent collection id, or under a parent derived from the domain name
-        child_collections = ensure_collections(PURVIEW_DOMAIN_NAME, ds_full)
-        # Ensure a single 'Unstructured Datasets' collection under the same parent
-        parent_ref = PURVIEW_PARENT_COLLECTION_ID or PURVIEW_DOMAIN_ID or _slug(PURVIEW_DOMAIN_NAME)
-        ud_collection = ensure_unstructured_datasets_collection(parent_ref)
+        try:
+            ud_collection = ensure_unstructured_datasets_collection(parent_ref)
+        except Exception as e:
+            logger.warning("Unable to ensure UD collection under parent %s: %s", parent_ref, e)
+            ud_collection = os.environ.get("PURVIEW_COLLECTION_ID")
     else:
-        child_collections = {}
         ud_collection = os.environ.get("PURVIEW_COLLECTION_ID")
 
-    # Upsert datasources
-    # If we have child collections, group datasources by their collection and write directly into those collections
-    if not DISABLE_GOVERNANCE and child_collections:
-        grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        for item in ds_full:
-            dsid = str(item.get("id"))
-            coll = child_collections.get(dsid)
-            if coll:
-                grouped[coll].append(item)
-        ds_guid_map = upsert_unstructured_datasources(client, tenant, ds_full, by_collection=grouped)
+    # Upsert datasource entities into the DXR instance parent if provided; otherwise fallback
+    if ds_full:
+        if PURVIEW_PARENT_COLLECTION_ID:
+            logger.info("Upserting %d datasources into parent collection %s", len(ds_full), parent_ref)
+            upsert_unstructured_datasources(client, tenant, ds_full, collection_id=parent_ref)
+        else:
+            if not DISABLE_GOVERNANCE and PURVIEW_DOMAIN_ID:
+                child_collections = ensure_collections(PURVIEW_DOMAIN_NAME, ds_full)
+                grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+                for item in ds_full:
+                    dsid = str(item.get("id"))
+                    coll = child_collections.get(dsid)
+                    if coll:
+                        grouped[coll].append(item)
+                logger.info("Ensuring %d child collections; will upsert %d datasources", len(child_collections), sum(len(v) for v in grouped.values()))
+                upsert_unstructured_datasources(client, tenant, ds_full, by_collection=grouped)
+            else:
+                logger.info("Upserting %d datasources into fallback collection %s", len(ds_full), (ud_collection or os.environ.get("PURVIEW_COLLECTION_ID") or "(none)"))
+                upsert_unstructured_datasources(client, tenant, ds_full, collection_id=ud_collection or os.environ.get("PURVIEW_COLLECTION_ID"))
     else:
-        ds_guid_map = upsert_unstructured_datasources(client, tenant, ds_full)
+        logger.info("No datasource hits discovered; skipping datasource upsert")
 
-    # Datasources are written directly into their target collections via collection_id
-
-    # Upsert tag assets
-    tag_guid_map = upsert_unstructured_datasets(client, tags, name_map, collection_id=ud_collection)
-
-    # Move tags to target collections if governance is enabled
-    # Tags are written into the UD collection; no replication under datasource collections
-
-    # Stats-driven enrichment
-    if ENABLE_LABEL_STATS:
-        # 1) Update datasource-side stats arrays
-        try:
-            update_unstructured_datasource_hit_stats(client, tenant, ds_full, child_collections)
-        except Exception as e:
-            logger.warning("Update datasource hit stats failed: %s", e)
-        # 2) Update label-side stats arrays and ensure relationships only where hits exist
-        try:
-            update_unstructured_dataset_hit_stats_and_relationships(client, tags, ds_full, name_map, ud_collection)
-        except Exception as e:
-            logger.warning("Update dataset hit stats/relationships failed: %s", e)
+    # Upsert labels into the Unstructured Datasets collection
+    if ud_collection:
+        upsert_unstructured_datasets(client, labels, ds_name_map, collection_id=ud_collection)
     else:
-        # Legacy relationship creation based on savedQueryDtoList
-        for t in tags:
-            qn_tag = _to_qualified_name(t)
-            ds_ids = set()
-            for dto in (t.get("savedQueryDtoList") or []):
-                for dsid in (dto.get("datasourceIds") or []):
-                    ds_ids.add(str(dsid))
-            for dsid in ds_ids:
-                qn_ds = _qn_datasource(tenant, dsid)
-                create_relationship("unstructured_datasource_has_unstructured_dataset", qn_ds, "unstructured_datasource", qn_tag, "unstructured_dataset")
+        logger.warning("No UD or explicit collection found; attempting label upsert without collection (may fail)")
+        upsert_unstructured_datasets(client, labels, ds_name_map)
+
+    # Enrich labels with hit arrays to make searching from labels easier
+    try:
+        if labels:
+            entities: List[AtlasEntity] = []
+            for c in labels:
+                lid = str(c.get("id"))
+                dsids = sorted(list(label_to_dsids.get(lid, set())))
+                dsnames = [ds_name_map.get(d, "") for d in dsids]
+                attrs = {
+                    "qualifiedName": _to_qualified_name(c),
+                    "hitDatasourceIds": dsids,
+                    "hitDatasourceNames": dsnames,
+                }
+                entities.append(AtlasEntity(type_name=CUSTOM_TYPE_NAME, attributes=attrs))
+            if entities:
+                payload = AtlasEntitiesWithExtInfo(entities=entities)
+                if ud_collection:
+                    client.entity.batch_create_or_update(payload, collection_id=ud_collection)
+                else:
+                    client.entity.batch_create_or_update(payload)
+    except Exception as e:
+        logger.debug("Label enrichment with hit arrays failed: %s", e)
+
+    # Create relationships (datasource -> label)
+    for c in labels:
+        qn_tag = _to_qualified_name(c)
+        lid = str(c.get("id"))
+        for dsid in label_to_dsids.get(lid, set()):
+            qn_ds = _qn_datasource(tenant, dsid)
+            _link_label_to_datasource(qn_tag, qn_ds)
 
     # Optional delete sync
     if SYNC_DELETE:
-        incoming = {_to_qualified_name(t) for t in tags}
+        incoming = {_to_qualified_name(t) for t in labels}
         existing = list_existing_tag_qns_for_tenant(tenant)
         stale = existing - incoming
         if stale:
@@ -897,9 +728,6 @@ if __name__ == "__main__":
     entrypoint()
 
 # ---- pvlib wiring aliases (override in-module implementations) ----
-# These assignments ensure external callers/tests use the refactored implementations.
-update_unstructured_datasource_hit_stats = pvstats.update_unstructured_datasource_hit_stats
-update_unstructured_dataset_hit_stats_and_relationships = pvstats.update_unstructured_dataset_hit_stats_and_relationships
 create_relationship = pvrels.create_relationship
 _get_entity_relationship_map_for_label = pvrels._get_entity_relationship_map_for_label
 _create_or_update_relationship_with_attrs = pvrels._create_or_update_relationship_with_attrs

@@ -61,8 +61,10 @@ def dxr_env() -> Dict[str, str]:
     return {
         "DXR_APP_URL": base,
         "DXR_PAT_TOKEN": os.getenv("DXR_PAT_TOKEN", ""),
-        "DXR_TAGS_PATH": os.getenv("DXR_TAGS_PATH", "/api/tags"),
-        "DXR_SEARCHABLE_DATASOURCES_PATH": os.getenv("DXR_SEARCHABLE_DATASOURCES_PATH", "/api/datasources/searchable"),
+        # New vbeta endpoints
+        "DXR_CLASSIFICATIONS_PATH": os.getenv("DXR_CLASSIFICATIONS_PATH", "/api/vbeta/classifications"),
+        "DXR_FILES_PATH": os.getenv("DXR_FILES_PATH", "/api/vbeta/files"),
+        "DXR_VERIFY_SSL": os.getenv("DXR_VERIFY_SSL", "1"),
         "DXR_TENANT": os.getenv("DXR_TENANT", "default"),
     }
 
@@ -73,4 +75,3 @@ def purview_env() -> Dict[str, str]:
         "AZURE_CLIENT_ID": os.getenv("AZURE_CLIENT_ID", ""),
         "AZURE_CLIENT_SECRET": os.getenv("AZURE_CLIENT_SECRET", ""),
     }
-

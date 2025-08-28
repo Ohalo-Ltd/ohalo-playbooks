@@ -56,14 +56,15 @@ def ensure_collections(domain_name: str, datasource_items: List[Dict[str, Any]])
     if parent_env:
         parent_name = parent_env
     elif domain_id:
-        parent_name = _slug(domain_name)
-        resp = pvgo.gov_collections_put(parent_name, {"friendlyName": domain_name})
-        if resp.status_code not in (200, 201):
-            logger.warning("Governance parent ensure failed (%s). Trying account-host fallback for parent '%s'...", resp.status_code, parent_name)
-            acct = pvgo.acct_collections_put(parent_name, {"friendlyName": domain_name})
-            if acct.status_code not in (200, 201):
-                logger.warning("Account-host parent ensure failed (%s). Set PURVIEW_PARENT_COLLECTION_ID to an existing collection refName.", acct.status_code)
-                raise requests.HTTPError(response=acct)  # type: ignore[name-defined]
+        # Use the provided domain referenceName directly
+        parent_name = domain_id
+        # Best-effort: ensure friendlyName (will no-op if it already exists)
+        try:
+            resp = pvgo.gov_collections_put(parent_name, {"friendlyName": domain_name})
+            if resp.status_code not in (200, 201):
+                pvgo.acct_collections_put(parent_name, {"friendlyName": domain_name})
+        except Exception:
+            pass
     else:
         parent_name = _slug(domain_name)
         resp = pvgo.gov_collections_put(parent_name, {"friendlyName": domain_name})
@@ -115,4 +116,3 @@ def ensure_unstructured_datasets_collection(parent_reference: str, name: str = "
             logger.error("Failed to ensure UD collection '%s': gov=%s acct=%s govBody=%s acctBody=%s", ref, r.status_code, last.status_code, b1, b2)
             last.raise_for_status()
     return ref
-

@@ -15,6 +15,13 @@ def ensure_types_and_relationships() -> None:
         "name": "unstructured_dataset",
         "superTypes": ["DataSet"],
         "attributeDefs": [
+            # Core label metadata from the new DXR classifications API
+            {"name": "labelId", "typeName": "string", "isOptional": True},
+            {"name": "labelType", "typeName": "string", "isOptional": True},
+            {"name": "labelSubtype", "typeName": "string", "isOptional": True},
+            {"name": "createdAt", "typeName": "string", "isOptional": True},
+            {"name": "updatedAt", "typeName": "string", "isOptional": True},
+            # Legacy/compat attributes (kept optional)
             {"name": "type", "typeName": "string", "isOptional": True},
             {"name": "parametersParameters", "typeName": "array<string>", "isOptional": True},
             {"name": "parametersValues", "typeName": "array<string>", "isOptional": True},
@@ -130,4 +137,3 @@ def ensure_types_and_relationships() -> None:
         if r.status_code not in (200, 201, 409):
             logger.error("Failed to ensure relationships: %s %s", r.status_code, r.text[:300])
             r.raise_for_status()
-
