@@ -164,6 +164,63 @@ def test_list_file_datasources_for_label_smoke():
 
 
 @pytest.mark.integration
+def test_label_entity_has_core_metadata_and_search_link(purview_client, test_artifacts):
+    env_or_skip()
+    sut.ensure_types_and_relationships()
+    # Verify the type has required attributes; if not, skip due to tenant permissions on type updates
+    td = sut._atlas_get("/datamap/api/atlas/v2/types/typedef/name/unstructured_dataset")
+    if td.status_code != 200:
+        pytest.skip(f"Cannot read unstructured_dataset typedef (status={td.status_code})")
+    try:
+        tjson = td.json() or {}
+        names = {a.get("name") for a in (tjson.get("attributeDefs") or [])}
+    except Exception:
+        names = set()
+    required_attrs = {"labelId", "labelType", "labelSubtype", "createdAt", "updatedAt", "dxrSearchLink"}
+    missing = required_attrs - names
+    if missing:
+        # Best-effort ensure then re-check
+        sut.ensure_types_and_relationships()
+        td2 = sut._atlas_get("/datamap/api/atlas/v2/types/typedef/name/unstructured_dataset")
+        try:
+            tjson2 = td2.json() or {}
+            names2 = {a.get("name") for a in (tjson2.get("attributeDefs") or [])}
+        except Exception:
+            names2 = set()
+        missing2 = required_attrs - names2
+        if missing2:
+            pytest.xfail(
+                "Tenant lacks type-update permissions to add required attributes: "
+                + ", ".join(sorted(missing2))
+            )
+    # Fetch classifications and pick first label
+    allc = sut.get_dxr_classifications()
+    labels = [c for c in (allc or []) if str(c.get("type")).upper() == "LABEL"]
+    if not labels:
+        pytest.skip("No classifications/labels returned from DXR")
+    label = labels[0]
+    # Upsert label into UD collection
+    ud_ref = _ensure_ud_collection_or_skip()
+    qn = sut._to_qualified_name(label)
+    test_artifacts["entities"].append((sut.CUSTOM_TYPE_NAME, qn))
+    sut.upsert_unstructured_datasets(purview_client, [label], {}, collection_id=ud_ref)
+    # Resolve and fetch attributes
+    resp = sut._atlas_get(f"/datamap/api/atlas/v2/entity/uniqueAttribute/type/{sut.CUSTOM_TYPE_NAME}", params={"attr:qualifiedName": qn})
+    assert resp.status_code == 200, f"UniqueAttribute lookup failed: {resp.status_code} {resp.text[:200]}"
+    data = resp.json() or {}
+    attrs = data.get("attributes", {})
+    # Core label metadata
+    assert attrs.get("labelId") == str(label.get("id"))
+    assert attrs.get("labelType") == (label.get("type") or "LABEL")
+    assert attrs.get("labelSubtype") == (label.get("subtype") or "")
+    assert isinstance(attrs.get("createdAt"), str) and attrs.get("createdAt")
+    assert isinstance(attrs.get("updatedAt"), str) and attrs.get("updatedAt")
+    # DXR search link present and clickable
+    link = attrs.get("dxrSearchLink")
+    assert isinstance(link, str) and link.startswith(("http://", "https://")), f"dxrSearchLink not set correctly: {link}"
+
+
+@pytest.mark.integration
 def test_end_to_end_upsert_labels_and_relationships(purview_client, test_artifacts):
     env_or_skip()
     sut.ensure_types_and_relationships()

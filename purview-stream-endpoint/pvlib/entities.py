@@ -8,6 +8,7 @@ from azure.purview.datamap.models import AtlasEntity, AtlasEntitiesWithExtInfo
 
 from . import atlas as pvatlas
 from .config import logger
+from .config import dxr_env
 from .typedefs import CUSTOM_TYPE_NAME
 
 
@@ -30,6 +31,8 @@ def upsert_unstructured_datasets(
     def build_entities_payload_for_tags(tags: List[Dict[str, Any]], ds_map_in: Dict[str, str]) -> AtlasEntitiesWithExtInfo:
         entities: List[AtlasEntity] = []
         dxr_tenant = os.environ.get("DXR_TENANT", "default")
+        env = dxr_env()
+        base_url = env.get("DXR_APP_URL", "").rstrip("/")
         for tag in tags:
             qn = _to_qualified_name(tag)
             tag_id = str(tag.get("id"))
@@ -39,6 +42,8 @@ def upsert_unstructured_datasets(
             label_subtype = tag.get("subtype") or ""
             created_at = tag.get("createdAt")
             updated_at = tag.get("updatedAt")
+            search_link_rel = tag.get("searchLink") or ""
+            full_search_url = f"{base_url}{search_link_rel}" if search_link_rel else None
             attrs = {
                 "qualifiedName": qn,
                 "name": name,
@@ -49,6 +54,8 @@ def upsert_unstructured_datasets(
                 "labelSubtype": label_subtype,
                 "createdAt": created_at,
                 "updatedAt": updated_at,
+                "test": "hello",
+                "dxrSearchLink": full_search_url,
                 # Keep tenant & legacy tagId for continuity
                 "dxrTenant": tag.get("tenant", dxr_tenant),
                 "tagId": tag_id,

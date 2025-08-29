@@ -566,7 +566,7 @@ def _create_relationship_retry(rel_type: str, end1_qn: str, end1_type: str, end2
     return False
 
 def _link_label_to_datasource(qn_tag: str, qn_ds: str) -> None:
-    # Create the standard 'has' relationship first — visible from both sides and widely supported
+    # Create the standard 'has' relationship — visible from both sides and widely supported
     ok_has = _create_relationship_retry(
         "unstructured_datasource_has_unstructured_dataset",
         qn_ds,
@@ -574,16 +574,6 @@ def _link_label_to_datasource(qn_tag: str, qn_ds: str) -> None:
         qn_tag,
         "unstructured_dataset",
         attempts=6,
-        delay_seconds=1.0,
-    )
-    # Optionally try the 'hits' relationship for richer label-side UI; ignore failures
-    _create_relationship_retry(
-        "unstructured_datasource_hits_unstructured_dataset",
-        qn_ds,
-        "unstructured_datasource",
-        qn_tag,
-        "unstructured_dataset",
-        attempts=3,
         delay_seconds=1.0,
     )
 
@@ -665,36 +655,70 @@ def run_once() -> None:
         logger.warning("No UD or explicit collection found; attempting label upsert without collection (may fail)")
         upsert_unstructured_datasets(client, labels, ds_name_map)
 
-    # Enrich labels with hit arrays to make searching from labels easier
-    try:
-        if labels:
-            entities: List[AtlasEntity] = []
-            for c in labels:
-                lid = str(c.get("id"))
-                dsids = sorted(list(label_to_dsids.get(lid, set())))
-                dsnames = [ds_name_map.get(d, "") for d in dsids]
-                attrs = {
-                    "qualifiedName": _to_qualified_name(c),
-                    "hitDatasourceIds": dsids,
-                    "hitDatasourceNames": dsnames,
-                }
-                entities.append(AtlasEntity(type_name=CUSTOM_TYPE_NAME, attributes=attrs))
-            if entities:
-                payload = AtlasEntitiesWithExtInfo(entities=entities)
-                if ud_collection:
-                    client.entity.batch_create_or_update(payload, collection_id=ud_collection)
-                else:
-                    client.entity.batch_create_or_update(payload)
-    except Exception as e:
-        logger.debug("Label enrichment with hit arrays failed: %s", e)
+    # (Legacy removed) We no longer enrich labels with hitDatasource* arrays.
 
     # Create relationships (datasource -> label)
+    # Choose a collection context for lineage processes
+    lineage_collection = ud_collection or parent_ref or os.environ.get("PURVIEW_COLLECTION_ID")
     for c in labels:
         qn_tag = _to_qualified_name(c)
         lid = str(c.get("id"))
         for dsid in label_to_dsids.get(lid, set()):
             qn_ds = _qn_datasource(tenant, dsid)
             _link_label_to_datasource(qn_tag, qn_ds)
+            try:
+                # Prefer SDK with collection context to avoid 403 on Process create
+                ds_name = ds_name_map.get(dsid, dsid)
+                label_name = c.get("name") or lid
+                label_desc = c.get("description") or ""
+                proc_name = f"DXR processing: {ds_name} -> {label_name}"
+                # Build description with DXR context and label metadata
+                proc_desc = label_desc or f"DXR processing that derived label '{label_name}' from datasource '{ds_name}' (id {dsid})."
+                # Append optional metadata if available
+                meta_lines: List[str] = []
+                ltype = c.get("type") or "LABEL"
+                lsub = c.get("subtype") or ""
+                if ltype:
+                    meta_lines.append(f"Label type: {ltype}")
+                if lsub:
+                    meta_lines.append(f"Label subtype: {lsub}")
+                created_at = c.get("createdAt")
+                updated_at = c.get("updatedAt")
+                if created_at:
+                    meta_lines.append(f"Created at: {created_at}")
+                if updated_at:
+                    meta_lines.append(f"Updated at: {updated_at}")
+                search_link_rel = c.get("searchLink") or ""
+                if search_link_rel:
+                    full_search_url = f"{DXR_APP_URL.rstrip('/')}{search_link_rel}"
+                    meta_lines.append(f"DXR Search: {full_search_url}")
+                if meta_lines:
+                    proc_desc = f"{proc_desc}\n" + "\n".join(meta_lines)
+                # Connector type from datasource item, if available
+                _ds_item = all_ds_by_id.get(dsid, {})
+                connector_type_name = _ds_item.get("connectorTypeName") or _ds_item.get("connectorType") or None
+                connector_id = _ds_item.get("connectorId")
+                connector_name = _ds_item.get("connectorName")
+                pvrels.create_lineage_with_client(
+                    client,
+                    qn_ds,
+                    qn_tag,
+                    collection_id=lineage_collection,
+                    process_name=proc_name,
+                    process_description=proc_desc,
+                    process_search_link=(full_search_url if search_link_rel else None),
+                    label_type=(c.get("type") or "LABEL"),
+                    label_subtype=(c.get("subtype") or None),
+                    created_at=c.get("createdAt"),
+                    updated_at=c.get("updatedAt"),
+                    datasource_id=dsid,
+                    datasource_name=ds_name,
+                    connector_type_name=connector_type_name,
+                    connector_id=connector_id,
+                    connector_name=connector_name,
+                )
+            except Exception as e:
+                logger.debug("Lineage creation failed for %s -> %s: %s", qn_ds, qn_tag, e)
 
     # Optional delete sync
     if SYNC_DELETE:

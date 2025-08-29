@@ -72,8 +72,17 @@ def list_file_datasources_for_label(label_id: str, label_name: str | None = None
                 if not dsid or dsid in seen:
                     continue
                 name = ds.get("name") or dsid
-                ctype = ((ds.get("connector") or {}).get("type")) or ""
-                seen[dsid] = {"id": dsid, "name": name, "connectorTypeName": ctype}
+                conn = ds.get("connector") or {}
+                ctype = conn.get("type") or ""
+                cname = conn.get("name") or None
+                cid = conn.get("id") or conn.get("connectorId") or None
+                seen[dsid] = {
+                    "id": dsid,
+                    "name": name,
+                    "connectorTypeName": ctype,
+                    "connectorName": cname,
+                    "connectorId": cid,
+                }
                 count += 1
         except Exception:
             pass

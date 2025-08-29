@@ -1,8 +1,10 @@
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 import time
 
 from . import atlas as pvatlas
 from .config import logger
+from azure.purview.datamap import DataMapClient
+from azure.purview.datamap.models import AtlasEntity, AtlasEntitiesWithExtInfo
 
 
 def create_relationship(rel_type: str, end1_qn: str, end1_type: str, end2_qn: str, end2_type: str) -> None:
@@ -116,3 +118,239 @@ def _delete_relationship_by_guid(rel_guid: str) -> None:
         logger.debug("Delete relationship %s -> %s %s", rel_guid, r.status_code, r.text[:200])
 
     
+def _parse_tenant_and_ids_from_qn(ds_qn: str, tag_qn: str) -> Dict[str, str]:
+    # Expected formats: dxrds://<tenant>/<dsid>, dxrtag://<tenant>/<labelId>
+    out: Dict[str, str] = {"tenant": "default", "dsid": "", "labelId": ""}
+    try:
+        t1 = ds_qn.split("//", 1)[1]
+        parts1 = t1.split("/")
+        out["tenant"] = parts1[0]
+        out["dsid"] = parts1[1] if len(parts1) > 1 else ""
+    except Exception:
+        pass
+    try:
+        t2 = tag_qn.split("//", 1)[1]
+        parts2 = t2.split("/")
+        if not out.get("tenant"):
+            out["tenant"] = parts2[0]
+        out["labelId"] = parts2[1] if len(parts2) > 1 else ""
+    except Exception:
+        pass
+    return out
+
+
+def create_lineage_between_datasource_and_dataset(ds_qn: str, tag_qn: str) -> bool:
+    """Create or update a Process lineage from datasource -> tag dataset.
+
+    Returns True on success or already-exists, False otherwise.
+    """
+    ds_guid = pvatlas.resolve_guid_by_qn("unstructured_datasource", ds_qn)
+    tag_guid = pvatlas.resolve_guid_by_qn("unstructured_dataset", tag_qn)
+    if not (ds_guid and tag_guid):
+        logger.debug("Lineage: unable to resolve GUIDs for %s -> %s", ds_qn, tag_qn)
+        return False
+
+    parts = _parse_tenant_and_ids_from_qn(ds_qn, tag_qn)
+    tenant = parts.get("tenant", "default")
+    dsid = parts.get("dsid", "")
+    label_id = parts.get("labelId", "")
+    proc_qn = f"dxrproc://{tenant}/{dsid}->{label_id}"
+    name = f"DXR lineage: {dsid} -> {label_id}"
+
+    entity = {
+        "typeName": "Process",
+        "attributes": {
+            "qualifiedName": proc_qn,
+            "name": name,
+        },
+        "relationshipAttributes": {
+            "inputs": [{"guid": ds_guid}],
+            "outputs": [{"guid": tag_guid}],
+        },
+    }
+    payload = {"entities": [entity]}
+    r = pvatlas._atlas_post("/datamap/api/atlas/v2/entity/bulk", payload)
+    if r.status_code in (200, 201):
+        return True
+    if r.status_code == 409:
+        # Update existing process to ensure edges
+        guid = pvatlas.resolve_guid_by_qn("Process", proc_qn) or ""
+        if not guid:
+            return True  # treat as exists
+        try:
+            # Merge relationship attributes
+            er = pvatlas._atlas_get(f"/datamap/api/atlas/v2/entity/guid/{guid}")
+            cur = er.json() if er.status_code == 200 else {}
+        except Exception:
+            cur = {}
+        ra = cur.get("relationshipAttributes") or {}
+        inputs = ra.get("inputs") or []
+        outputs = ra.get("outputs") or []
+        if not any((i.get("guid") == ds_guid) for i in inputs):
+            inputs.append({"guid": ds_guid})
+        if not any((o.get("guid") == tag_guid) for o in outputs):
+            outputs.append({"guid": tag_guid})
+        update_payload = {
+            "guid": guid,
+            "typeName": "Process",
+            "attributes": {"qualifiedName": proc_qn, "name": name},
+            "relationshipAttributes": {"inputs": inputs, "outputs": outputs},
+        }
+        pr = pvatlas._atlas_put(f"/datamap/api/atlas/v2/entity/guid/{guid}", update_payload)
+        return pr.status_code in (200, 201)
+    logger.debug("Lineage process upsert failed (%s): %s", r.status_code, r.text[:300])
+    return False
+
+
+def create_lineage_with_client(
+    client: DataMapClient,
+    ds_qn: str,
+    tag_qn: str,
+    *,
+    collection_id: Optional[str] = None,
+    process_name: Optional[str] = None,
+    process_description: Optional[str] = None,
+    process_search_link: Optional[str] = None,
+    label_type: Optional[str] = None,
+    label_subtype: Optional[str] = None,
+    created_at: Optional[str] = None,
+    updated_at: Optional[str] = None,
+    datasource_id: Optional[str] = None,
+    datasource_name: Optional[str] = None,
+    connector_type_name: Optional[str] = None,
+    connector_id: Optional[str] = None,
+    connector_name: Optional[str] = None,
+) -> bool:
+    """Create lineage using SDK with collection context to avoid 403.
+
+    This mirrors create_lineage_between_datasource_and_dataset but uses the
+    DataMapClient so we can pass collection_id (curator scope).
+    """
+    ds_guid = pvatlas.resolve_guid_by_qn("unstructured_datasource", ds_qn)
+    tag_guid = pvatlas.resolve_guid_by_qn("unstructured_dataset", tag_qn)
+    if not (ds_guid and tag_guid):
+        logger.debug("Lineage(SDK): unresolved GUIDs for %s -> %s", ds_qn, tag_qn)
+        return False
+
+    parts = _parse_tenant_and_ids_from_qn(ds_qn, tag_qn)
+    tenant = parts.get("tenant", "default")
+    dsid = parts.get("dsid", "")
+    label_id = parts.get("labelId", "")
+    proc_qn = f"dxrproc://{tenant}/{dsid}->{label_id}"
+    name = process_name or f"DXR lineage: {dsid} -> {label_id}"
+
+    attrs: Dict[str, Any] = {"qualifiedName": proc_qn, "name": name}
+    if process_description:
+        attrs["description"] = process_description
+    if process_search_link:
+        attrs["dxrSearchLink"] = process_search_link
+    if label_type:
+        attrs["labelType"] = label_type
+    if label_subtype:
+        attrs["labelSubtype"] = label_subtype
+    if created_at:
+        attrs["createdAt"] = created_at
+    if updated_at:
+        attrs["updatedAt"] = updated_at
+    if datasource_id:
+        attrs["datasourceId"] = datasource_id
+    if datasource_name:
+        attrs["datasourceName"] = datasource_name
+    if connector_type_name:
+        attrs["connectorTypeName"] = connector_type_name
+    if connector_id:
+        attrs["connectorId"] = connector_id
+    if connector_name:
+        attrs["connectorName"] = connector_name
+
+    # Prefer custom subtype to carry clickable link attribute
+    entity = AtlasEntity(
+        type_name="dxr_process",
+        attributes=attrs,
+        relationship_attributes={"inputs": [{"guid": ds_guid}], "outputs": [{"guid": tag_guid}]},
+    )
+    payload = AtlasEntitiesWithExtInfo(entities=[entity])
+    try:
+        if collection_id:
+            client.entity.batch_create_or_update(payload, collection_id=collection_id)
+        else:
+            client.entity.batch_create_or_update(payload)
+        return True
+    except Exception as e:
+        try:
+            from azure.core.exceptions import HttpResponseError
+            if isinstance(e, HttpResponseError) and getattr(e, "response", None) is not None:
+                status = getattr(e.response, "status_code", None)
+                body = getattr(e.response, "text", "")
+                logger.debug("Lineage(SDK) upsert failed: status=%s body=%s", status, str(body)[:300])
+        except Exception:
+            pass
+        # Fallback 1: try base Process without custom attribute
+        try:
+            attrs_fallback = {k: v for k, v in attrs.items() if k != "dxrSearchLink"}
+            entity2 = AtlasEntity(
+                type_name="Process",
+                attributes=attrs_fallback,
+                relationship_attributes={"inputs": [{"guid": ds_guid}], "outputs": [{"guid": tag_guid}]},
+            )
+            payload2 = AtlasEntitiesWithExtInfo(entities=[entity2])
+            if collection_id:
+                client.entity.batch_create_or_update(payload2, collection_id=collection_id)
+            else:
+                client.entity.batch_create_or_update(payload2)
+            return True
+        except Exception:
+            pass
+        # Fallback 2: if the process already exists, update its attributes and edges
+        parts = _parse_tenant_and_ids_from_qn(ds_qn, tag_qn)
+        tenant = parts.get("tenant", "default")
+        dsid = parts.get("dsid", "")
+        label_id = parts.get("labelId", "")
+        proc_qn = f"dxrproc://{tenant}/{dsid}->{label_id}"
+        # Try resolve as dxr_process first, then Process
+        guid = pvatlas.resolve_guid_by_qn("dxr_process", proc_qn) or pvatlas.resolve_guid_by_qn("Process", proc_qn) or ""
+        if not guid:
+            return create_lineage_between_datasource_and_dataset(ds_qn, tag_qn)
+        er = pvatlas._atlas_get(f"/datamap/api/atlas/v2/entity/guid/{guid}")
+        cur = er.json() if er.status_code == 200 else {}
+        existing_type = cur.get("typeName") or cur.get("type") or "Process"
+        ra = cur.get("relationshipAttributes") or {}
+        inputs = ra.get("inputs") or []
+        outputs = ra.get("outputs") or []
+        if not any((i.get("guid") == ds_guid) for i in inputs):
+            inputs.append({"guid": ds_guid})
+        if not any((o.get("guid") == tag_guid) for o in outputs):
+            outputs.append({"guid": tag_guid})
+        upd_attrs: Dict[str, Any] = {"qualifiedName": proc_qn, "name": name}
+        if process_description:
+            upd_attrs["description"] = process_description
+        # Only include custom fields when existing type supports them
+        if existing_type == "dxr_process":
+            if process_search_link:
+                upd_attrs["dxrSearchLink"] = process_search_link
+            if label_type:
+                upd_attrs["labelType"] = label_type
+            if label_subtype:
+                upd_attrs["labelSubtype"] = label_subtype
+            if created_at:
+                upd_attrs["createdAt"] = created_at
+            if updated_at:
+                upd_attrs["updatedAt"] = updated_at
+            if datasource_id:
+                upd_attrs["datasourceId"] = datasource_id
+            if datasource_name:
+                upd_attrs["datasourceName"] = datasource_name
+            if connector_type_name:
+                upd_attrs["connectorTypeName"] = connector_type_name
+            if connector_id:
+                upd_attrs["connectorId"] = connector_id
+            if connector_name:
+                upd_attrs["connectorName"] = connector_name
+        update_payload = {
+            "guid": guid,
+            "typeName": existing_type,
+            "attributes": upd_attrs,
+            "relationshipAttributes": {"inputs": inputs, "outputs": outputs},
+        }
+        pr = pvatlas._atlas_put(f"/datamap/api/atlas/v2/entity/guid/{guid}", update_payload)
+        return pr.status_code in (200, 201)
