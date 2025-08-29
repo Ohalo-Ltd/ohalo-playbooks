@@ -167,6 +167,42 @@ def delete_entities_by_qualified_names(qns: List[str], type_name: str) -> None:
         logger.warning("Bulk delete returned %s: %s", r.status_code, r.text[:300])
 
 
+def search_entity_qns_by_attribute(
+    type_name: str,
+    attribute_name: str,
+    attribute_value: str,
+    *,
+    limit: int = 1000,
+) -> Set[str]:
+    """Return a set of qualifiedNames for the given type where attribute==value.
+
+    Uses Atlas advanced search. Best-effort; returns an empty set on failures.
+    """
+    payload: Dict[str, Any] = {
+        "typeName": type_name,
+        "excludeDeletedEntities": True,
+        "where": {
+            "attributeName": attribute_name,
+            "operator": "eq",
+            "attributeValue": attribute_value,
+        },
+        "attributes": ["qualifiedName"],
+        "limit": int(limit or 1000),
+    }
+    out: Set[str] = set()
+    resp = _atlas_post("/datamap/api/atlas/v2/search/advanced", payload)
+    if resp.status_code == 200:
+        try:
+            data = resp.json() or {}
+            for ent in data.get("entities", []) or []:
+                qn = (ent.get("attributes") or {}).get("qualifiedName")
+                if isinstance(qn, str) and qn:
+                    out.add(qn)
+        except Exception:
+            return out
+    return out
+
+
 def get_purview_client() -> DataMapClient:
     env = purview_env()
     cred = ClientSecretCredential(

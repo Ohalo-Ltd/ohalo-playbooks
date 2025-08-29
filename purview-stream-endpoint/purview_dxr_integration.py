@@ -326,28 +326,8 @@ def resolve_guid_by_qn(type_name: str, qualified_name: str, attempts: int = 8, d
 ## Removed local collection helpers; use pvlib.atlas versions if needed
 
 def list_existing_tag_qns_for_tenant(tenant: str) -> Set[str]:
-    # Advanced search by attribute
-    payload = {
-        "typeName": CUSTOM_TYPE_NAME,
-        "excludeDeletedEntities": True,
-        "where": {"attributeName": "dxrTenant", "operator": "eq", "attributeValue": tenant},
-        "attributes": ["qualifiedName"],
-        "limit": 1000,
-    }
-    qns: Set[str] = set()
-    resp = _atlas_post("/datamap/api/atlas/v2/search/advanced", payload)
-    if resp.status_code == 200:
-        try:
-            data = resp.json()
-            for ent in data.get("entities", []) or []:
-                qn = ent.get("attributes", {}).get("qualifiedName")
-                if qn:
-                    qns.add(qn)
-        except Exception:
-            pass
-        return qns
-    # Fallback: empty
-    return qns
+    # Delegate to pvlib.atlas helper
+    return set(pvatlas.search_entity_qns_by_attribute(CUSTOM_TYPE_NAME, "dxrTenant", tenant, limit=1000))
 
 ## Removed local delete_entities_by_qualified_names; using pvlib.atlas alias at bottom
 
