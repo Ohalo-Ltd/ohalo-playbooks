@@ -118,6 +118,69 @@ def _delete_relationship_by_guid(rel_guid: str) -> None:
         logger.debug("Delete relationship %s -> %s %s", rel_guid, r.status_code, r.text[:200])
 
     
+def create_relationship_retry(
+    rel_type: str,
+    end1_qn: str,
+    end1_type: str,
+    end2_qn: str,
+    end2_type: str,
+    *,
+    attempts: int = 6,
+    delay_seconds: float = 1.2,
+) -> bool:
+    """Create relationship by resolving GUIDs first and posting by GUID with retries.
+
+    More reliable than uniqueAttributes during indexing delays; returns True on success/exists.
+    """
+    end1_guid = None
+    end2_guid = None
+    for _ in range(max(1, attempts)):
+        if not end1_guid:
+            end1_guid = pvatlas.resolve_guid_by_qn(end1_type, end1_qn, attempts=1, delay_seconds=delay_seconds)
+        if not end2_guid:
+            end2_guid = pvatlas.resolve_guid_by_qn(end2_type, end2_qn, attempts=1, delay_seconds=delay_seconds)
+        if end1_guid and end2_guid:
+            break
+        time.sleep(delay_seconds)
+    if not (end1_guid and end2_guid):
+        logger.debug(
+            "create_relationship_retry: unable to resolve GUIDs: %s(%s), %s(%s)",
+            end1_qn,
+            end1_type,
+            end2_qn,
+            end2_type,
+        )
+        return False
+
+    payload = {
+        "typeName": rel_type,
+        "end1": {"typeName": end1_type, "guid": end1_guid},
+        "end2": {"typeName": end2_type, "guid": end2_guid},
+    }
+    r = None
+    for i in range(max(1, attempts)):
+        r = pvatlas._atlas_post("/datamap/api/atlas/v2/relationship", payload)
+        if r.status_code in (200, 201, 409):
+            if i > 0:
+                logger.debug(
+                    "Relationship %s created/exists after %d retries: %s -> %s",
+                    rel_type,
+                    i,
+                    end1_qn,
+                    end2_qn,
+                )
+            return True
+        time.sleep(delay_seconds)
+    if r is not None:
+        logger.debug(
+            "Relationship %s create failed after %d attempts: status=%s body=%s",
+            rel_type,
+            attempts,
+            r.status_code,
+            r.text[:300],
+        )
+    return False
+
 def _parse_tenant_and_ids_from_qn(ds_qn: str, tag_qn: str) -> Dict[str, str]:
     # Expected formats: dxrds://<tenant>/<dsid>, dxrtag://<tenant>/<labelId>
     out: Dict[str, str] = {"tenant": "default", "dsid": "", "labelId": ""}

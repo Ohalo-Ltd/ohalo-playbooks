@@ -301,98 +301,7 @@ def ensure_unstructured_datasets_collection(parent_reference: str) -> str:
 
     
 
-def create_relationship(rel_type: str, end1_qn: str, end1_type: str, end2_qn: str, end2_type: str) -> None:
-    payload = {
-        "typeName": rel_type,
-        "end1": {"typeName": end1_type, "uniqueAttributes": {"qualifiedName": end1_qn}},
-        "end2": {"typeName": end2_type, "uniqueAttributes": {"qualifiedName": end2_qn}},
-    }
-    resp = _atlas_post("/datamap/api/atlas/v2/relationship", payload)
-    if resp.status_code in (200, 201):
-        return
-    if resp.status_code == 409:
-        # already exists
-        return
-    logger.warning("Relationship create failed (%s): %s", resp.status_code, resp.text[:300])
-
-def _atlas_put(path: str, payload: Dict[str, Any]) -> requests.Response:
-    url = f"{PURVIEW_ENDPOINT}{path}"
-    return requests.put(url, headers=_atlas_headers(), json=payload, timeout=HTTP_TIMEOUT_SECONDS)
-
-def _get_entity_relationship_map_for_label(label_guid: str) -> Dict[str, str]:
-    """Return mapping of related datasource GUID -> relationship GUID for a given label entity.
-    Best-effort parsing of Atlas entity payload."""
-    rels: Dict[str, str] = {}
-    try:
-        r = _atlas_get(f"/datamap/api/atlas/v2/entity/guid/{label_guid}")
-        if r.status_code != 200:
-            return rels
-        data = r.json() or {}
-        ra = data.get("relationshipAttributes") or {}
-        # end name could be 'datasource', 'datasources', or 'hitDatasources' depending on typedefs
-        ds_rel = ra.get("hitDatasources") or ra.get("datasources") or ra.get("datasource")
-        items = []
-        if isinstance(ds_rel, list):
-            items = ds_rel
-        elif isinstance(ds_rel, dict):
-            items = [ds_rel]
-        for it in items:
-            ds_guid = it.get("guid") or (it.get("entity") or {}).get("guid")
-            rel_guid = it.get("relationshipGuid") or it.get("relationshipId") or (it.get("relationship") or {}).get("guid")
-            if ds_guid and rel_guid:
-                rels[str(ds_guid)] = str(rel_guid)
-    except Exception:
-        return rels
-    return rels
-
-def _create_or_update_relationship_with_attrs(rel_type: str, end1_qn: str, end1_type: str, end2_qn: str, end2_type: str, attrs: Dict[str, Any]) -> None:
-    payload = {
-        "typeName": rel_type,
-        "attributes": attrs,
-        "end1": {"typeName": end1_type, "uniqueAttributes": {"qualifiedName": end1_qn}},
-        "end2": {"typeName": end2_type, "uniqueAttributes": {"qualifiedName": end2_qn}},
-    }
-    resp = _atlas_post("/datamap/api/atlas/v2/relationship", payload)
-    if resp.status_code in (200, 201):
-        return
-    if resp.status_code == 409:
-        # Find existing relationship and update attributes
-        label_guid = resolve_guid_by_qn(end2_type, end2_qn) if end2_type == "unstructured_dataset" else resolve_guid_by_qn(end1_type, end1_qn)
-        if not label_guid:
-            return
-        rels = _get_entity_relationship_map_for_label(label_guid)
-        # Resolve datasource guid to pick correct relationship
-        ds_qn = end1_qn if end1_type == "unstructured_datasource" else end2_qn
-        ds_guid = resolve_guid_by_qn("unstructured_datasource", ds_qn)
-        if not ds_guid:
-            return
-        rel_guid = rels.get(ds_guid)
-        if not rel_guid:
-            return
-        # GET existing, ensure type matches, then update attributes
-        r = _atlas_get(f"/datamap/api/atlas/v2/relationship/guid/{rel_guid}")
-        if r.status_code != 200:
-            return
-        try:
-            rel_obj = r.json() or {}
-        except Exception:
-            rel_obj = {}
-        if rel_obj.get("typeName") and rel_obj.get("typeName") != rel_type:
-            return
-        rel_obj["attributes"] = rel_obj.get("attributes", {}) | attrs
-        pr = _atlas_put(f"/datamap/api/atlas/v2/relationship/guid/{rel_guid}", rel_obj)
-        if pr.status_code not in (200, 201):
-            logger.debug("Relationship attribute update failed: %s %s", pr.status_code, pr.text[:200])
-        return
-    logger.debug("Relationship create failed (%s): %s", resp.status_code, resp.text[:200])
-
-def _delete_relationship_by_guid(rel_guid: str) -> None:
-    try:
-        r = _atlas_delete(f"/datamap/api/atlas/v2/relationship/guid/{rel_guid}")
-        if r.status_code not in (200, 204):
-            logger.debug("Delete relationship %s -> %s %s", rel_guid, r.status_code, r.text[:200])
-    except Exception:
-        pass
+## Removed local relationship helpers; using pvlib.relationships
 
 
     
@@ -414,92 +323,7 @@ def upsert_unstructured_datasources(
 def resolve_guid_by_qn(type_name: str, qualified_name: str, attempts: int = 8, delay_seconds: float = 1.5) -> str | None:
     return pvatlas.resolve_guid_by_qn(type_name, qualified_name, attempts, delay_seconds)
 
-# ---------- Entity collection helpers ----------
-ENTITY_API_VERSION = "2023-09-01"
-
-def _entity_get(path: str, params: Dict[str, Any] | None = None) -> requests.Response:
-    url = f"{PURVIEW_ENDPOINT}{path}"
-    headers = _atlas_headers()
-    return requests.get(url, headers=headers, params=params, timeout=HTTP_TIMEOUT_SECONDS)
-
-
-def get_entity_collection_info(guid: str) -> Dict[str, Any] | None:
-    """Fetch entity (data plane) metadata that may include collection membership.
-    Tries the entity endpoint first (preferred for collection info), then falls back to Atlas if needed.
-    Returns a dict with best-effort fields: {"collectionName": str|None, "collectionId": str|None, "raw": <service payload>} or None on hard failure.
-    """
-    try:
-        # Data plane entity endpoint tends to include collection info
-        r = _entity_get(f"/datamap/api/entity/guid/{guid}", params={"api-version": ENTITY_API_VERSION})
-        if r.status_code == 200:
-            try:
-                data = r.json()
-            except Exception:
-                data = {}
-            # normalize
-            info = {
-                "collectionName": data.get("collectionName") or data.get("collection") or data.get("collectionId"),
-                "collectionId": data.get("collectionId"),
-                "raw": data,
-            }
-            return info
-    except Exception:
-        pass
-
-    # Fallback: Atlas entity (may not include collection, but return raw for debugging)
-    r2 = _atlas_get(f"/datamap/api/atlas/v2/entity/guid/{guid}")
-    if r2.status_code == 200:
-        try:
-            data2 = r2.json()
-        except Exception:
-            data2 = {}
-        return {"collectionName": None, "collectionId": None, "raw": data2}
-    return None
-
-
-def assert_entity_in_collection(guid: str, expected_collection_name: str) -> bool:
-    """Return True if the entity appears to belong to the expected collection.
-    Accepts either a collection referenceName (e.g., sdaqff) or a friendlyName (e.g., Unstructured Datasets).
-    We check several possible shapes in the entity payload and also normalize expected by resolving the
-    friendlyName from the account-host collections API when possible.
-    """
-    # Build accepted names for comparison: provided value and its friendlyName (if resolvable)
-    expected = set([expected_collection_name])
-    try:
-        r = _acct_collections_get(expected_collection_name)
-        if r.status_code == 200:
-            try:
-                data = r.json() or {}
-                fn = data.get("friendlyName")
-                if isinstance(fn, str) and fn:
-                    expected.add(fn)
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    info = get_entity_collection_info(guid)
-    if not info:
-        return False
-    data = info.get("raw") or {}
-
-    # direct name/id checks
-    for key in ("collectionName", "collection", "collectionId"):
-        val = data.get(key)
-        if isinstance(val, str) and val in expected:
-            return True
-
-    # Some responses include a list of collections
-    collections = data.get("collections") or data.get("collectionHierarchy")
-    if isinstance(collections, list):
-        for c in collections:
-            if isinstance(c, str) and c == expected_collection_name:
-                return True
-            if isinstance(c, dict):
-                name = c.get("name") or c.get("collectionName") or c.get("referenceName")
-                if name in expected:
-                    return True
-    return False
+## Removed local collection helpers; use pvlib.atlas versions if needed
 
 def list_existing_tag_qns_for_tenant(tenant: str) -> Set[str]:
     # Advanced search by attribute
@@ -525,49 +349,14 @@ def list_existing_tag_qns_for_tenant(tenant: str) -> Set[str]:
     # Fallback: empty
     return qns
 
-def delete_entities_by_qualified_names(qns: List[str], type_name: str) -> None:
-    return pvatlas.delete_entities_by_qualified_names(qns, type_name)
+## Removed local delete_entities_by_qualified_names; using pvlib.atlas alias at bottom
 
 
-def _create_relationship_retry(rel_type: str, end1_qn: str, end1_type: str, end2_qn: str, end2_type: str, *, attempts: int = 6, delay_seconds: float = 1.2) -> bool:
-    """Create relationship with retries, resolving GUIDs explicitly to avoid eventual-consistency lookups by unique attributes."""
-    end1_guid = None
-    end2_guid = None
-    # First, resolve both GUIDs with retries
-    for i in range(max(1, attempts)):
-        if not end1_guid:
-            end1_guid = resolve_guid_by_qn(end1_type, end1_qn, attempts=1, delay_seconds=delay_seconds)
-        if not end2_guid:
-            end2_guid = resolve_guid_by_qn(end2_type, end2_qn, attempts=1, delay_seconds=delay_seconds)
-        if end1_guid and end2_guid:
-            break
-        time.sleep(delay_seconds)
-    if not (end1_guid and end2_guid):
-        logger.warning("Unable to resolve GUIDs for relationship %s: end1=%s (%s) end2=%s (%s)", rel_type, end1_qn, end1_type, end2_qn, end2_type)
-        return False
-
-    # Create relationship by GUID (more reliable than uniqueAttributes during indexing)
-    payload = {
-        "typeName": rel_type,
-        "end1": {"typeName": end1_type, "guid": end1_guid},
-        "end2": {"typeName": end2_type, "guid": end2_guid},
-    }
-    for i in range(max(1, attempts)):
-        r = _atlas_post("/datamap/api/atlas/v2/relationship", payload)
-        if r.status_code in (200, 201, 409):
-            if i > 0:
-                logger.debug("Relationship %s created/exists after %d retries: %s -> %s", rel_type, i, end1_qn, end2_qn)
-            return True
-        body = r.text[:500] if hasattr(r, 'text') else ''
-        logger.debug("Relationship create attempt %d failed (%s): %s", i + 1, r.status_code, body)
-        time.sleep(delay_seconds)
-    body = r.text[:500] if 'r' in locals() and hasattr(r, 'text') else ''
-    logger.warning("Failed to create relationship %s after %d attempts: %s -> %s (last status=%s body=%s)", rel_type, attempts, end1_qn, end2_qn, r.status_code if 'r' in locals() else 'n/a', body)
-    return False
+## Removed local retry; use pvlib.relationships.create_relationship_retry
 
 def _link_label_to_datasource(qn_tag: str, qn_ds: str) -> None:
     # Create the standard 'has' relationship — visible from both sides and widely supported
-    ok_has = _create_relationship_retry(
+    ok_has = pvrels.create_relationship_retry(
         "unstructured_datasource_has_unstructured_dataset",
         qn_ds,
         "unstructured_datasource",
