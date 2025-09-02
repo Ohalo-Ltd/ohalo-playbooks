@@ -1,0 +1,15 @@
+version: "3.9"
+
+services:
+  purview-dxr-sync:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: purview-dxr-sync:latest
+    container_name: purview-dxr-sync
+    env_file:
+      - ./.env
+    restart: unless-stopped
+    # Default command runs one cycle (RUN_ONCE=1). For continuous runs set RUN_ONCE=0 in .env or here:
+    # environment:
+    #   - RUN_ONCE=0

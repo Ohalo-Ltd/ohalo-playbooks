@@ -1,0 +1,5 @@
+azure-identity>=1.15.0
+# Pin to a version available on PyPI in most environments
+azure-purview-datamap==1.0.0b2
+requests>=2.31.0
+python-dotenv>=1.0.1
