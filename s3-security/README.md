@@ -17,7 +17,7 @@ This playbook demonstrates automated file classification and routing for S3 buck
 
 ## Project Structure
 - `lambda_function.py`: Lambda handler with all business logic.
-- `__main__.py`: Pulumi stack definition (S3 buckets, Lambda, permissions, notifications).
+- `main.py`: Pulumi stack definition (S3 buckets, Lambda, permissions, notifications).
 - `build_lambda.sh`: Builds the Lambda deployment package with all dependencies.
 - `start_demo.sh`: One-step script to set up everything (dependencies, Lambda package, Pulumi stack).
 - `pyproject.toml`: Python dependencies for uv.

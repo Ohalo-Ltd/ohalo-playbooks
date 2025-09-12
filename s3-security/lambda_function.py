@@ -1,9 +1,11 @@
-import os
 import logging
-from typing import List
-import boto3
-import dotenv
+import os
 import urllib.parse
+from typing import List
+
+import boto3
+import botocore.exceptions
+import dotenv
 from dxrpy import DXRClient
 from dxrpy.utils import File
 
@@ -14,24 +16,29 @@ dotenv.load_dotenv()
 
 dxr_api_key = os.environ["DXR_API_KEY"]
 dxr_api_url = os.environ["DXR_API_URL"]
-dxr_datasource_id = os.environ.get("DXR_DATASOURCE_ID")
+dxr_datasource_id = os.environ.get("DXR_DATASOURCE_ID", "")
 
 allowed_bucket = os.environ["ALLOWED_BUCKET"]
 quarantine_bucket = os.environ["QUARANTINE_BUCKET"]
 
 # Whether to delete files from source bucket after processing
-remove_from_source = os.environ.get("REMOVE_FROM_SOURCE", "false").lower() == "true"
+remove_from_source = os.environ.get("REMOVE_FROM_SOURCE", "false").lower() in (
+    "true",
+    "1",
+    "yes",
+    "on",
+)
 
 # Configuration for labels loaded from environment variables
 allowed_labels_str = os.environ.get("ALLOWED_LABELS", "Allowed")
-ALLOWED_LABELS = [
-    label.strip() for label in allowed_labels_str.split(",") if label.strip()
-]
+ALLOWED_LABELS = {
+    label.strip() for label in allowed_labels_str.split(",") if len(label.strip()) > 0
+}
 
 blocked_labels_str = os.environ.get("BLOCKED_LABELS", "")
-BLOCKED_LABELS = [
-    label.strip() for label in blocked_labels_str.split(",") if label.strip()
-]
+BLOCKED_LABELS = {
+    label.strip() for label in blocked_labels_str.split(",") if len(label.strip()) > 0
+}
 
 s3_client = boto3.client("s3")
 
@@ -64,11 +71,16 @@ def lambda_handler(event, context):
         # Download the file from S3
         try:
             s3_client.download_file(intake_bucket, decoded_file_key, local_file_path)
-        except s3_client.exceptions.NoSuchKey:
-            logger.error(
-                f"File not found: {decoded_file_key} in bucket: {intake_bucket}"
-            )
-            raise
+        except botocore.exceptions.ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code")
+            if error_code == "NoSuchKey":
+                logger.error(
+                    f"File not found: {decoded_file_key} in bucket: {intake_bucket}"
+                )
+                raise
+            else:
+                logger.error(f"Error downloading file: {e}")
+                raise
         except Exception as e:
             logger.error(f"Error downloading file: {e}")
             raise
