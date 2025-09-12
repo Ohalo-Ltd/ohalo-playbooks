@@ -1,0 +1,9 @@
+version: "3.9"
+services:
+  box-shield-dxr-sync:
+    build: .
+    env_file:
+      - .env
+    environment:
+      - RUN_ONCE=${RUN_ONCE:-1}
+    restart: unless-stopped
