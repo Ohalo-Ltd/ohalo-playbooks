@@ -2,9 +2,9 @@
 
 Welcome to the **ohalo-playbooks** repository! This repo contains a collection of Ansible playbooks used to automate common workflows and integrations at Ohalo.
 
-## Projects
+## Playbooks
 
-This repository currently includes the following projects:
+This repository currently includes the following playbooks:
 
 - **[`rag-app`](./rag-app/)**  
   Full-stack Retrieval Augmented Generation demo that helps teams surface institutional knowledge in seconds, pairing a FastAPI + Postgres backend with a Next.js frontend for rapid iteration. Check the [README](./rag-app/README.md) in the folder for environment setup and developer workflow details.
