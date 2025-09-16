@@ -7,6 +7,7 @@
   - `purview-stream-endpoint/`: Purview integration scripts (`pvlib/` helpers, integration + test files).
   - `export-stream-endpoint/`: Terraform + Lambda under `terraform/` (Python in `terraform/lambda/`).
   - Root config: `pytest.ini` (markers), `.env` (local vars, do not commit secrets).
+- Keep the root `README.md` aligned with this list of active subprojects whenever directories are added, removed, or renamed.
 
 ## Build, Test, and Dev Commands
 - RAG app (both services): `cd rag-app && ./start.sh` (add `--reset-db` to drop Postgres volume).
