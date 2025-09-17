@@ -28,3 +28,4 @@ response.json
 # .gitignore
 .env
 python/
+.pytest_cache/
