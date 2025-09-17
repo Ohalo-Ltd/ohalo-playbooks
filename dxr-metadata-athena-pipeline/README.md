@@ -1,13 +1,20 @@
-# Exporter with AWS Lambda, Glue, S3, Athena + Terraform
+# Data X-Ray Metadata to Athena Pipeline
 Data X-Ray version: **7.19.0**
 
-This repository demonstrates how to:
+This playbook shows how to operationalize the Data X-Ray metadata plane for downstream analytics:
 
-1. Connect an existing Data X-Ray installation to an **AWS Lambda function** using **Terraform** to fetch and upload the data to **S3**.
-2. Run a AWS Glue Crawler that collects the data from S3 and puts it in a Data Catalogue.
-3. Query that Data Catalogue data using Amazon Athena.
+1. Extract governance metadata from Data X-Ray with an **AWS Lambda** built and deployed via **Terraform**.
+2. Persist the metadata in **Amazon S3** and register it in the **AWS Glue Data Catalog** with an automated crawler.
+3. Interrogate the curated catalog using **Amazon Athena** so governance and security teams can answer discovery questions in seconds.
 
 ![Process diagram](./process.png)
+
+---
+
+## Why this matters
+- Give data stewards a searchable inventory of Data X-Ray findings without needing console access.
+- Blend classification, sensitivity, and lineage signals with other enterprise datasets in Athena workgroups.
+- Reuse Terraform to keep collection infrastructure reproducible across environments.
 
 ---
 

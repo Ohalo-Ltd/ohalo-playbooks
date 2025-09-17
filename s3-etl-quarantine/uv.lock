@@ -401,7 +401,7 @@ wheels = [
 ]
 
 [[package]]
-name = "s3-security"
+name = "s3-etl-quarantine"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

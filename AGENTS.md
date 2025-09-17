@@ -5,7 +5,9 @@
   - `rag-app/`: Full-stack RAG demo (`backend/` FastAPI + Postgres, `frontend/` Next.js).
   - `scan-email-attachments/`: SMTP proxy playbook with tests under `tests/` and app code in `src/smtp_proxy/`.
   - `purview-stream-endpoint/`: Purview integration scripts (`pvlib/` helpers, integration + test files).
-  - `export-stream-endpoint/`: Terraform + Lambda under `terraform/` (Python in `terraform/lambda/`).
+  - `dxr-metadata-athena-pipeline/`: Terraform + Lambda under `terraform/` (Python in `terraform/lambda/`).
+  - `glue-unstructured-dq-monitoring/`: Terraform helpers, Lambda, and Glue artefacts for Data Quality experiments.
+  - `s3-etl-quarantine/`: Pulumi-driven S3 quarantine demo (Python lambda + uv tooling).
   - Root config: `pytest.ini` (markers), `.env` (local vars, do not commit secrets).
 - Keep the root `README.md` aligned with this list of active subprojects whenever directories are added, removed, or renamed.
 
@@ -15,7 +17,7 @@
 - RAG frontend only: `cd rag-app/frontend && npm ci && npm run dev` (serves on `:3000`).
 - Email attachments playbook: `cd scan-email-attachments && ./start_playbook.sh`.
 - Purview integration smoke runs: `cd purview-stream-endpoint && ./run_once.sh` or `./sanity-check.sh`.
-- Export stream build/deploy: `cd export-stream-endpoint/terraform/lambda && ./build.sh`; then `cd .. && terraform init && terraform apply`.
+- DXR metadata pipeline build/deploy: `cd dxr-metadata-athena-pipeline/terraform/lambda && ./build.sh`; then `cd .. && terraform init && terraform apply`.
 - Tests:
   - Root markers: `pytest -m unit`, `-m integration`, or `-m destructive`.
   - Email playbook: `cd scan-email-attachments && pytest -q`.

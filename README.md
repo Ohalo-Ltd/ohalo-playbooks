@@ -1,6 +1,6 @@
 # ohalo-playbooks
 
-Welcome to the **ohalo-playbooks** repository! This repo contains a collection of Ansible playbooks used to automate common workflows and integrations at Ohalo.
+Welcome to the **ohalo-playbooks** repository! This repo aggregates automation playbooks, reference applications, and infrastructure blueprints used to accelerate data governance and security workflows with Data X-Ray.
 
 ## Playbooks
 
@@ -9,14 +9,20 @@ This repository currently includes the following playbooks:
 - **[`rag-app`](./rag-app/)**  
   Full-stack Retrieval Augmented Generation demo that helps teams surface institutional knowledge in seconds, pairing a FastAPI + Postgres backend with a Next.js frontend for rapid iteration. Check the [README](./rag-app/README.md) in the folder for environment setup and developer workflow details.
 
+- **[`scan-email-attachments`](./scan-email-attachments/)**  
+  SMTP proxy playbook that intercepts outbound attachments to prevent sensitive data leakage and orchestrate remediation workflows before messages leave the organization. Refer to the [README](./scan-email-attachments/README.md) in the folder for setup and execution steps.
+
 - **[`purview-stream-endpoint`](./purview-stream-endpoint/)**  
   Azure Purview integration scripts and helpers that unlock continuous catalog exports so governance leads can monitor data health and lineage in near real time. Start with the [README](./purview-stream-endpoint/README.md) for usage instructions and integration guidance.
 
-- **[`export-stream-endpoint`](./export-stream-endpoint/)**  
-  Terraform module and Lambda code that operationalize compliant data delivery pipelines, speeding up partner onboarding while keeping infrastructure reproducible. See the [README](./export-stream-endpoint/README.md) in the folder for detailed instructions and deployment information.
+- **[`dxr-metadata-athena-pipeline`](./dxr-metadata-athena-pipeline/)**  
+  Terraform-driven pipeline that lifts Data X-Ray's metadata plane into AWS Glue and exposes it through Athena so governance teams can run ad-hoc discovery and compliance queries. The [README](./dxr-metadata-athena-pipeline/README.md) breaks down deployment and query workflows.
 
-- **[`scan-email-attachments`](./scan-email-attachments/)**  
-  SMTP proxy playbook that intercepts outbound attachments to prevent sensitive data leakage and orchestrate remediation workflows before messages leave the organization. Refer to the [README](./scan-email-attachments/README.md) in the folder for setup and execution steps.
+- **[`glue-unstructured-dq-monitoring`](./glue-unstructured-dq-monitoring/)**  
+  Lambda, Glue, and Data Quality assets that score unstructured files using Data X-Ray labels and AWS Glue DQ rulesets, keeping data lakes clean before ETL jobs consume sensitive content. See the [README](./glue-unstructured-dq-monitoring/README.md) for setup and runbook commands.
+
+- **[`s3-etl-quarantine`](./s3-etl-quarantine/)**  
+  Pulumi-managed guardrail that watches S3 staging zones, classifies files with Data X-Ray, and automatically quarantines risky payloads feeding unstructured ETL pipelines. The [README](./s3-etl-quarantine/README.md) covers prerequisites, deployment, and cleanup steps.
 
 ## Getting Started
 
