@@ -4,13 +4,19 @@ Welcome to the **ohalo-playbooks** repository! This repo contains a collection o
 
 ## Playbooks
 
-Currently, this repository includes the following playbooks:
+This repository currently includes the following playbooks:
+
+- **[`rag-app`](./rag-app/)**  
+  Full-stack Retrieval Augmented Generation demo that helps teams surface institutional knowledge in seconds, pairing a FastAPI + Postgres backend with a Next.js frontend for rapid iteration. Check the [README](./rag-app/README.md) in the folder for environment setup and developer workflow details.
+
+- **[`purview-stream-endpoint`](./purview-stream-endpoint/)**  
+  Azure Purview integration scripts and helpers that unlock continuous catalog exports so governance leads can monitor data health and lineage in near real time. Start with the [README](./purview-stream-endpoint/README.md) for usage instructions and integration guidance.
 
 - **[`export-stream-endpoint`](./export-stream-endpoint/)**  
-  Automates the setup and management of an export stream endpoint. See the [README](./export-stream-endpoint/README.md) in the folder for detailed instructions and usage information.
+  Terraform module and Lambda code that operationalize compliant data delivery pipelines, speeding up partner onboarding while keeping infrastructure reproducible. See the [README](./export-stream-endpoint/README.md) in the folder for detailed instructions and deployment information.
 
 - **[`scan-email-attachments`](./scan-email-attachments/)**  
-  Scans email attachments for sensitive data and integrates with external tools for processing. Refer to the [README](./scan-email-attachments/README.md) in the folder for setup and execution steps.
+  SMTP proxy playbook that intercepts outbound attachments to prevent sensitive data leakage and orchestrate remediation workflows before messages leave the organization. Refer to the [README](./scan-email-attachments/README.md) in the folder for setup and execution steps.
 
 ## Getting Started
 
