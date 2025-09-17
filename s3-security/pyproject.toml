@@ -1,0 +1,13 @@
+[project]
+name = "s3-security"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pulumi",
+    "pulumi-aws",
+    "boto3",
+    "python-dotenv",
+    "dxrpy",
+]

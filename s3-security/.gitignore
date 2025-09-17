@@ -1,0 +1,14 @@
+__pycache__/
+.env
+*.pyc
+*.pyo
+*.pyd
+*.zip
+*.tar.gz
+*.egg-info/
+.cache/
+Pulumi.*.yaml
+
+lambda_build/
+.github/
+.venv

@@ -1,0 +1,3 @@
+name: s3-security-demo
+runtime: python
+description: S3 security demo stack using Pulumi
