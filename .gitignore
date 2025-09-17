@@ -20,10 +20,12 @@ package/
 
 # Lambda output file
 output.json
+response.json
 
 # venv
 .venv
 
 # .gitignore
 .env
+python/
 .pytest_cache/
