@@ -1,13 +1,13 @@
-# S3 Security Demo (Pulumi + Data X-Ray)
+# S3 ETL Quarantine Automation (Pulumi + Data X-Ray)
 
-This playbook demonstrates automated file classification and routing for S3 buckets using AWS Lambda and Data X-Ray, managed with Pulumi and modern Python tooling.
+This playbook operationalizes continuous monitoring for unstructured ETL zones. It pairs Data X-Ray file inspection with Pulumi-managed AWS infrastructure to quarantine risky payloads before they land in downstream analytics pipelines.
 
 ## What Does This Do?
-- **Monitors an S3 bucket** for new file uploads.
-- **Classifies files** using the Data X-Ray API.
-- **Routes files** to either an 'allowed' or 'quarantine' bucket based on classification results.
-- **All infrastructure** (S3 buckets, Lambda, permissions) is managed by Pulumi in Python.
-- **All Python dependencies** are managed with [uv](https://github.com/astral-sh/uv) and `pyproject.toml`.
+- **Watches staging buckets feeding ETL jobs** for newly arrived objects.
+- **Classifies files** using the Data X-Ray API to surface sensitivity and policy violations.
+- **Automatically quarantines, reroutes, or releases files** based on configurable rules so downstream jobs only ingest clean assets.
+- **Manages infrastructure as code** with Pulumi in Python for reproducible environments.
+- **Packages lambdas with uv** so dependency management stays deterministic.
 
 ## How It Works
 1. **Upload a file** to the source S3 bucket.

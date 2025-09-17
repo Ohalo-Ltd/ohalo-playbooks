@@ -1,0 +1,3 @@
+name: s3-etl-quarantine
+runtime: python
+description: Quarantine risky S3 ETL payloads with Data X-Ray and Pulumi automation
