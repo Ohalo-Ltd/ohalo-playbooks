@@ -168,9 +168,7 @@ resource "aws_iam_role_policy" "glue_s3_policy" {
         ]
         Resource = [
           aws_s3_bucket.files_data.arn,
-          "${aws_s3_bucket.files_data.arn}/*",
-          aws_s3_bucket.glue_scripts.arn,
-          "${aws_s3_bucket.glue_scripts.arn}/*"
+          "${aws_s3_bucket.files_data.arn}/*"
         ]
       }
     ]
@@ -188,44 +186,6 @@ resource "aws_glue_crawler" "files_crawler" {
   }
 
   # No schedule - manual only
-}
-
-# S3 bucket for Glue scripts
-resource "aws_s3_bucket" "glue_scripts" {
-  bucket = "${var.project_name}-glue-scripts-${random_string.suffix.result}"
-}
-
-resource "aws_s3_object" "dq_script" {
-  bucket = aws_s3_bucket.glue_scripts.id
-  key    = "scripts/data_quality_check.py"
-  source = "glue_scripts/data_quality_check.py"
-  etag   = filemd5("glue_scripts/data_quality_check.py")
-}
-
-# Glue Data Quality Job (manual only)
-resource "aws_glue_job" "data_quality_check" {
-  name     = "${var.project_name}-dq-check"
-  role_arn = aws_iam_role.glue_role.arn
-
-  command {
-    script_location = "s3://${aws_s3_bucket.glue_scripts.bucket}/scripts/data_quality_check.py"
-    python_version  = "3"
-  }
-
-  default_arguments = {
-    "--job-bookmark-option"               = "job-bookmark-enable"
-    "--enable-continuous-cloudwatch-log" = "true"
-    "--DATABASE_NAME"                     = aws_glue_catalog_database.files_db.name
-    "--TABLE_NAME"                        = "raw_data"
-    "--S3_BUCKET"                        = aws_s3_bucket.files_data.id
-  }
-
-  execution_property {
-    max_concurrent_runs = 1
-  }
-
-  max_retries = 1
-  timeout     = 60
 }
 
 data "aws_caller_identity" "current" {}
