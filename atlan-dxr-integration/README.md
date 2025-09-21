@@ -68,8 +68,14 @@ Environment variables (see `.env.example`):
 - Metadata is written to Atlan via `pyatlan`'s synchronous client (`AtlanClient.asset.save`).
 - The module is idempotent: rerunning the service overwrites datasets with the same
   qualified name.
-- Connection management is out of scope — ensure the configured connection already exists
-  and grants the API token permission to create assets.
+- On startup the uploader verifies the referenced connection and will create it if it
+  does not already exist. The API token therefore needs rights to read connections,
+  resolve the `$admin` role, and create a new connection and datasets. If you prefer to
+  manage the connection manually, create it up-front and assign the service principal the
+  appropriate persona/purpose.
+- Connector metadata is normalised using Atlan's `AtlanConnectorType` enum, so values such
+  as `custom-connector` in configuration will be stored as the canonical `custom` in
+  Atlan.
 
 ## Development
 
