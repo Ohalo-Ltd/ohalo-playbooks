@@ -99,6 +99,14 @@ def test_pipeline_runs_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
             self.asset = _FakeAssetClient()
 
     monkeypatch.setattr(atlan_uploader, "AtlanClient", _FakeAtlanClient)
+    monkeypatch.setattr(
+        atlan_uploader.AtlanUploader,
+        "_ensure_connection_exists",
+        lambda self: (
+            atlan_uploader.AtlanConnectorType.CUSTOM,
+            "default/connection",
+        ),
+    )
 
     pipeline.run()
 
@@ -113,6 +121,7 @@ def test_pipeline_runs_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "patient-data.csv" in attrs.user_description
     assert "lab-results.parquet" in attrs.user_description
     assert attrs.source_url == "https://dxr.example.com/resource-search/classification-123"
+    assert attrs.connector_name == "custom"
 
 
 @pytest.mark.integration
@@ -156,7 +165,66 @@ def test_pipeline_skips_upload_when_no_records(monkeypatch: pytest.MonkeyPatch) 
             uploader_called = True
 
     monkeypatch.setattr(pipeline, "AtlanUploader", _FakeUploader)
+    monkeypatch.setattr(
+        atlan_uploader.AtlanUploader,
+        "_ensure_connection_exists",
+        lambda self: (
+            atlan_uploader.AtlanConnectorType.CUSTOM,
+            "default/connection",
+        ),
+    )
 
     pipeline.run()
 
     assert uploader_called is False
+
+
+@pytest.mark.integration
+def test_pipeline_exits_when_upload_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pipeline surfaces upload failures as a non-zero exit code."""
+
+    classifications = [
+        Classification(
+            identifier="classification-789",
+            name="Radiology",
+            type="ANNOTATOR",
+            subtype=None,
+            description=None,
+            link=None,
+            search_link=None,
+        )
+    ]
+
+    fake_client = _FakeDXRClient(classifications, files=[])
+
+    monkeypatch.setattr(pipeline, "DXRClient", lambda *args, **kwargs: fake_client)
+
+    monkeypatch.setenv("DXR_BASE_URL", "https://dxr.example.com/api")
+    monkeypatch.setenv("DXR_PAT", "dxr-token")
+    monkeypatch.setenv("ATLAN_BASE_URL", "https://atlan.example.com")
+    monkeypatch.setenv("ATLAN_API_TOKEN", "atlan-token")
+    monkeypatch.setenv("ATLAN_CONNECTION_QUALIFIED_NAME", "default/connection")
+    monkeypatch.setenv("ATLAN_CONNECTION_NAME", "dxr-connection")
+    monkeypatch.setenv("ATLAN_CONNECTOR_NAME", "custom-connector")
+
+    class _FailingUploader:
+        def __init__(self, config):
+            pass
+
+        def upsert(self, records):
+            raise atlan_uploader.AtlanUploadError("permission denied")
+
+    monkeypatch.setattr(pipeline, "AtlanUploader", _FailingUploader)
+    monkeypatch.setattr(
+        atlan_uploader.AtlanUploader,
+        "_ensure_connection_exists",
+        lambda self: (
+            atlan_uploader.AtlanConnectorType.CUSTOM,
+            "default/connection",
+        ),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        pipeline.run()
+
+    assert exc_info.value.code == 1

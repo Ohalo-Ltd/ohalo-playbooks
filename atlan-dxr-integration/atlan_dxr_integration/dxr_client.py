@@ -51,7 +51,7 @@ class DXRClient:
         self._session.headers.update(
             {
                 "Authorization": f"Bearer {pat_token}",
-                "Accept": "application/json",
+                "Accept": "application/json, application/x-ndjson",
             }
         )
 

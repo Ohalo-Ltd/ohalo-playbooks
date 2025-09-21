@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from .atlan_uploader import AtlanUploader
+from .atlan_uploader import AtlanUploadError, AtlanUploader
 from .config import Config
 from .dataset_builder import DatasetBuilder
 from .dxr_client import DXRClient
@@ -37,7 +37,11 @@ def run() -> None:
         return
 
     uploader = AtlanUploader(config)
-    uploader.upsert(records)
+    try:
+        uploader.upsert(records)
+    except AtlanUploadError as exc:
+        LOGGER.error("DXR → Atlan sync aborted: %s", exc)
+        raise SystemExit(1) from exc
     LOGGER.info("DXR → Atlan sync completed")
 
 
