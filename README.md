@@ -18,11 +18,14 @@ This repository currently includes the following playbooks:
 - **[`dxr-metadata-athena-pipeline`](./dxr-metadata-athena-pipeline/)**  
   Terraform-driven pipeline that lifts Data X-Ray's metadata plane into AWS Glue and exposes it through Athena so governance teams can run ad-hoc discovery and compliance queries. The [README](./dxr-metadata-athena-pipeline/README.md) breaks down deployment and query workflows.
 
-- **[`glue-unstructured-dq-monitoring`](./glue-unstructured-dq-monitoring/)**  
+- **[`glue-unstructured-dq-monitoring`](./glue-unstructured-dq-monitoring/)**
   Lambda, Glue, and Data Quality assets that score unstructured files using Data X-Ray labels and AWS Glue DQ rulesets, keeping data lakes clean before ETL jobs consume sensitive content. See the [README](./glue-unstructured-dq-monitoring/README.md) for setup and runbook commands.
 
-- **[`s3-etl-quarantine`](./s3-etl-quarantine/)**  
+- **[`s3-etl-quarantine`](./s3-etl-quarantine/)**
   Pulumi-managed guardrail that watches S3 staging zones, classifies files with Data X-Ray, and automatically quarantines risky payloads feeding unstructured ETL pipelines. The [README](./s3-etl-quarantine/README.md) covers prerequisites, deployment, and cleanup steps.
+
+- **[`atlan-dxr-integration`](./atlan-dxr-integration/)**
+  Containerised service that syncs Data X-Ray classifications into Atlan as `DataSet` assets using the official Python SDK. Review the [README](./atlan-dxr-integration/README.md) for configuration, runtime options, and deployment guidance.
 
 ## Getting Started
 
