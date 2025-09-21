@@ -17,6 +17,7 @@ class Config:
     dxr_pat: str
     dxr_classification_types: Optional[Set[str]]
     dxr_sample_file_limit: int
+    dxr_file_fetch_limit: int
 
     atlan_base_url: str
     atlan_api_token: str
@@ -66,12 +67,16 @@ class Config:
         sample_file_limit = _parse_int(
             os.getenv("DXR_SAMPLE_FILE_LIMIT"), default=5, minimum=0
         )
+        file_fetch_limit = _parse_int(
+            os.getenv("DXR_FILE_FETCH_LIMIT"), default=200, minimum=0
+        )
 
         return cls(
             dxr_base_url=_strip_trailing_slash(os.environ["DXR_BASE_URL"]),
             dxr_pat=os.environ["DXR_PAT"],
             dxr_classification_types=classification_types,
             dxr_sample_file_limit=sample_file_limit,
+            dxr_file_fetch_limit=file_fetch_limit,
             atlan_base_url=_strip_trailing_slash(os.environ["ATLAN_BASE_URL"]),
             atlan_api_token=os.environ["ATLAN_API_TOKEN"],
             atlan_connection_qualified_name=os.environ[

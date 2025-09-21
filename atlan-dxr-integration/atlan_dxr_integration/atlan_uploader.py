@@ -39,6 +39,12 @@ class AtlanUploader:
         self._connection_qualified_name = connection_qn
         self._qualified_name_prefix = self._build_dataset_prefix(connection_qn)
 
+    @property
+    def client(self) -> AtlanClient:
+        """Expose the underlying Atlan client for verification helpers."""
+
+        return self._client
+
     def upsert(self, records: Iterable[DatasetRecord]) -> None:
         batch: List[DataSet] = []
         for record in records:
@@ -50,8 +56,11 @@ class AtlanUploader:
         if batch:
             self._save_batch(batch)
 
+    def dataset_qualified_name(self, record: DatasetRecord) -> str:
+        return f"{self._qualified_name_prefix}/{record.identifier}"
+
     def _build_dataset(self, record: DatasetRecord) -> DataSet:
-        qualified_name = f"{self._qualified_name_prefix}/{record.identifier}"
+        qualified_name = self.dataset_qualified_name(record)
         attributes = DataSet.Attributes(
             qualified_name=qualified_name,
             name=record.name,
@@ -68,9 +77,27 @@ class AtlanUploader:
     def _save_batch(self, batch: List[DataSet]) -> None:
         try:
             response = self._client.asset.save(batch)
+            created = response.assets_created(DataSet)
+            updated = response.assets_updated(DataSet)
+            partial = response.assets_partially_updated(DataSet)
+            mutated_count = len(created) + len(updated) + len(partial)
+            if mutated_count == 0:
+                if self._datasets_exist(batch):
+                    LOGGER.info(
+                        "No dataset changes detected in Atlan (request id: %s); assets already up to date.",
+                        getattr(response, "request_id", "unknown"),
+                    )
+                    return
+                message = (
+                    "Atlan acknowledged the upsert request but did not mutate any "
+                    "datasets. Verify the connection, connector name, and service "
+                    "permissions."
+                )
+                LOGGER.error(message)
+                raise AtlanUploadError(message)
             LOGGER.info(
-                "Upserted %d datasets into Atlan (request id: %s)",
-                len(batch),
+                "Upserted %d dataset(s) into Atlan (request id: %s)",
+                mutated_count,
                 getattr(response, "request_id", "unknown"),
             )
         except AtlanPermissionError as exc:
@@ -85,6 +112,21 @@ class AtlanUploader:
             message = "Atlan rejected the dataset upsert request."
             LOGGER.error("%s (original error: %s)", message, exc)
             raise AtlanUploadError(message) from exc
+
+    def _datasets_exist(self, batch: Iterable[DataSet]) -> bool:
+        """Confirm each dataset in the batch exists in Atlan."""
+
+        for dataset in batch:
+            qualified_name = dataset.attributes.qualified_name
+            try:
+                self._client.asset.get_by_qualified_name(
+                    qualified_name,
+                    DataSet,
+                    ignore_relationships=True,
+                )
+            except AtlanError:
+                return False
+        return True
 
     def _ensure_connection_exists(self) -> tuple[AtlanConnectorType, str]:
         qualified_name = self._config.atlan_connection_qualified_name

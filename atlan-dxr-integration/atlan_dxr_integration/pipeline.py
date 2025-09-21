@@ -28,8 +28,17 @@ def run() -> None:
             dxr_base_url=config.dxr_base_url,
         )
 
-        for file_payload in dxr_client.stream_files():
-            builder.consume_file(file_payload)
+        max_files = config.dxr_file_fetch_limit or None
+        for classification in classifications:
+            if not classification.identifier:
+                continue
+            files = dxr_client.fetch_files_for_label(
+                classification.identifier,
+                label_name=classification.name,
+                max_items=max_files,
+            )
+            for file_payload in files:
+                builder.consume_file(file_payload)
 
     records = builder.build()
     if not records:

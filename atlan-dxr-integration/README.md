@@ -52,6 +52,7 @@ Environment variables (see `.env.example`):
 | `DXR_PAT` | Data X-Ray personal access token. |
 | `DXR_CLASSIFICATION_TYPES` | Optional comma-separated whitelist of DXR classification `type` values to ingest. Leave blank to ingest everything. |
 | `DXR_SAMPLE_FILE_LIMIT` | Number of sample files to include in dataset summaries. |
+| `DXR_FILE_FETCH_LIMIT` | Maximum files to request from DXR per classification (0 for unlimited). |
 | `ATLAN_BASE_URL` | Base URL for Atlan. |
 | `ATLAN_API_TOKEN` | Atlan API token. |
 | `ATLAN_CONNECTION_QUALIFIED_NAME` | Qualified name of the Atlan connection that owns the datasets. |
@@ -76,6 +77,19 @@ Environment variables (see `.env.example`):
 - Connector metadata is normalised using Atlan's `AtlanConnectorType` enum, so values such
   as `custom-connector` in configuration will be stored as the canonical `custom` in
   Atlan.
+
+### Sanity check
+
+Run a lightweight verification against live DXR and Atlan environments:
+
+```bash
+python -m atlan_dxr_integration.sanity_check --labels 1 --max-files 200
+```
+
+The command pulls a small sample of DXR classifications, pushes them to Atlan, and
+confirms the resulting datasets exist via `get_by_qualified_name`. It exits with a non-zero
+status if no classifications are returned, no datasets are generated, or Atlan does not
+acknowledge the upsert.
 
 ## Development
 

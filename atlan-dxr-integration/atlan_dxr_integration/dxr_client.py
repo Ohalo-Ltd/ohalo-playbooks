@@ -89,13 +89,62 @@ class DXRClient:
         LOGGER.debug("Streaming files from %s", url)
         with self._session.get(url, stream=True, timeout=self._timeout) as response:
             response.raise_for_status()
-            for line in response.iter_lines(decode_unicode=True):
-                if not line:
-                    continue
-                try:
-                    yield json.loads(line)
-                except json.JSONDecodeError:
-                    LOGGER.warning("Skipping malformed JSONL line from DXR: %s", line)
+            yield from self._iter_stream(response)
+
+    def fetch_files_for_label(
+        self,
+        label_id: str,
+        *,
+        label_name: Optional[str] = None,
+        max_items: Optional[int] = None,
+    ) -> List[Dict[str, object]]:
+        """Retrieve files associated with a specific DXR label."""
+
+        if not label_id:
+            return []
+
+        queries = [f'labels.id: "{label_id}"']
+        if label_name:
+            queries.append(f'labels.name: "{label_name}"')
+
+        results: List[Dict[str, object]] = []
+        for query in queries:
+            url = urljoin(self._base_url, "vbeta/files")
+            params = {"q": query}
+            LOGGER.debug("Fetching files for label %s with query %s", label_id, query)
+            try:
+                with self._session.get(
+                    url,
+                    params=params,
+                    stream=True,
+                    timeout=self._timeout,
+                ) as response:
+                    response.raise_for_status()
+                    for obj in self._iter_stream(response):
+                        results.append(obj)
+                        if max_items and max_items > 0 and len(results) >= max_items:
+                            return results
+            except requests.HTTPError as exc:
+                LOGGER.warning(
+                    "DXR files request failed for label %s query %s: %s",
+                    label_id,
+                    query,
+                    exc,
+                )
+                continue
+            if results:
+                break
+        return results
+
+    @staticmethod
+    def _iter_stream(response: requests.Response) -> Generator[Dict[str, object], None, None]:
+        for line in response.iter_lines(decode_unicode=True):
+            if not line:
+                continue
+            try:
+                yield json.loads(line)
+            except json.JSONDecodeError:
+                LOGGER.warning("Skipping malformed JSONL line from DXR: %s", line)
 
 
 def _safe_str(value: object) -> Optional[str]:

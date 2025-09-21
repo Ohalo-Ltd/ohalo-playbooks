@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from types import SimpleNamespace
-from typing import Iterable, Iterator, List
+from typing import Dict, Iterable, Iterator, List
 
 import pytest
 
@@ -11,12 +12,33 @@ from atlan_dxr_integration import atlan_uploader, pipeline
 from atlan_dxr_integration.dxr_client import Classification
 
 
+class _FakeMutationResponse:
+    def __init__(self, assets):
+        self._assets = assets
+        self.request_id = "req-1"
+
+    def assets_created(self, asset_type):
+        return [asset for asset in self._assets if isinstance(asset, asset_type)]
+
+    def assets_updated(self, asset_type):
+        return []
+
+    def assets_partially_updated(self, asset_type):
+        return []
+
+
 class _FakeDXRClient:
     """Stub DXR client for pipeline integration tests."""
 
     def __init__(self, classifications: Iterable[Classification], files: Iterable[dict]):
         self._classifications = list(classifications)
-        self._files = list(files)
+        self._files_by_label: Dict[str, List[dict]] = defaultdict(list)
+        for payload in files:
+            labels = payload.get("labels") or []
+            for label in labels:
+                label_id = label.get("id") or label.get("classificationId")
+                if label_id:
+                    self._files_by_label[str(label_id)].append(payload)
 
     def __enter__(self) -> "_FakeDXRClient":
         return self
@@ -31,7 +53,24 @@ class _FakeDXRClient:
         return list(self._classifications)
 
     def stream_files(self) -> Iterator[dict]:
-        yield from self._files
+        for items in self._files_by_label.values():
+            yield from items
+
+    def fetch_files_for_label(
+        self,
+        label_id: str,
+        *,
+        label_name: str | None = None,
+        max_items: int | None = None,
+    ) -> List[dict]:
+        items = list(self._files_by_label.get(label_id, []))
+        if max_items and max_items > 0:
+            return items[:max_items]
+        if not items and label_name:
+            for key, value in self._files_by_label.items():
+                if key.lower() == (label_name or "").lower():
+                    return list(value)
+        return items
 
 
 @pytest.mark.integration
@@ -91,8 +130,12 @@ def test_pipeline_runs_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
 
     class _FakeAssetClient:
         def save(self, assets):
-            captured_batches.append(list(assets))
-            return SimpleNamespace(request_id="req-1")
+            batch = list(assets)
+            captured_batches.append(batch)
+            return _FakeMutationResponse(batch)
+
+        def get_by_qualified_name(self, qualified_name, asset_type, **kwargs):
+            return SimpleNamespace(attributes=SimpleNamespace(qualified_name=qualified_name))
 
     class _FakeAtlanClient:
         def __init__(self, *args, **kwargs):

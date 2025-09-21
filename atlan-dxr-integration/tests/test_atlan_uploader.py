@@ -9,6 +9,24 @@ import pytest
 from atlan_dxr_integration import atlan_uploader
 from pyatlan.errors import ErrorCode, NotFoundError
 from pyatlan.model.assets.connection import Connection
+from pyatlan.model.assets.data_set import DataSet
+
+
+class _FakeMutationResponse:
+    def __init__(self, *, request_id: str = "req", created=None, updated=None, partial=None):
+        self.request_id = request_id
+        self._created = created or []
+        self._updated = updated or []
+        self._partial = partial or []
+
+    def assets_created(self, asset_type):
+        return [asset for asset in self._created if isinstance(asset, asset_type)]
+
+    def assets_updated(self, asset_type):
+        return [asset for asset in self._updated if isinstance(asset, asset_type)]
+
+    def assets_partially_updated(self, asset_type):
+        return [asset for asset in self._partial if isinstance(asset, asset_type)]
 
 
 class _FailingBatchAsset:
@@ -22,6 +40,20 @@ class _FailingBatchAsset:
 class _FailingBatchClient:
     def __init__(self, exception: Exception) -> None:
         self.asset = _FailingBatchAsset(exception)
+
+
+class _SuccessfulBatchClient:
+    def __init__(self, response: _FakeMutationResponse, *, lookups: dict[str, object]) -> None:
+        def _get(qualified_name, asset_type, **kwargs):
+            value = lookups.get(qualified_name)
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        self.asset = SimpleNamespace(
+            save=lambda batch: response,
+            get_by_qualified_name=_get,
+        )
 
 
 class _FakeRoleCache:
@@ -69,16 +101,18 @@ class _FakeConnectionAsset:
                 asset_type.__name__,
                 qualified_name,
             )
-        return asset_type()
+        return SimpleNamespace(
+            attributes=SimpleNamespace(
+                qualified_name=qualified_name,
+                connector_name="custom",
+            )
+        )
 
     def save(self, asset):
         if self.save_exception:
             raise self.save_exception
         self.saved_assets.append(asset)
-        return SimpleNamespace(
-            request_id="req-conn",
-            assets_created=lambda asset_type: [asset] if asset_type is Connection else [],
-        )
+        return _FakeMutationResponse(request_id="req-conn", created=[asset])
 
 
 class _FakeConnectionClient:
@@ -99,6 +133,7 @@ def _build_config() -> SimpleNamespace:
         atlan_batch_size=10,
         qualified_name_prefix="default/connection",
         atlan_dataset_path_prefix="dxr",
+        dxr_file_fetch_limit=200,
     )
 
 
@@ -192,3 +227,80 @@ def test_ensure_connection_exists_raises_on_permission_error(monkeypatch: pytest
         atlan_uploader.AtlanUploader(_build_config())
 
     assert "connection" in str(exc_info.value).lower()
+
+
+def test_save_batch_no_mutation_succeeds_when_assets_exist(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Uploader treats zero-mutation responses as success when datasets already exist."""
+
+    config = _build_config()
+    qualified_name = f"{config.atlan_connection_qualified_name}/{config.atlan_dataset_path_prefix}/classification-1"
+    response = _FakeMutationResponse(request_id="req-dataset", created=[], updated=[], partial=[])
+
+    existing = SimpleNamespace(attributes=SimpleNamespace(qualified_name=qualified_name))
+
+    monkeypatch.setattr(
+        atlan_uploader.AtlanUploader,
+        "_ensure_connection_exists",
+        lambda self: (
+            atlan_uploader.AtlanConnectorType.CUSTOM,
+            config.atlan_connection_qualified_name,
+        ),
+    )
+
+    monkeypatch.setattr(
+        atlan_uploader,
+        "AtlanClient",
+        lambda *args, **kwargs: _SuccessfulBatchClient(response, lookups={qualified_name: existing}),
+    )
+
+    uploader = atlan_uploader.AtlanUploader(config)
+    dataset = DataSet(
+        attributes=DataSet.Attributes(
+            qualified_name=qualified_name,
+            name="Classification One",
+        )
+    )
+
+    uploader._save_batch([dataset])
+
+
+def test_save_batch_no_mutation_raises_when_assets_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Uploader errors if zero-mutation response and datasets cannot be found."""
+
+    config = _build_config()
+    qualified_name = f"{config.atlan_connection_qualified_name}/{config.atlan_dataset_path_prefix}/classification-1"
+    response = _FakeMutationResponse(request_id="req-dataset", created=[], updated=[], partial=[])
+
+    error = NotFoundError(
+        ErrorCode.ASSET_NOT_FOUND_BY_QN,
+        "DataSet",
+        qualified_name,
+    )
+
+    monkeypatch.setattr(
+        atlan_uploader.AtlanUploader,
+        "_ensure_connection_exists",
+        lambda self: (
+            atlan_uploader.AtlanConnectorType.CUSTOM,
+            config.atlan_connection_qualified_name,
+        ),
+    )
+
+    monkeypatch.setattr(
+        atlan_uploader,
+        "AtlanClient",
+        lambda *args, **kwargs: _SuccessfulBatchClient(response, lookups={qualified_name: error}),
+    )
+
+    uploader = atlan_uploader.AtlanUploader(config)
+    dataset = DataSet(
+        attributes=DataSet.Attributes(
+            qualified_name=qualified_name,
+            name="Classification One",
+        )
+    )
+
+    with pytest.raises(atlan_uploader.AtlanUploadError) as exc_info:
+        uploader._save_batch([dataset])
+
+    assert "did not mutate any datasets" in str(exc_info.value)
