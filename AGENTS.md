@@ -8,6 +8,7 @@
   - `dxr-metadata-athena-pipeline/`: Terraform + Lambda under `terraform/` (Python in `terraform/lambda/`).
   - `glue-unstructured-dq-monitoring/`: Terraform helpers, Lambda, and Glue artefacts for Data Quality experiments.
   - `s3-etl-quarantine/`: Pulumi-driven S3 quarantine demo (Python lambda + uv tooling).
+  - `atlan-dxr-integration/`: Data X-Ray → Atlan metadata sync service (Python, pytest under `tests/`, Dockerised runtime).
   - Root config: `pytest.ini` (markers), `.env` (local vars, do not commit secrets).
 - Keep the root `README.md` aligned with this list of active subprojects whenever directories are added, removed, or renamed.
 
@@ -22,6 +23,7 @@
   - Root markers: `pytest -m unit`, `-m integration`, or `-m destructive`.
   - Email playbook: `cd scan-email-attachments && pytest -q`.
   - Purview: `cd purview-stream-endpoint && pytest -q`.
+  - Atlan ↔ DXR playbook: `cd atlan-dxr-integration && pytest -q` (integration tests stub external SDKs).
 
 ## Coding Style & Naming
 - Python: 4-space indent, `snake_case` for files/functions, `PascalCase` classes.
