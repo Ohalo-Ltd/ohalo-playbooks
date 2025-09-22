@@ -7,7 +7,7 @@ import logging
 from typing import Iterable, List
 
 from pyatlan.errors import AtlanError
-from pyatlan.model.assets.data_set import DataSet
+from pyatlan.model.assets.core.table import Table
 
 from .config import Config
 from .dataset_builder import DatasetBuilder, DatasetRecord
@@ -89,24 +89,24 @@ def run(*, sample_labels: int = 1, max_files: int = 500) -> None:
 
 
 def _verify_assets(records: Iterable[DatasetRecord], uploader: AtlanUploader) -> None:
-    """Fetch each dataset from Atlan to confirm it exists after upsert."""
+    """Fetch each table from Atlan to confirm it exists after upsert."""
 
     for record in records:
-        qualified_name = uploader.dataset_qualified_name(record)
+        qualified_name = uploader.table_qualified_name(record)
         try:
-            dataset: DataSet = uploader.client.asset.get_by_qualified_name(
+            table: Table = uploader.client.asset.get_by_qualified_name(
                 qualified_name,
-                DataSet,
+                Table,
                 ignore_relationships=True,
             )
         except AtlanError as exc:
             raise SystemExit(
-                f"Failed to verify dataset '{qualified_name}' in Atlan: {exc}"
+                f"Failed to verify table '{qualified_name}' in Atlan: {exc}"
             ) from exc
 
-        attrs = dataset.attributes
+        attrs = table.attributes
         LOGGER.info(
-            "Verified dataset '%s' (name='%s', files=%d)",
+            "Verified table '%s' (display_name='%s', files=%d)",
             qualified_name,
             getattr(attrs, "name", record.name),
             record.file_count,

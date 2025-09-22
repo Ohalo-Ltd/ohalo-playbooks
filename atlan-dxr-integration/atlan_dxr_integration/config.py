@@ -24,6 +24,8 @@ class Config:
     atlan_connection_qualified_name: str
     atlan_connection_name: str
     atlan_connector_name: str
+    atlan_database_name: str
+    atlan_schema_name: str
     atlan_dataset_path_prefix: str
     atlan_batch_size: int
 
@@ -37,6 +39,19 @@ class Config:
         if suffix:
             return f"{self.atlan_connection_qualified_name.rstrip('/')}/{suffix}"
         return self.atlan_connection_qualified_name.rstrip("/")
+
+    @property
+    def database_qualified_name(self) -> str:
+        """Qualified name for the Atlan database containing DXR assets."""
+
+        base = self.atlan_connection_qualified_name.rstrip("/")
+        return f"{base}/{self.atlan_database_name}"
+
+    @property
+    def schema_qualified_name(self) -> str:
+        """Qualified name for the Atlan schema grouping DXR tables."""
+
+        return f"{self.database_qualified_name}/{self.atlan_schema_name}"
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -84,6 +99,8 @@ class Config:
             ],
             atlan_connection_name=os.environ["ATLAN_CONNECTION_NAME"],
             atlan_connector_name=os.environ["ATLAN_CONNECTOR_NAME"],
+            atlan_database_name=os.getenv("ATLAN_DATABASE_NAME", "dxr"),
+            atlan_schema_name=os.getenv("ATLAN_SCHEMA_NAME", "labels"),
             atlan_dataset_path_prefix=os.getenv("ATLAN_DATASET_PATH_PREFIX", "dxr"),
             atlan_batch_size=batch_size,
             log_level=os.getenv("LOG_LEVEL", "INFO"),
