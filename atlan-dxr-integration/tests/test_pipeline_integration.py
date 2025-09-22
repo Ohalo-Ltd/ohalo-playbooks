@@ -75,7 +75,7 @@ class _FakeDXRClient:
 
 @pytest.mark.integration
 def test_pipeline_runs_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pipeline builds datasets from DXR metadata and upserts them into Atlan."""
+    """Pipeline builds tables from DXR metadata and upserts them into Atlan."""
 
     classifications = [
         Classification(
@@ -117,9 +117,14 @@ def test_pipeline_runs_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setenv("ATLAN_BASE_URL", "https://atlan.example.com")
     monkeypatch.setenv("ATLAN_API_TOKEN", "atlan-token")
-    monkeypatch.setenv("ATLAN_CONNECTION_QUALIFIED_NAME", "default/connection")
+    monkeypatch.setenv(
+        "ATLAN_CONNECTION_QUALIFIED_NAME",
+        "default/custom/dxr-connection",
+    )
     monkeypatch.setenv("ATLAN_CONNECTION_NAME", "dxr-connection")
     monkeypatch.setenv("ATLAN_CONNECTOR_NAME", "custom-connector")
+    monkeypatch.setenv("ATLAN_DATABASE_NAME", "dxr")
+    monkeypatch.setenv("ATLAN_SCHEMA_NAME", "labels")
     monkeypatch.setenv("ATLAN_DATASET_PATH_PREFIX", "dxr")
     monkeypatch.setenv("ATLAN_BATCH_SIZE", "5")
     monkeypatch.setenv("LOG_LEVEL", "DEBUG")
@@ -147,18 +152,32 @@ def test_pipeline_runs_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
         "_ensure_connection_exists",
         lambda self: (
             atlan_uploader.AtlanConnectorType.CUSTOM,
-            "default/connection",
+            "default/custom/dxr-connection",
         ),
+    )
+    monkeypatch.setattr(
+        atlan_uploader.AtlanUploader,
+        "_ensure_database_exists",
+        lambda self, _: "default/custom/dxr-connection/dxr",
+    )
+    monkeypatch.setattr(
+        atlan_uploader.AtlanUploader,
+        "_ensure_schema_exists",
+        lambda self, *__: "default/custom/dxr-connection/dxr/labels",
     )
 
     pipeline.run()
 
-    assert captured_batches, "Expected datasets to be pushed into Atlan"
+    assert captured_batches, "Expected tables to be pushed into Atlan"
     assert len(captured_batches[0]) == 1
-    dataset = captured_batches[0][0]
-    attrs = dataset.attributes
-    assert attrs.qualified_name == "default/connection/dxr/classification-123"
-    assert attrs.name == "Heart Failure"
+    table = captured_batches[0][0]
+    attrs = table.attributes
+    assert (
+        attrs.qualified_name
+        == "default/custom/dxr-connection/dxr/labels/classification-123"
+    )
+    assert attrs.name == "classification-123"
+    assert getattr(attrs, "display_name", None) == "Heart Failure"
     assert attrs.description == "Files classified under the disease Heart Failure"
     assert "DXR dataset contains 2 file(s)." in attrs.user_description
     assert "patient-data.csv" in attrs.user_description
