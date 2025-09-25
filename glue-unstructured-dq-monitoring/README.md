@@ -26,10 +26,6 @@ This playbook proves out how Data X-Ray labels and metadata can drive unstructur
    ```bash
    aws glue start-crawler --name files-dq-check-files-crawler --region us-east-1
    ```
-7. Run the Glue DQ job to score unstructured files and enforce the bundled ruleset:
-   ```bash
-   aws glue start-job-run --job-name $(terraform output -raw glue_job_name) --region us-east-1
-   ```
 
 ## Default ruleset
 The sample Glue DQ rules identify files that contain highly sensitive labels but are missing required gating labels. Use this as a starting point and adapt the logic to your own label taxonomy.
