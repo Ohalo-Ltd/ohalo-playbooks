@@ -15,16 +15,18 @@ This playbook proves out how Data X-Ray labels and metadata can drive unstructur
 
 ## Getting started
 1. Run `./create-lambda-package.sh` to bundle the Lambda dependencies.
-2. Deploy the Terraform stack as usual (`terraform init && terraform apply`).
-3. Kick off the Lambda to refresh S3 snapshots:
+2. Generate a PAT token from the DXR Console.
+3. Create a new `terraform.tfvars` file, based off of the existing `terraform.example.tfvars` file and fill in the template values (the PAT from step 2 and the DXR URL).
+4. Deploy the Terraform stack as usual (`terraform init && terraform apply`).
+5. Kick off the Lambda to refresh S3 snapshots:
    ```bash
    aws lambda invoke --function-name files-dq-check-fetch-files-data --payload '{}' response.json --region us-east-1
    ```
-4. Refresh the Glue tables so Data Quality has the latest partitions:
+6. Refresh the Glue tables so Data Quality has the latest partitions:
    ```bash
    aws glue start-crawler --name files-dq-check-files-crawler --region us-east-1
    ```
-5. Run the Glue DQ job to score unstructured files and enforce the bundled ruleset:
+7. Run the Glue DQ job to score unstructured files and enforce the bundled ruleset:
    ```bash
    aws glue start-job-run --job-name $(terraform output -raw glue_job_name) --region us-east-1
    ```
