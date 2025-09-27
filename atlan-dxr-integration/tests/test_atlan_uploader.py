@@ -10,8 +10,10 @@ from atlan_dxr_integration import atlan_uploader
 from pyatlan.errors import ErrorCode, NotFoundError
 from pyatlan.model.assets.connection import Connection
 from pyatlan.model.assets.core.database import Database
+from pyatlan.model.assets.core.file import File
 from pyatlan.model.assets.core.schema import Schema
 from pyatlan.model.assets.core.table import Table
+from pyatlan.model.enums import FileType
 
 
 class _FakeMutationResponse:
@@ -114,15 +116,20 @@ class _FakeAssetService:
             qualified_name,
         )
 
-    def save(self, asset):
+    def save(self, assets):
+        batch = (
+            list(assets)
+            if isinstance(assets, (list, tuple))
+            else [assets]
+        )
         response = (
             self.save_responses.pop(0)
             if self.save_responses
-            else _FakeMutationResponse(request_id="req", created=[asset])
+            else _FakeMutationResponse(request_id="req", created=list(batch))
         )
         if isinstance(response, Exception):
             raise response
-        self.saved_assets.append(asset)
+        self.saved_assets.extend(batch)
         return response
 
 
@@ -194,24 +201,33 @@ def test_save_batch_wraps_atlan_errors(monkeypatch: pytest.MonkeyPatch, exceptio
         "_ensure_connection_exists",
         lambda self: (
             atlan_uploader.AtlanConnectorType.CUSTOM,
-            "default/connection",
+            "default/custom/dxr-connection",
         ),
     )
     monkeypatch.setattr(
         atlan_uploader.AtlanUploader,
         "_ensure_database_exists",
-        lambda self, _: "default/connection/dxr",
+        lambda self, _: "default/custom/dxr-connection/dxr",
     )
     monkeypatch.setattr(
         atlan_uploader.AtlanUploader,
         "_ensure_schema_exists",
-        lambda self, *__: "default/connection/dxr/labels",
+        lambda self, *__: "default/custom/dxr-connection/dxr/labels",
     )
     monkeypatch.setattr(atlan_uploader, "AtlanClient", _fake_client_factory)
     uploader = atlan_uploader.AtlanUploader(_build_config())
 
+    table = Table.creator(
+        name="test",
+        schema_qualified_name=uploader._schema_qualified_name,
+        schema_name=uploader._config.atlan_schema_name,
+        database_name=uploader._config.atlan_database_name,
+        database_qualified_name=uploader._database_qualified_name,
+        connection_qualified_name=uploader._connection_qualified_name,
+    )
+
     with pytest.raises(atlan_uploader.AtlanUploadError) as exc_info:
-        uploader._save_batch([object()])
+        uploader._save_assets([table], Table, "tables", "table")
 
     message = str(exc_info.value)
     assert "Atlan" in message
@@ -342,7 +358,7 @@ def test_save_batch_no_mutation_succeeds_when_assets_exist(monkeypatch: pytest.M
     )
     table.attributes.qualified_name = qualified_name
 
-    uploader._save_batch([table])
+    uploader._save_assets([table], Table, "tables", "table")
 
 
 def test_save_batch_no_mutation_raises_when_assets_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -394,6 +410,55 @@ def test_save_batch_no_mutation_raises_when_assets_missing(monkeypatch: pytest.M
     table.attributes.qualified_name = qualified_name
 
     with pytest.raises(atlan_uploader.AtlanUploadError) as exc_info:
-        uploader._save_batch([table])
+        uploader._save_assets([table], Table, "tables", "table")
 
     assert "did not mutate any tables" in str(exc_info.value)
+
+
+def test_upsert_files_sets_connector_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _build_config()
+
+    monkeypatch.setattr(
+        atlan_uploader.AtlanUploader,
+        "_ensure_connection_exists",
+        lambda self: (
+            atlan_uploader.AtlanConnectorType.CUSTOM,
+            config.atlan_connection_qualified_name,
+        ),
+    )
+    monkeypatch.setattr(
+        atlan_uploader.AtlanUploader,
+        "_ensure_database_exists",
+        lambda self, _: config.database_qualified_name,
+    )
+    monkeypatch.setattr(
+        atlan_uploader.AtlanUploader,
+        "_ensure_schema_exists",
+        lambda self, *__: config.schema_qualified_name,
+    )
+
+    fake_client = _FakeAtlanClient()
+    monkeypatch.setattr(atlan_uploader, "AtlanClient", lambda *_, **__: fake_client)
+
+    uploader = atlan_uploader.AtlanUploader(config)
+
+    file_asset = File.creator(
+        name="invoice.pdf",
+        connection_qualified_name=config.atlan_connection_qualified_name,
+        file_type=FileType.PDF,
+    )
+    file_asset.attributes.qualified_name = (
+        f"{config.atlan_connection_qualified_name}/file-123"
+    )
+
+    uploader.upsert_files([file_asset])
+
+    saved_assets = fake_client.asset.saved_assets
+    assert len(saved_assets) == 1
+    saved = saved_assets[0]
+    attrs = saved.attributes
+    assert attrs.connection_name == config.atlan_connection_name
+    assert attrs.connector_name == atlan_uploader.AtlanConnectorType.CUSTOM.value
+    assert attrs.qualified_name == (
+        f"{config.atlan_connection_qualified_name}/file-123"
+    )

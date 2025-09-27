@@ -10,6 +10,8 @@ import pytest
 
 from atlan_dxr_integration import atlan_uploader, pipeline
 from atlan_dxr_integration.dxr_client import Classification
+from pyatlan.model.assets.core.file import File
+from pyatlan.model.assets.core.table import Table
 
 
 class _FakeMutationResponse:
@@ -32,6 +34,7 @@ class _FakeDXRClient:
 
     def __init__(self, classifications: Iterable[Classification], files: Iterable[dict]):
         self._classifications = list(classifications)
+        self._all_files = list(files)
         self._files_by_label: Dict[str, List[dict]] = defaultdict(list)
         for payload in files:
             labels = payload.get("labels") or []
@@ -53,8 +56,18 @@ class _FakeDXRClient:
         return list(self._classifications)
 
     def stream_files(self) -> Iterator[dict]:
-        for items in self._files_by_label.values():
-            yield from items
+        yielded: set[str] = set()
+        for payload in self._all_files:
+            identifier = (
+                str(payload.get("id"))
+                if payload.get("id") is not None
+                else str(payload.get("fileId")) if payload.get("fileId") is not None else None
+            )
+            if identifier and identifier in yielded:
+                continue
+            if identifier:
+                yielded.add(identifier)
+            yield payload
 
     def fetch_files_for_label(
         self,
@@ -168,9 +181,12 @@ def test_pipeline_runs_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
 
     pipeline.run()
 
-    assert captured_batches, "Expected tables to be pushed into Atlan"
-    assert len(captured_batches[0]) == 1
-    table = captured_batches[0][0]
+    assert captured_batches, "Expected assets to be pushed into Atlan"
+    table_batch = next(batch for batch in captured_batches if batch and isinstance(batch[0], Table))
+    file_batch = next(batch for batch in captured_batches if batch and isinstance(batch[0], File))
+
+    assert len(table_batch) == 1
+    table = table_batch[0]
     attrs = table.attributes
     assert (
         attrs.qualified_name
@@ -184,6 +200,17 @@ def test_pipeline_runs_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "lab-results.parquet" in attrs.user_description
     assert attrs.source_url == "https://dxr.example.com/resource-search/classification-123"
     assert attrs.connector_name == "custom"
+
+    assert len(file_batch) == 2
+    file_asset = sorted(file_batch, key=lambda asset: asset.attributes.display_name)[0]
+    file_attrs = file_asset.attributes
+    assert file_attrs.connection_name == "dxr-connection"
+    assert file_attrs.connector_name == "custom"
+    assert file_attrs.qualified_name.startswith("default/custom/dxr-connection/")
+    assert file_attrs.file_path in {
+        "s3://bucket/patient-data.csv",
+        "s3://bucket/lab-results.parquet",
+    }
 
 
 @pytest.mark.integration

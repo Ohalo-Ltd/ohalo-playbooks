@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Type, TypeVar
 
 from pyatlan.client.atlan import AtlanClient
 from pyatlan.errors import (
@@ -12,13 +12,18 @@ from pyatlan.errors import (
     PermissionError as AtlanPermissionError,
 )
 from pyatlan.model.assets.connection import Connection
+from pyatlan.model.assets.core.asset import Asset
 from pyatlan.model.assets.core.database import Database
+from pyatlan.model.assets.core.file import File
 from pyatlan.model.assets.core.schema import Schema
 from pyatlan.model.assets.core.table import Table
 from pyatlan.model.enums import AtlanConnectorType
 
 from .config import Config
 from .dataset_builder import DatasetRecord
+
+
+AssetType = TypeVar("AssetType", bound=Asset)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,6 +50,10 @@ class AtlanUploader:
         )
 
     @property
+    def connection_qualified_name(self) -> str:
+        return self._connection_qualified_name
+
+    @property
     def client(self) -> AtlanClient:
         """Expose the underlying Atlan client for verification helpers."""
 
@@ -56,13 +65,32 @@ class AtlanUploader:
             table = self._build_table(record)
             batch.append(table)
             if len(batch) >= self._config.atlan_batch_size:
-                self._save_batch(batch)
+                self._save_assets(batch, Table, "tables", "table")
                 batch = []
         if batch:
-            self._save_batch(batch)
+            self._save_assets(batch, Table, "tables", "table")
 
     def table_qualified_name(self, record: DatasetRecord) -> str:
         return f"{self._schema_qualified_name}/{self._table_name(record)}"
+
+    def upsert_files(self, assets: Iterable[File]) -> None:
+        batch: List[File] = []
+        for asset in assets:
+            attrs = asset.attributes
+            attrs.connection_name = self._config.atlan_connection_name
+            attrs.connector_name = self._connector_type.value
+            if not attrs.connection_qualified_name:
+                attrs.connection_qualified_name = self._connection_qualified_name
+            if not attrs.qualified_name:
+                attrs.qualified_name = (
+                    f"{self._connection_qualified_name}/{attrs.name or asset.guid}"
+                )
+            batch.append(asset)
+            if len(batch) >= self._config.atlan_batch_size:
+                self._save_assets(batch, File, "file assets", "file asset")
+                batch = []
+        if batch:
+            self._save_assets(batch, File, "file assets", "file asset")
 
     def _build_table(self, record: DatasetRecord) -> Table:
         table_name = self._table_name(record)
@@ -86,54 +114,70 @@ class AtlanUploader:
 
         return table
 
-    def _save_batch(self, batch: List[Table]) -> None:
+    def _save_assets(
+        self,
+        batch: List[AssetType],
+        asset_type: Type[AssetType],
+        noun_plural: str,
+        noun_singular: str,
+    ) -> None:
         try:
             response = self._client.asset.save(batch)
-            created = response.assets_created(Table)
-            updated = response.assets_updated(Table)
-            partial = response.assets_partially_updated(Table)
+            created = response.assets_created(asset_type)
+            updated = response.assets_updated(asset_type)
+            partial = response.assets_partially_updated(asset_type)
             mutated_count = len(created) + len(updated) + len(partial)
             if mutated_count == 0:
-                if self._tables_exist(batch):
+                if self._assets_exist(batch, asset_type):
                     LOGGER.info(
-                        "No DXR table changes detected in Atlan (request id: %s); assets already up to date.",
+                        "No DXR %s were changed in Atlan (request id: %s); assets already up to date.",
+                        noun_plural,
                         getattr(response, "request_id", "unknown"),
                     )
                     return
                 message = (
                     "Atlan acknowledged the upsert request but did not mutate any "
-                    "tables. Verify the connection, connector name, and service "
+                    f"{noun_plural}. Verify the connection, connector name, and service "
                     "permissions."
                 )
                 LOGGER.error(message)
                 raise AtlanUploadError(message)
             LOGGER.info(
-                "Upserted %d DXR table(s) into Atlan (request id: %s)",
+                "Upserted %d DXR %s into Atlan (request id: %s)",
                 mutated_count,
+                noun_plural,
                 getattr(response, "request_id", "unknown"),
             )
         except AtlanPermissionError as exc:
             message = (
-                "Atlan rejected the table upsert due to insufficient permissions. "
-                "Verify that the provided API token can create table assets for "
+                f"Atlan rejected the {noun_singular} upsert due to insufficient permissions. "
+                "Verify that the provided API token can create "
+                f"{noun_plural} for "
                 f"connection '{self._config.atlan_connection_name}'."
             )
             LOGGER.error("%s (original error: %s)", message, exc)
             raise AtlanUploadError(message) from exc
         except AtlanError as exc:
-            message = "Atlan rejected the table upsert request."
+            message = f"Atlan rejected the {noun_singular} upsert request."
             LOGGER.error("%s (original error: %s)", message, exc)
             raise AtlanUploadError(message) from exc
 
-    def _tables_exist(self, batch: Iterable[Table]) -> bool:
-        """Confirm each table in the batch exists in Atlan."""
+    def _assets_exist(
+        self,
+        batch: Iterable[AssetType],
+        asset_type: Type[AssetType],
+    ) -> bool:
+        """Confirm each asset in the batch exists in Atlan."""
 
-        for table in batch:
-            qualified_name = table.attributes.qualified_name
+        for asset in batch:
+            attrs = asset.attributes
+            qualified_name = getattr(attrs, "qualified_name", None)
             try:
+                if not qualified_name:
+                    return False
                 self._client.asset.get_by_qualified_name(
                     qualified_name,
-                    Table,
+                    asset_type,
                     ignore_relationships=True,
                 )
             except AtlanError:

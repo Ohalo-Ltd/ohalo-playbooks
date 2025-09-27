@@ -67,3 +67,23 @@ def test_dataset_builder_handles_multiple_labels():
     assert record.file_count == 2
     assert len(record.sample_files) == 1
     assert isinstance(record.sample_files[0], SampleFile)
+
+
+def test_dataset_builder_supports_camel_case_keys():
+    classification = _classification(id="999", name="Finance")
+    builder = DatasetBuilder([classification])
+    file_payload = {
+        "fileId": "file-3",
+        "fileName": "invoice.pdf",
+        "filePath": "//sharepoint/contracts/2023/invoice.pdf",
+        "labels": [{"id": "999"}],
+    }
+    builder.consume_file(file_payload)
+    record = builder.build()[0]
+    assert record.file_count == 1
+    assert record.sample_files[0].identifier == "file-3"
+    assert record.sample_files[0].name == "invoice.pdf"
+    assert (
+        record.sample_files[0].path
+        == "//sharepoint/contracts/2023/invoice.pdf"
+    )

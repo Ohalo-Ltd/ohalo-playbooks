@@ -69,11 +69,15 @@ class DatasetBuilder:
         allowed_types: Optional[Iterable[str]] = None,
         sample_file_limit: int = 5,
         dxr_base_url: Optional[str] = None,
+        file_fetch_limit: Optional[int] = None,
     ) -> None:
         self._records: Dict[str, DatasetRecord] = {}
         self._allowed_types = {t.upper() for t in allowed_types} if allowed_types else None
         self._sample_file_limit = sample_file_limit
         self._dxr_base_url = _normalise_base_url(dxr_base_url) if dxr_base_url else None
+        self._file_fetch_limit = (
+            file_fetch_limit if file_fetch_limit and file_fetch_limit > 0 else None
+        )
 
         for classification in classifications:
             if self._allowed_types and (
@@ -102,13 +106,27 @@ class DatasetBuilder:
             record = self._records.get(label)
             if not record:
                 continue
+            if self._file_fetch_limit and record.file_count >= self._file_fetch_limit:
+                continue
             record.file_count += 1
             if len(record.sample_files) < self._sample_file_limit:
                 record.sample_files.append(
                     SampleFile(
-                        identifier=_safe_str(payload.get("id")),
-                        name=_safe_str(payload.get("name") or payload.get("filename")),
-                        path=_safe_str(payload.get("path") or payload.get("filepath")),
+                        identifier=_safe_str(
+                            payload.get("id")
+                            or payload.get("fileId")
+                            or payload.get("file_id")
+                        ),
+                        name=_safe_str(
+                            payload.get("name")
+                            or payload.get("filename")
+                            or payload.get("fileName")
+                        ),
+                        path=_safe_str(
+                            payload.get("path")
+                            or payload.get("filepath")
+                            or payload.get("filePath")
+                        ),
                         link=_safe_str(payload.get("link")),
                     )
                 )

@@ -101,6 +101,19 @@ confirms the resulting tables exist via `get_by_qualified_name`. It exits with a
 status if no classifications are returned, no tables are generated, or Atlan does not
 acknowledge the upsert.
 
+### Cleaning up connections during testing
+
+To hard-delete the configured Atlan connection (for example between integration test
+runs), use the dedicated helper:
+
+```bash
+python -m atlan_dxr_integration.connection_manager --delete-type purge
+```
+
+By default the helper issues a soft delete before performing the hard delete. Pass
+`--skip-soft-delete` to jump straight to the requested deletion mode. Available delete
+types map to `pyatlan`'s `AtlanDeleteType` values (`hard`, `purge`).
+
 ## Development
 
 Run unit tests from the repository root:
