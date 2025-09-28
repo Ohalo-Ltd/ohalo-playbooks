@@ -1,4 +1,4 @@
-"""Helpers for transforming DXR file payloads into Atlan File assets."""
+"""Factory for constructing enriched Atlan File assets from DXR payloads."""
 
 from __future__ import annotations
 
@@ -6,67 +6,60 @@ import logging
 import math
 import re
 import unicodedata
-from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Set
+from typing import Dict, Iterable, Mapping, Optional, Sequence, Set
 from urllib.parse import urljoin
 
 from pyatlan.model.assets.core.file import File
-from pyatlan.model.enums import FileType
+from pyatlan.model.enums import AtlanTagColor, FileType
+
+from .global_attributes import GlobalAttributeManager
+from .tag_registry import TagHandle, TagRegistry
 
 LOGGER = logging.getLogger(__name__)
 
 
-class FileAssetBuilder:
-    """Accumulates DXR file payloads and converts them into Atlan File assets."""
+class FileAssetFactory:
+    """Create Atlan File assets populated with DXR metadata and tags."""
 
     def __init__(
         self,
         *,
+        tag_registry: TagRegistry,
+        tag_namespace: str,
+        dxr_base_url: Optional[str] = None,
+    ) -> None:
+        self._tag_registry = tag_registry
+        self._tag_namespace = tag_namespace
+        self._dxr_base_url = _normalise_base_url(dxr_base_url) if dxr_base_url else None
+
+    def build(
+        self,
+        payload: Dict[str, object],
+        *,
         connection_qualified_name: str,
         connection_name: str,
-        dxr_base_url: str | None = None,
-    ) -> None:
-        self._connection_qualified_name = connection_qualified_name.rstrip("/")
-        self._connection_name = connection_name
-        self._dxr_base_url = _normalise_base_url(dxr_base_url)
-        self._files: Dict[str, Dict[str, object]] = {}
-
-    def consume(self, payload: Dict[str, object]) -> None:
-        """Queue a DXR file payload for transformation."""
-
+        classification_tags: Mapping[str, TagHandle],
+    ) -> File:
         identifier = _file_identifier(payload)
         if not identifier:
-            LOGGER.debug("Ignoring DXR file payload without identifier: %s", payload)
-            return
-        if identifier not in self._files:
-            self._files[identifier] = payload
+            raise ValueError("DXR file payload missing unique identifier")
 
-    def build(self) -> List[File]:
-        """Build Atlan File assets for all queued payloads."""
-
-        assets: List[File] = []
-        for identifier, payload in self._files.items():
-            asset = self._to_file_asset(identifier, payload)
-            assets.append(asset)
-        return assets
-
-    def _to_file_asset(self, identifier: str, payload: Dict[str, object]) -> File:
-        name = _safe_str(
-            payload.get("fileName")
-            or payload.get("name")
-            or payload.get("filename")
-            or identifier
-        ) or identifier
+        name = _coalesce_str(
+            payload.get("fileName"),
+            payload.get("name"),
+            payload.get("filename"),
+            identifier,
+        )
 
         asset = File.creator(
             name=name,
-            connection_qualified_name=self._connection_qualified_name,
+            connection_qualified_name=connection_qualified_name,
             file_type=_resolve_file_type(payload, name=name),
         )
 
         attrs = asset.attributes
-        attrs.qualified_name = f"{self._connection_qualified_name}/{identifier}"
-        attrs.connection_name = self._connection_name
+        attrs.qualified_name = f"{connection_qualified_name}/{identifier}"
+        attrs.connection_name = connection_name
         attrs.display_name = name
 
         description = _build_description(payload)
@@ -74,55 +67,220 @@ class FileAssetBuilder:
             attrs.description = description
             attrs.user_description = description
 
-        path = _safe_str(
-            payload.get("filePath")
-            or payload.get("path")
-            or payload.get("filepath")
+        path = _coalesce_str(
+            payload.get("filePath"),
+            payload.get("path"),
+            payload.get("filepath"),
         )
         if path:
             attrs.file_path = path
-
-        source_url = _derive_source_url(identifier, path, self._dxr_base_url)
-        if source_url:
-            attrs.source_url = source_url
 
         owner = _extract_owner(payload)
         if owner:
             attrs.owner_users = {owner}
 
-        tags = _collect_tags(payload)
+        tags = self._build_tags(payload, classification_tags)
         if tags:
-            existing = set(attrs.asset_tags or [])
-            attrs.asset_tags = existing.union(tags)
+            attrs.asset_tags = [handle.name for handle in sorted(tags, key=lambda h: h.name)]
+
+        source_url = _derive_source_url(identifier, path, self._dxr_base_url)
+        if source_url:
+            attrs.source_url = source_url
 
         return asset
+
+    def _build_tags(
+        self,
+        payload: Dict[str, object],
+        classification_tags: Mapping[str, TagHandle],
+    ) -> Set[TagHandle]:
+        tags: Set[TagHandle] = set()
+
+        def add_classification(identifier: Optional[str]) -> bool:
+            if not identifier:
+                return False
+            handle = classification_tags.get(identifier)
+            if handle:
+                tags.add(handle)
+                return True
+            return False
+
+        # Classifications / labels
+        raw_labels = payload.get("labels") or payload.get("classifications")
+        if isinstance(raw_labels, list):
+            for item in raw_labels:
+                if isinstance(item, dict):
+                    identifier = _coalesce_str(
+                        item.get("id"), item.get("classificationId")
+                    )
+                    if add_classification(identifier):
+                        continue
+                    name = _coalesce_str(item.get("name"))
+                    if name:
+                        tags.add(
+                            self._tag_registry.ensure(
+                                slug_parts=["label", name],
+                                display_name=f"Label :: {name}",
+                                color=AtlanTagColor.GRAY,
+                            )
+                        )
+                elif isinstance(item, str):
+                    add_classification(_coalesce_str(item))
+        elif isinstance(raw_labels, dict):
+            identifier = _coalesce_str(
+                raw_labels.get("id"), raw_labels.get("classificationId")
+            )
+            add_classification(identifier)
+
+        # Fallback for legacy helper
+        for identifier in _extract_label_identifiers(payload):
+            add_classification(identifier)
+
+        # DLP labels
+        for dlp in _extract_iterable_dict(payload.get("dlpLabels")):
+            name = _coalesce_str(dlp.get("name"))
+            system = _coalesce_str(dlp.get("dlpSystem"))
+            if not name:
+                continue
+            display = f"DLP :: {system or 'Unspecified'} :: {name}"
+            slug_parts = ["dlp", system or "unspecified", name]
+            tags.add(
+                self._tag_registry.ensure(
+                    slug_parts=slug_parts,
+                    display_name=display,
+                    color=AtlanTagColor.YELLOW,
+                )
+            )
+
+        # Annotators
+        for annotator in _extract_iterable_dict(payload.get("annotators")):
+            has_classification = add_classification(_coalesce_str(annotator.get("id")))
+            name = _coalesce_str(annotator.get("name"))
+            if name and not has_classification:
+                tags.add(
+                    self._tag_registry.ensure(
+                        slug_parts=["annotator", name],
+                        display_name=f"Annotator :: {name}",
+                        color=AtlanTagColor.GREEN,
+                    )
+                )
+            domain = annotator.get("domain")
+            domain_id = None
+            domain_name = None
+            if isinstance(domain, dict):
+                domain_id = _coalesce_str(domain.get("id"))
+                domain_name = _coalesce_str(domain.get("name"))
+            if not add_classification(domain_id) and domain_name:
+                tags.add(
+                    self._tag_registry.ensure(
+                        slug_parts=["annotator-domain", domain_name],
+                        display_name=f"Annotator Domain :: {domain_name}",
+                        color=AtlanTagColor.GREEN,
+                    )
+                )
+
+        # Entitlements
+        entitlements = payload.get("entitlements")
+        if isinstance(entitlements, dict):
+            for principal in _extract_iterable_dict(entitlements.get("whoCanAccess")):
+                account_type = (_coalesce_str(principal.get("accountType")) or "UNKNOWN").upper()
+                identifier = _coalesce_str(principal.get("email"), principal.get("name"))
+                if identifier:
+                    tags.add(
+                        self._tag_registry.ensure(
+                            slug_parts=["entitlement", account_type, identifier],
+                            display_name=f"Entitlement :: {account_type.title()} :: {identifier}",
+                            color=AtlanTagColor.RED,
+                        )
+                    )
+
+        # Extracted metadata
+        for item in _extract_iterable_dict(payload.get("extractedMetadata")):
+            if add_classification(_coalesce_str(item.get("id"))):
+                # Still capture rich value context when available.
+                name = _coalesce_str(item.get("name"))
+                value = _coalesce_str(item.get("value"))
+                if name and value:
+                    tags.add(
+                        self._tag_registry.ensure(
+                            slug_parts=["metadata", name, value],
+                            display_name=f"Metadata :: {name} = {value}",
+                            color=AtlanTagColor.GRAY,
+                        )
+                    )
+                continue
+
+            name = _coalesce_str(item.get("name"))
+            value = _coalesce_str(item.get("value"))
+            if name and value:
+                tags.add(
+                    self._tag_registry.ensure(
+                        slug_parts=["metadata", name, value],
+                        display_name=f"Metadata :: {name} = {value}",
+                        color=AtlanTagColor.GRAY,
+                    )
+                )
+
+        # Categories
+        raw_categories = payload.get("categories")
+        for category in _normalize_to_list(raw_categories):
+            if isinstance(category, dict):
+                name = _coalesce_str(category.get("name"))
+            else:
+                name = _coalesce_str(category)
+            if name:
+                tags.add(
+                    self._tag_registry.ensure(
+                        slug_parts=["category", name],
+                        display_name=f"Category :: {name}",
+                        color=AtlanTagColor.GRAY,
+                    )
+                )
+
+        return tags
+
+
+def _extract_iterable_dict(value: object) -> Iterable[Dict[str, object]]:
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, dict):
+                yield item
+    elif isinstance(value, dict):
+        yield value
+    return []
+
+
+def _normalize_to_list(value: object) -> Sequence[object]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
 
 
 def _file_identifier(payload: Dict[str, object]) -> Optional[str]:
     for key in ("fileId", "id", "contentSha256", "path", "filePath"):
         value = payload.get(key)
-        text = _safe_str(value)
+        text = _coalesce_str(value)
         if text:
             return _normalise_identifier(text)
     return None
 
 
-def _normalise_identifier(value: str) -> str:
-    return value.replace(" ", "_")
-
-
 def _resolve_file_type(payload: Dict[str, object], *, name: str) -> FileType:
-    mime = _safe_str(payload.get("mimeType"))
+    mime = _coalesce_str(payload.get("mimeType"))
     if mime:
         file_type = _MIME_TYPE_MAP.get(mime.lower())
         if file_type:
             return file_type
 
-    extension = Path(name).suffix.lower()
+    extension = _extract_extension(name)
     if not extension:
-        path = _safe_str(payload.get("filePath") or payload.get("path") or payload.get("filepath"))
+        path = _coalesce_str(
+            payload.get("filePath"), payload.get("path"), payload.get("filepath")
+        )
         if path:
-            extension = Path(path).suffix.lower()
+            extension = _extract_extension(path)
 
     if extension:
         file_type = _EXTENSION_MAP.get(extension)
@@ -171,28 +329,22 @@ _EXTENSION_MAP: Dict[str, FileType] = {
 }
 
 
-def _collect_tags(payload: Dict[str, object]) -> Set[str]:
-    tags: Set[str] = set()
-
-    for label in _extract_label_names(payload):
-        tags.add(_format_tag("dxr-label", label))
-
-    tags.update(_extract_dlp_labels(payload))
-    tags.update(_extract_annotator_tags(payload))
-    tags.update(_extract_entitlement_tags(payload))
-    tags.update(_extract_metadata_tags(payload))
-    tags.update(_extract_category_tags(payload))
-
-    return {tag for tag in tags if tag}
+def _extract_extension(name: str) -> Optional[str]:
+    if not name:
+        return None
+    parts = name.rsplit(".", 1)
+    if len(parts) != 2:
+        return None
+    return f".{parts[1].lower()}"
 
 
 def _build_description(payload: Dict[str, object]) -> Optional[str]:
-    lines: List[str] = []
+    lines = []
 
     datasource = payload.get("datasource")
     if isinstance(datasource, dict):
-        datasource_name = _safe_str(datasource.get("name"))
-        datasource_type = _safe_str(
+        datasource_name = _coalesce_str(datasource.get("name"))
+        datasource_type = _coalesce_str(
             (datasource.get("connector") or {}).get("type")
             if isinstance(datasource.get("connector"), dict)
             else None
@@ -203,10 +355,10 @@ def _build_description(payload: Dict[str, object]) -> Optional[str]:
             else:
                 lines.append(f"Data source: {datasource_name}")
 
-    path = _safe_str(
-        payload.get("filePath")
-        or payload.get("path")
-        or payload.get("filepath")
+    path = _coalesce_str(
+        payload.get("filePath"),
+        payload.get("path"),
+        payload.get("filepath"),
     )
     if path:
         lines.append(f"Path: {path}")
@@ -215,110 +367,31 @@ def _build_description(payload: Dict[str, object]) -> Optional[str]:
     if isinstance(size, int) and size >= 0:
         lines.append(f"Size: {_format_bytes(size)}")
 
-    labels = _extract_label_names(payload)
-    if labels:
-        lines.append("Labels: " + ", ".join(labels))
-
-    scan_depth = _safe_str(payload.get("scanDepth"))
+    scan_depth = _coalesce_str(payload.get("scanDepth"))
     if scan_depth:
         lines.append(f"Scan depth: {scan_depth}")
 
     return "\n".join(lines) if lines else None
 
 
-def _extract_label_names(payload: Dict[str, object]) -> List[str]:
-    raw = payload.get("labels")
-    names: List[str] = []
+def _extract_label_identifiers(payload: Dict[str, object]) -> Iterable[str]:
+    raw = payload.get("labels") or payload.get("classifications")
     if isinstance(raw, list):
         for item in raw:
             if isinstance(item, dict):
-                name = _safe_str(item.get("name"))
-                if name:
-                    names.append(name)
-    return names
-
-
-def _extract_dlp_labels(payload: Dict[str, object]) -> Set[str]:
-    tags: Set[str] = set()
-    raw = payload.get("dlpLabels")
-    if isinstance(raw, list):
-        for item in raw:
-            if not isinstance(item, dict):
-                continue
-            name = _safe_str(item.get("name"))
-            system = _safe_str(item.get("dlpSystem"))
-            if name:
-                value = f"{system}:{name}" if system else name
-                tags.add(_format_tag("dlp", value))
-    return tags
-
-
-def _extract_annotator_tags(payload: Dict[str, object]) -> Set[str]:
-    tags: Set[str] = set()
-    raw = payload.get("annotators")
-    if isinstance(raw, list):
-        for item in raw:
-            if not isinstance(item, dict):
-                continue
-            name = _safe_str(item.get("name"))
-            if name:
-                tags.add(_format_tag("annotator", name))
-            domain = item.get("domain")
-            domain_name = _safe_str(domain.get("name")) if isinstance(domain, dict) else None
-            if domain_name:
-                tags.add(_format_tag("annotator-domain", domain_name))
-    return tags
-
-
-def _extract_entitlement_tags(payload: Dict[str, object]) -> Set[str]:
-    tags: Set[str] = set()
-    entitlements = payload.get("entitlements")
-    if not isinstance(entitlements, dict):
-        return tags
-    principals = entitlements.get("whoCanAccess")
-    if not isinstance(principals, list):
-        return tags
-    for principal in principals:
-        if not isinstance(principal, dict):
-            continue
-        account_type = _safe_str(principal.get("accountType")) or "unknown"
-        key = _safe_str(principal.get("email") or principal.get("name"))
-        if key:
-            tags.add(_format_tag("entitlement", f"{account_type}:{key}"))
-    return tags
-
-
-def _extract_metadata_tags(payload: Dict[str, object]) -> Set[str]:
-    tags: Set[str] = set()
-    raw = payload.get("extractedMetadata")
-    if not isinstance(raw, list):
-        return tags
-    for item in raw:
-        if not isinstance(item, dict):
-            continue
-        name = _safe_str(item.get("name"))
-        value = _safe_str(item.get("value"))
-        if name and value:
-            tags.add(_format_tag("metadata", f"{name}={value}"))
-    return tags
-
-
-def _extract_category_tags(payload: Dict[str, object]) -> Set[str]:
-    tags: Set[str] = set()
-    raw = payload.get("categories")
-    if isinstance(raw, list):
-        for item in raw:
-            if isinstance(item, dict):
-                name = _safe_str(item.get("name"))
-            else:
-                name = _safe_str(item)
-            if name:
-                tags.add(_format_tag("category", name))
+                identifier = _coalesce_str(
+                    item.get("id"),
+                    item.get("classificationId"),
+                )
+                if identifier:
+                    yield identifier
+            elif isinstance(item, str):
+                yield item
     elif isinstance(raw, dict):
-        name = _safe_str(raw.get("name"))
-        if name:
-            tags.add(_format_tag("category", name))
-    return tags
+        for key in ("id", "classificationId"):
+            value = raw.get(key)
+            if value:
+                yield str(value)
 
 
 def _derive_source_url(
@@ -341,10 +414,10 @@ def _looks_like_url(path: str) -> bool:
 def _extract_owner(payload: Dict[str, object]) -> Optional[str]:
     owner = payload.get("owner")
     if isinstance(owner, dict):
-        email = _safe_str(owner.get("email"))
+        email = _coalesce_str(owner.get("email"))
         if email:
             return email
-        name = _safe_str(owner.get("name"))
+        name = _coalesce_str(owner.get("name"))
         if name:
             return name
     return None
@@ -361,24 +434,25 @@ def _format_bytes(size: int) -> str:
     return f"{scaled:.1f} {suffix}"
 
 
-def _normalise_base_url(value: Optional[str]) -> Optional[str]:
-    if not value:
-        return None
+def _normalise_base_url(value: str) -> str:
     cleaned = value.rstrip("/")
     if cleaned.endswith("/api"):
         cleaned = cleaned[: -len("/api")]
     return cleaned
 
 
-def _safe_str(value: object) -> Optional[str]:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
+def _normalise_identifier(value: str) -> str:
+    return value.replace(" ", "_")
 
 
-def _format_tag(namespace: str, value: str) -> str:
-    return f"{namespace}:{_slugify(value)}"
+def _coalesce_str(*values: object) -> Optional[str]:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
 
 
 def _slugify(value: str) -> str:
@@ -389,4 +463,4 @@ def _slugify(value: str) -> str:
     return cleaned or "unknown"
 
 
-__all__ = ["FileAssetBuilder"]
+__all__ = ["FileAssetFactory"]

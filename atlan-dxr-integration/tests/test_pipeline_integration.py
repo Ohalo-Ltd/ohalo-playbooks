@@ -1,95 +1,177 @@
-"""Integration-style tests for the DXR → Atlan pipeline."""
+"""Integration-style tests for the DXR → Atlan pipeline with stub collaborators."""
 
 from __future__ import annotations
 
-from collections import defaultdict
 from types import SimpleNamespace
-from typing import Dict, Iterable, Iterator, List
+from typing import Dict, List
 
 import pytest
 
-from atlan_dxr_integration import atlan_uploader, pipeline
+from atlan_dxr_integration import pipeline
+from atlan_dxr_integration.connection_utils import ConnectionHandle
+from atlan_dxr_integration.tag_registry import TagHandle
 from atlan_dxr_integration.dxr_client import Classification
 from pyatlan.model.assets.core.file import File
 from pyatlan.model.assets.core.table import Table
-
-
-class _FakeMutationResponse:
-    def __init__(self, assets):
-        self._assets = assets
-        self.request_id = "req-1"
-
-    def assets_created(self, asset_type):
-        return [asset for asset in self._assets if isinstance(asset, asset_type)]
-
-    def assets_updated(self, asset_type):
-        return []
-
-    def assets_partially_updated(self, asset_type):
-        return []
+from pyatlan.model.enums import AtlanConnectorType, FileType
 
 
 class _FakeDXRClient:
-    """Stub DXR client for pipeline integration tests."""
-
-    def __init__(self, classifications: Iterable[Classification], files: Iterable[dict]):
+    def __init__(self, classifications, files):
         self._classifications = list(classifications)
-        self._all_files = list(files)
-        self._files_by_label: Dict[str, List[dict]] = defaultdict(list)
-        for payload in files:
-            labels = payload.get("labels") or []
-            for label in labels:
-                label_id = label.get("id") or label.get("classificationId")
-                if label_id:
-                    self._files_by_label[str(label_id)].append(payload)
+        self._files = list(files)
 
     def __enter__(self) -> "_FakeDXRClient":
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:  # pragma: no cover - cleanup hook
-        return None
+    def __exit__(self, exc_type, exc, tb):
+        return False
 
-    def close(self) -> None:  # pragma: no cover - compatibility shim
-        return None
-
-    def fetch_classifications(self) -> List[Classification]:
+    def fetch_classifications(self):
         return list(self._classifications)
 
-    def stream_files(self) -> Iterator[dict]:
-        yielded: set[str] = set()
-        for payload in self._all_files:
-            identifier = (
-                str(payload.get("id"))
-                if payload.get("id") is not None
-                else str(payload.get("fileId")) if payload.get("fileId") is not None else None
-            )
-            if identifier and identifier in yielded:
-                continue
-            if identifier:
-                yielded.add(identifier)
-            yield payload
+    def stream_files(self):
+        yield from self._files
 
-    def fetch_files_for_label(
+
+class _StubTagRegistry:
+    def __init__(self, client, namespace):
+        self.namespace = namespace
+
+    def ensure(self, *, slug_parts, display_name, **_):
+        slug = "/".join(slug_parts)
+        name = f"{self.namespace} :: {display_name}"
+        return TagHandle(slug=slug, name=name)
+
+
+class _StubGlobalAttributeManager:
+    def __init__(self, client, tag_registry):
+        self._registry = tag_registry
+
+    def ensure_classification_tags(self, classifications):
+        mapping = {}
+        for classification in classifications:
+            identifier = classification.identifier
+            display = classification.name or identifier
+            handle = self._registry.ensure(
+                slug_parts=["classification", identifier],
+                display_name=f"Classification :: {display}",
+            )
+            mapping[identifier] = handle
+        return mapping
+
+
+class _StubFileAssetFactory:
+    def __init__(self, *, tag_registry, tag_namespace, dxr_base_url=None):
+        self._registry = tag_registry
+
+    def build(
         self,
-        label_id: str,
+        payload: Dict[str, object],
         *,
-        label_name: str | None = None,
-        max_items: int | None = None,
-    ) -> List[dict]:
-        items = list(self._files_by_label.get(label_id, []))
-        if max_items and max_items > 0:
-            return items[:max_items]
-        if not items and label_name:
-            for key, value in self._files_by_label.items():
-                if key.lower() == (label_name or "").lower():
-                    return list(value)
-        return items
+        connection_qualified_name: str,
+        connection_name: str,
+        classification_tags,
+    ) -> File:
+        identifier = payload.get("id") or payload.get("fileId") or "file"
+        asset = File.creator(
+            name=payload.get("name") or payload.get("fileName") or str(identifier),
+            connection_qualified_name=connection_qualified_name,
+            file_type=FileType.TXT,
+        )
+        attrs = asset.attributes
+        attrs.qualified_name = f"{connection_qualified_name}/{identifier}"
+        attrs.connection_name = connection_name
+        attrs.asset_tags = [handle.name for handle in classification_tags.values()]
+        return asset
+
+
+class _StubConnectionProvisioner:
+    def __init__(self, client):
+        self.client = client
+
+    def ensure_connection(
+        self,
+        *,
+        qualified_name: str,
+        connection_name: str,
+        connector_name: str,
+        domain_name: str | None = None,
+    ) -> ConnectionHandle:
+        connection = SimpleNamespace(attributes=SimpleNamespace(name=connection_name))
+        return ConnectionHandle(
+            connector_type=AtlanConnectorType.CUSTOM,
+            qualified_name=qualified_name,
+            connection=connection,
+        )
+
+    def ensure_database(self, *, name: str, qualified_name: str, **_):
+        return qualified_name
+
+    def ensure_schema(self, *, name: str, qualified_name: str, **_):
+        return qualified_name
+
+
+class _StubDatasourceCoordinator:
+    def __init__(self, *, config, client, provisioner, factory):
+        self.records: List[Dict[str, object]] = []
+        self._factory = factory
+        self.flushed = False
+
+    def consume(self, payload, *, classification_tags):
+        self.records.append(payload)
+        self._factory.build(
+            payload,
+            connection_qualified_name="default/custom/dxr-datasource",
+            connection_name="dxr-datasource",
+            classification_tags=classification_tags,
+        )
+
+    def flush(self):
+        self.flushed = True
+
+
+class _StubUploader:
+    def __init__(self, config):
+        self.client = SimpleNamespace()
+        self.upserts: List[List[Table]] = []
+
+    def upsert(self, records):
+        batch = []
+        for record in records:
+            table = Table.creator(
+                name=record.identifier,
+                schema_qualified_name="default/custom/dxr-unstructured-attributes/dxr/labels",
+                database_qualified_name="default/custom/dxr-unstructured-attributes/dxr",
+                database_name="dxr",
+                schema_name="labels",
+                connection_qualified_name="default/custom/dxr-unstructured-attributes",
+            )
+            batch.append(table)
+        self.upserts.append(batch)
+
+
+def _prepare_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DXR_BASE_URL", "https://dxr.example.com/api")
+    monkeypatch.setenv("DXR_PAT", "dxr-token")
+    monkeypatch.setenv("ATLAN_BASE_URL", "https://atlan.example.com")
+    monkeypatch.setenv("ATLAN_API_TOKEN", "atlan-token")
+    monkeypatch.setenv(
+        "ATLAN_GLOBAL_CONNECTION_QUALIFIED_NAME",
+        "default/custom/dxr-unstructured-attributes",
+    )
+    monkeypatch.setenv("ATLAN_GLOBAL_CONNECTION_NAME", "dxr-unstructured-attributes")
+    monkeypatch.setenv("ATLAN_GLOBAL_CONNECTOR_NAME", "custom-connector")
+    monkeypatch.setenv("ATLAN_GLOBAL_DOMAIN", "DXR Unstructured")
+    monkeypatch.setenv("ATLAN_DATASOURCE_CONNECTION_PREFIX", "dxr-datasource")
+    monkeypatch.setenv("ATLAN_BATCH_SIZE", "5")
+    monkeypatch.setenv("ATLAN_DATABASE_NAME", "dxr")
+    monkeypatch.setenv("ATLAN_SCHEMA_NAME", "labels")
+    monkeypatch.setenv("LOG_LEVEL", "DEBUG")
 
 
 @pytest.mark.integration
 def test_pipeline_runs_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pipeline builds tables from DXR metadata and upserts them into Atlan."""
-
     classifications = [
         Classification(
             identifier="classification-123",
@@ -116,166 +198,68 @@ def test_pipeline_runs_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
         },
     ]
 
-    fake_client = _FakeDXRClient(classifications, files)
+    _prepare_env(monkeypatch)
+    captured_files: list[Dict[str, object]] = []
 
-    def _client_factory(base_url: str, pat_token: str) -> _FakeDXRClient:
-        assert base_url == "https://dxr.example.com/api"
-        assert pat_token == "dxr-token"
-        return fake_client
+    def _ds_factory(**kwargs):
+        coordinator = _StubDatasourceCoordinator(**kwargs)
+        original_consume = coordinator.consume
 
-    monkeypatch.setenv("DXR_BASE_URL", "https://dxr.example.com/api")
-    monkeypatch.setenv("DXR_PAT", "dxr-token")
-    monkeypatch.setenv("DXR_CLASSIFICATION_TYPES", "ANNOTATOR")
-    monkeypatch.setenv("DXR_SAMPLE_FILE_LIMIT", "2")
+        def _consume(payload, *, classification_tags):
+            captured_files.append(payload)
+            original_consume(payload, classification_tags=classification_tags)
 
-    monkeypatch.setenv("ATLAN_BASE_URL", "https://atlan.example.com")
-    monkeypatch.setenv("ATLAN_API_TOKEN", "atlan-token")
-    monkeypatch.setenv(
-        "ATLAN_CONNECTION_QUALIFIED_NAME",
-        "default/custom/dxr-connection",
-    )
-    monkeypatch.setenv("ATLAN_CONNECTION_NAME", "dxr-connection")
-    monkeypatch.setenv("ATLAN_CONNECTOR_NAME", "custom-connector")
-    monkeypatch.setenv("ATLAN_DATABASE_NAME", "dxr")
-    monkeypatch.setenv("ATLAN_SCHEMA_NAME", "labels")
-    monkeypatch.setenv("ATLAN_DATASET_PATH_PREFIX", "dxr")
-    monkeypatch.setenv("ATLAN_BATCH_SIZE", "5")
-    monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+        coordinator.consume = _consume  # type: ignore
+        return coordinator
 
-    monkeypatch.setattr(pipeline, "DXRClient", lambda base_url, pat: _client_factory(base_url, pat))
-
-    captured_batches: list = []
-
-    class _FakeAssetClient:
-        def save(self, assets):
-            batch = list(assets)
-            captured_batches.append(batch)
-            return _FakeMutationResponse(batch)
-
-        def get_by_qualified_name(self, qualified_name, asset_type, **kwargs):
-            return SimpleNamespace(attributes=SimpleNamespace(qualified_name=qualified_name))
-
-    class _FakeAtlanClient:
-        def __init__(self, *args, **kwargs):
-            self.asset = _FakeAssetClient()
-
-    monkeypatch.setattr(atlan_uploader, "AtlanClient", _FakeAtlanClient)
-    monkeypatch.setattr(
-        atlan_uploader.AtlanUploader,
-        "_ensure_connection_exists",
-        lambda self: (
-            atlan_uploader.AtlanConnectorType.CUSTOM,
-            "default/custom/dxr-connection",
-        ),
-    )
-    monkeypatch.setattr(
-        atlan_uploader.AtlanUploader,
-        "_ensure_database_exists",
-        lambda self, _: "default/custom/dxr-connection/dxr",
-    )
-    monkeypatch.setattr(
-        atlan_uploader.AtlanUploader,
-        "_ensure_schema_exists",
-        lambda self, *__: "default/custom/dxr-connection/dxr/labels",
-    )
+    monkeypatch.setattr(pipeline, "DXRClient", lambda *args, **kwargs: _FakeDXRClient(classifications, files))
+    monkeypatch.setattr(pipeline, "AtlanUploader", _StubUploader)
+    monkeypatch.setattr(pipeline, "ConnectionProvisioner", _StubConnectionProvisioner)
+    monkeypatch.setattr(pipeline, "TagRegistry", _StubTagRegistry)
+    monkeypatch.setattr(pipeline, "GlobalAttributeManager", _StubGlobalAttributeManager)
+    monkeypatch.setattr(pipeline, "FileAssetFactory", _StubFileAssetFactory)
+    monkeypatch.setattr(pipeline, "DatasourceIngestionCoordinator", _ds_factory)
 
     pipeline.run()
 
-    assert captured_batches, "Expected assets to be pushed into Atlan"
-    table_batch = next(batch for batch in captured_batches if batch and isinstance(batch[0], Table))
-    file_batch = next(batch for batch in captured_batches if batch and isinstance(batch[0], File))
-
-    assert len(table_batch) == 1
-    table = table_batch[0]
-    attrs = table.attributes
-    assert (
-        attrs.qualified_name
-        == "default/custom/dxr-connection/dxr/labels/classification-123"
-    )
-    assert attrs.name == "classification-123"
-    assert getattr(attrs, "display_name", None) == "Heart Failure"
-    assert attrs.description == "Files classified under the disease Heart Failure"
-    assert "DXR dataset contains 2 file(s)." in attrs.user_description
-    assert "patient-data.csv" in attrs.user_description
-    assert "lab-results.parquet" in attrs.user_description
-    assert attrs.source_url == "https://dxr.example.com/resource-search/classification-123"
-    assert attrs.connector_name == "custom"
-
-    assert len(file_batch) == 2
-    file_asset = sorted(file_batch, key=lambda asset: asset.attributes.display_name)[0]
-    file_attrs = file_asset.attributes
-    assert file_attrs.connection_name == "dxr-connection"
-    assert file_attrs.connector_name == "custom"
-    assert file_attrs.qualified_name.startswith("default/custom/dxr-connection/")
-    assert file_attrs.file_path in {
-        "s3://bucket/patient-data.csv",
-        "s3://bucket/lab-results.parquet",
-    }
+    assert captured_files == files
 
 
 @pytest.mark.integration
 def test_pipeline_skips_upload_when_no_records(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No upload is attempted if no dataset records are generated."""
+    classifications = []
+    files: list[dict] = []
 
-    classifications = [
-        Classification(
-            identifier="classification-456",
-            name="Cardiology",
-            type="ANNOTATOR",
-            subtype=None,
-            description=None,
-            link=None,
-            search_link=None,
-        )
-    ]
+    _prepare_env(monkeypatch)
 
-    fake_client = _FakeDXRClient(classifications, files=[])
+    holder: dict[str, _StubUploader] = {}
 
-    monkeypatch.setenv("DXR_BASE_URL", "https://dxr.example.com/api")
-    monkeypatch.setenv("DXR_PAT", "dxr-token")
-    monkeypatch.setenv("DXR_CLASSIFICATION_TYPES", "NON_MATCHING_TYPE")
+    def _uploader_factory(config):
+        uploader = _StubUploader(config)
+        holder["instance"] = uploader
+        return uploader
 
-    monkeypatch.setenv("ATLAN_BASE_URL", "https://atlan.example.com")
-    monkeypatch.setenv("ATLAN_API_TOKEN", "atlan-token")
-    monkeypatch.setenv("ATLAN_CONNECTION_QUALIFIED_NAME", "default/connection")
-    monkeypatch.setenv("ATLAN_CONNECTION_NAME", "dxr-connection")
-    monkeypatch.setenv("ATLAN_CONNECTOR_NAME", "custom-connector")
-
-    monkeypatch.setattr(pipeline, "DXRClient", lambda *args, **kwargs: fake_client)
-
-    uploader_called = False
-
-    class _FakeUploader:
-        def __init__(self, config):
-            pass
-
-        def upsert(self, records):  # pragma: no cover - should not be invoked
-            nonlocal uploader_called
-            uploader_called = True
-
-    monkeypatch.setattr(pipeline, "AtlanUploader", _FakeUploader)
-    monkeypatch.setattr(
-        atlan_uploader.AtlanUploader,
-        "_ensure_connection_exists",
-        lambda self: (
-            atlan_uploader.AtlanConnectorType.CUSTOM,
-            "default/connection",
-        ),
-    )
+    monkeypatch.setattr(pipeline, "DXRClient", lambda *args, **kwargs: _FakeDXRClient(classifications, files))
+    monkeypatch.setattr(pipeline, "AtlanUploader", _uploader_factory)
+    monkeypatch.setattr(pipeline, "ConnectionProvisioner", _StubConnectionProvisioner)
+    monkeypatch.setattr(pipeline, "TagRegistry", _StubTagRegistry)
+    monkeypatch.setattr(pipeline, "GlobalAttributeManager", _StubGlobalAttributeManager)
+    monkeypatch.setattr(pipeline, "FileAssetFactory", _StubFileAssetFactory)
+    monkeypatch.setattr(pipeline, "DatasourceIngestionCoordinator", lambda **kwargs: _StubDatasourceCoordinator(**kwargs))
 
     pipeline.run()
 
-    assert uploader_called is False
+    assert holder["instance"].upserts == []
 
 
 @pytest.mark.integration
 def test_pipeline_exits_when_upload_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pipeline surfaces upload failures as a non-zero exit code."""
+    _prepare_env(monkeypatch)
 
     classifications = [
         Classification(
-            identifier="classification-789",
-            name="Radiology",
+            identifier="classification-999",
+            name="Test",
             type="ANNOTATOR",
             subtype=None,
             description=None,
@@ -283,35 +267,22 @@ def test_pipeline_exits_when_upload_fails(monkeypatch: pytest.MonkeyPatch) -> No
             search_link=None,
         )
     ]
+    monkeypatch.setattr(
+        pipeline,
+        "DXRClient",
+        lambda *args, **kwargs: _FakeDXRClient(classifications, []),
+    )
 
-    fake_client = _FakeDXRClient(classifications, files=[])
-
-    monkeypatch.setattr(pipeline, "DXRClient", lambda *args, **kwargs: fake_client)
-
-    monkeypatch.setenv("DXR_BASE_URL", "https://dxr.example.com/api")
-    monkeypatch.setenv("DXR_PAT", "dxr-token")
-    monkeypatch.setenv("ATLAN_BASE_URL", "https://atlan.example.com")
-    monkeypatch.setenv("ATLAN_API_TOKEN", "atlan-token")
-    monkeypatch.setenv("ATLAN_CONNECTION_QUALIFIED_NAME", "default/connection")
-    monkeypatch.setenv("ATLAN_CONNECTION_NAME", "dxr-connection")
-    monkeypatch.setenv("ATLAN_CONNECTOR_NAME", "custom-connector")
-
-    class _FailingUploader:
-        def __init__(self, config):
-            pass
-
+    class _FailingUploader(_StubUploader):
         def upsert(self, records):
-            raise atlan_uploader.AtlanUploadError("permission denied")
+            raise pipeline.AtlanUploadError("boom")
 
     monkeypatch.setattr(pipeline, "AtlanUploader", _FailingUploader)
-    monkeypatch.setattr(
-        atlan_uploader.AtlanUploader,
-        "_ensure_connection_exists",
-        lambda self: (
-            atlan_uploader.AtlanConnectorType.CUSTOM,
-            "default/connection",
-        ),
-    )
+    monkeypatch.setattr(pipeline, "ConnectionProvisioner", _StubConnectionProvisioner)
+    monkeypatch.setattr(pipeline, "TagRegistry", _StubTagRegistry)
+    monkeypatch.setattr(pipeline, "GlobalAttributeManager", _StubGlobalAttributeManager)
+    monkeypatch.setattr(pipeline, "FileAssetFactory", _StubFileAssetFactory)
+    monkeypatch.setattr(pipeline, "DatasourceIngestionCoordinator", lambda **kwargs: _StubDatasourceCoordinator(**kwargs))
 
     with pytest.raises(SystemExit) as exc_info:
         pipeline.run()

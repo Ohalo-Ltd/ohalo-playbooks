@@ -13,15 +13,13 @@ from atlan_dxr_integration.config import Config
 
 
 class _FakeAssetService:
-    def __init__(self, *, connection=None):
-        self._connection = connection or SimpleNamespace(guid="conn-guid")
+    def __init__(self, *, connections=None):
+        self.connections = list(connections or [])
         self.deleted: list[str] = []
         self.purged: list[tuple[str, AtlanDeleteType]] = []
 
-    def get_by_qualified_name(self, qualified_name, asset_type, **kwargs):
-        if isinstance(self._connection, Exception):
-            raise self._connection
-        return self._connection
+    def search(self, request):  # pragma: no cover - exercised indirectly
+        return SimpleNamespace(entities=list(self.connections))
 
     def delete_by_guid(self, guid):
         self.deleted.append(guid)
@@ -46,20 +44,31 @@ def _build_config() -> Config:
         dxr_file_fetch_limit=200,
         atlan_base_url="https://atlan.example.com",
         atlan_api_token="atlan-token",
-        atlan_connection_qualified_name="default/custom/dxr-connection",
-        atlan_connection_name="dxr-connection",
-        atlan_connector_name="custom-connector",
+        atlan_global_connection_qualified_name="default/custom/dxr-unstructured-attributes",
+        atlan_global_connection_name="dxr-unstructured-attributes",
+        atlan_global_connector_name="custom-connector",
+        atlan_global_domain_name="DXR Unstructured",
+        atlan_datasource_connection_prefix="dxr-datasource",
+        atlan_datasource_domain_prefix="DXR",
         atlan_database_name="dxr",
         atlan_schema_name="labels",
         atlan_dataset_path_prefix="dxr",
         atlan_batch_size=10,
+        atlan_tag_namespace="DXR",
         log_level="INFO",
     )
 
 
 def test_purge_connection_soft_then_hard(monkeypatch: pytest.MonkeyPatch) -> None:
     config = _build_config()
-    asset_service = _FakeAssetService()
+    connection = SimpleNamespace(
+        guid="conn-guid",
+        attributes=SimpleNamespace(
+            name="dxr-unstructured-attributes",
+            qualified_name="default/custom/dxr-unstructured-attributes",
+        ),
+    )
+    asset_service = _FakeAssetService(connections=[connection])
     client = _FakeAtlanClient(asset_service)
 
     purge_connection(
@@ -75,7 +84,14 @@ def test_purge_connection_soft_then_hard(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_purge_connection_skips_soft_delete(monkeypatch: pytest.MonkeyPatch) -> None:
     config = _build_config()
-    asset_service = _FakeAssetService()
+    connection = SimpleNamespace(
+        guid="conn-guid",
+        attributes=SimpleNamespace(
+            name="dxr-unstructured-attributes",
+            qualified_name="default/custom/dxr-unstructured-attributes",
+        ),
+    )
+    asset_service = _FakeAssetService(connections=[connection])
     client = _FakeAtlanClient(asset_service)
 
     purge_connection(
@@ -91,28 +107,25 @@ def test_purge_connection_skips_soft_delete(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_purge_connection_raises_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     config = _build_config()
-    asset_service = _FakeAssetService(
-        connection=NotFoundError(
-            ErrorCode.ASSET_NOT_FOUND_BY_QN,
-            "Connection",
-            config.atlan_connection_qualified_name,
-        )
-    )
+    asset_service = _FakeAssetService(connections=[])
     client = _FakeAtlanClient(asset_service)
 
     with pytest.raises(SystemExit) as exc_info:
         purge_connection(config, client=client)
 
-    assert "not found" in str(exc_info.value).lower()
+    assert "nothing to purge" in str(exc_info.value).lower()
 
 
 def test_purge_connection_requires_guid(monkeypatch: pytest.MonkeyPatch) -> None:
     config = _build_config()
-    asset_service = _FakeAssetService(connection=SimpleNamespace(guid=None))
+    connection = SimpleNamespace(
+        guid=None,
+        attributes=SimpleNamespace(name="dxr-datasource-foo", qualified_name="default/custom/dxr-datasource-foo"),
+    )
+    asset_service = _FakeAssetService(connections=[connection])
     client = _FakeAtlanClient(asset_service)
 
     with pytest.raises(SystemExit) as exc_info:
         purge_connection(config, client=client)
 
     assert "does not expose a guid" in str(exc_info.value).lower()
-

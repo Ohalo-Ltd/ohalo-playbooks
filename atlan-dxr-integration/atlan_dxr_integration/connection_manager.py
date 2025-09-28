@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import argparse
 import logging
-from types import SimpleNamespace
-from typing import Optional
+from typing import Iterable, List, Optional
 
 from pyatlan.client.atlan import AtlanClient
 from pyatlan.errors import AtlanError, NotFoundError
 from pyatlan.model.assets.connection import Connection
 from pyatlan.model.enums import AtlanDeleteType
+from pyatlan.model.search import DSL, Bool, IndexSearchRequest, Term
+from pyatlan.model.search import TermAttributes
 
 from .config import Config
 
@@ -29,54 +30,43 @@ def purge_connection(
     soft_delete_first: bool = True,
     client: Optional[AtlanClient] = None,
 ) -> None:
-    """Hard-delete the configured Atlan connection and (optionally) its assets.
-
-    Parameters align with Atlan's guidance for removing connections during
-    automated testing (see https://developer.atlan.com/.../connection-delete/).
-    """
+    """Hard-delete matching Atlan connections for development reset scenarios."""
 
     client = client or AtlanClient(
         base_url=config.atlan_base_url,
         api_key=config.atlan_api_token,
     )
 
-    qualified_name = config.atlan_connection_qualified_name
-    LOGGER.info(
-        "Looking up connection '%s' prior to deletion", qualified_name
-    )
+    connections = _find_connections(client, config)
+    if not connections:
+        raise SystemExit("No matching connections found; nothing to purge.")
 
-    try:
-        connection: Connection = client.asset.get_by_qualified_name(
-            qualified_name,
-            Connection,
-            ignore_relationships=True,
+    LOGGER.info("Purging %d connection(s) from Atlan", len(connections))
+
+    for connection in connections:
+        guid = getattr(connection, "guid", None)
+        attrs = getattr(connection, "attributes", None)
+        name = getattr(attrs, "name", None) if attrs else None
+        qualified_name = getattr(attrs, "qualified_name", None) if attrs else None
+        display = name or qualified_name or guid or "unknown"
+        if not guid:
+            raise SystemExit(
+                f"Connection '{display}' does not expose a GUID; cannot delete."
+            )
+
+        if soft_delete_first:
+            LOGGER.info("Soft-deleting connection '%s' (guid=%s)", display, guid)
+            response = client.asset.delete_by_guid(guid)
+            _log_mutation_result("soft delete", response)
+
+        LOGGER.info(
+            "Performing %s deletion of connection '%s' (guid=%s)",
+            delete_type.value.lower(),
+            display,
+            guid,
         )
-    except NotFoundError:
-        raise SystemExit(
-            f"Connection '{qualified_name}' not found; nothing to purge."
-        )
-    except AtlanError as exc:
-        raise SystemExit(f"Failed to load connection '{qualified_name}': {exc}") from exc
-
-    guid = getattr(connection, "guid", None)
-    if not guid:
-        raise SystemExit(
-            f"Connection '{qualified_name}' does not expose a GUID; cannot delete."
-        )
-
-    if soft_delete_first:
-        LOGGER.info("Soft-deleting connection '%s' (guid=%s)", qualified_name, guid)
-        response = client.asset.delete_by_guid(guid)
-        _log_mutation_result("soft delete", response)
-
-    LOGGER.info(
-        "Performing %s deletion of connection '%s' (guid=%s)",
-        delete_type.value.lower(),
-        qualified_name,
-        guid,
-    )
-    response = client.asset.purge_by_guid(guid, delete_type=delete_type)
-    _log_mutation_result(f"{delete_type.value.lower()} delete", response)
+        response = client.asset.purge_by_guid(guid, delete_type=delete_type)
+        _log_mutation_result(f"{delete_type.value.lower()} delete", response)
 
 
 def _log_mutation_result(operation: str, response) -> None:
@@ -85,6 +75,112 @@ def _log_mutation_result(operation: str, response) -> None:
         LOGGER.info("Atlan acknowledged %s (request_id=%s)", operation, request_id)
     else:
         LOGGER.info("Atlan acknowledged %s", operation)
+
+
+def _find_connections(client: AtlanClient, config: Config) -> List[Connection]:
+    term = Term(field=TermAttributes.TYPE_NAME.value, value="Connection")
+    request = IndexSearchRequest(
+        dsl=DSL(
+            query=Bool(must=[term]),
+            size=1000,
+        )
+    )
+    try:
+        results = client.asset.search(request)
+    except AtlanError as exc:
+        raise SystemExit(f"Failed to search for connections: {exc}") from exc
+
+    entities = getattr(results, "entities", []) or []
+    targets: List[Connection] = []
+    for entity in entities:
+        attrs = getattr(entity, "attributes", None)
+        name = getattr(attrs, "name", None) if attrs else None
+        if _matches_connection(name, config):
+            targets.append(entity)
+    return targets
+
+
+def _purge_files_for_connection(
+    client: AtlanClient,
+    *,
+    connection_qualified_name: str,
+    connection_name: str,
+    delete_type: AtlanDeleteType,
+    soft_delete_first: bool,
+) -> None:
+    if not connection_qualified_name:
+        return
+
+    query = Bool(
+        must=[
+            Term(field="__typeName.keyword", value="File"),
+            Term(field="connectionQualifiedName", value=connection_qualified_name),
+        ]
+    )
+    request = IndexSearchRequest(dsl=DSL(query=query, size=1000))
+    try:
+        results = client.asset.search(request)
+    except AtlanError as exc:
+        LOGGER.warning(
+            "Unable to enumerate files for connection '%s': %s",
+            connection_name,
+            exc,
+        )
+        return
+
+    entities = getattr(results, "entities", []) or []
+    if not entities:
+        return
+
+    LOGGER.info(
+        "Deleting %d file asset(s) under connection '%s'",
+        len(entities),
+        connection_name,
+    )
+    for entity in entities:
+        guid = getattr(entity, "guid", None)
+        if not guid:
+            continue
+        if soft_delete_first:
+            client.asset.delete_by_guid(guid)
+        client.asset.purge_by_guid(guid, delete_type=delete_type)
+
+
+def _purge_domains(
+    client: AtlanClient,
+    *,
+    domain_guids: Iterable[str],
+    delete_type: AtlanDeleteType,
+    soft_delete_first: bool,
+) -> None:
+    unique_guids = {guid for guid in domain_guids if guid}
+    if not unique_guids:
+        return
+
+    LOGGER.info("Purging %d domain(s)", len(unique_guids))
+    for guid in unique_guids:
+        if soft_delete_first:
+            try:
+                client.asset.delete_by_guid(guid)
+            except AtlanError as exc:
+                LOGGER.warning(
+                    "Unable to soft delete domain %s: %s", guid, exc
+                )
+        try:
+            client.asset.purge_by_guid(guid, delete_type=delete_type)
+        except AtlanError as exc:
+            LOGGER.warning("Unable to purge domain %s: %s", guid, exc)
+
+
+def _matches_connection(name: Optional[str], config: Config) -> bool:
+    if not name:
+        return False
+    if name == config.atlan_global_connection_name:
+        return True
+    prefix = config.atlan_datasource_connection_prefix
+    if prefix and name.startswith(prefix):
+        return True
+    return False
 
 
 def _parse_delete_type(raw: str) -> AtlanDeleteType:
@@ -138,4 +234,3 @@ if __name__ == "__main__":  # pragma: no cover - CLI glue
 
 
 __all__ = ["purge_connection"]
-

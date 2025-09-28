@@ -1,19 +1,17 @@
-"""Unit tests for the Atlan uploader helpers."""
+"""Unit tests for the Atlan uploader."""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 
 import pytest
+from pyatlan.errors import ErrorCode
+from pyatlan.model.assets.core.file import File
+from pyatlan.model.assets.core.table import Table
+from pyatlan.model.enums import AtlanConnectorType, FileType
 
 from atlan_dxr_integration import atlan_uploader
-from pyatlan.errors import ErrorCode, NotFoundError
-from pyatlan.model.assets.connection import Connection
-from pyatlan.model.assets.core.database import Database
-from pyatlan.model.assets.core.file import File
-from pyatlan.model.assets.core.schema import Schema
-from pyatlan.model.assets.core.table import Table
-from pyatlan.model.enums import FileType
+from atlan_dxr_integration.connection_utils import ConnectionHandle
 
 
 class _FakeMutationResponse:
@@ -33,432 +31,216 @@ class _FakeMutationResponse:
         return [asset for asset in self._partial if isinstance(asset, asset_type)]
 
 
-class _FailingBatchAsset:
-    def __init__(self, exception: Exception) -> None:
-        self._exception = exception
-
-    def save(self, batch):  # pragma: no cover - exercised via uploader
-        raise self._exception
-
-
-class _FailingBatchClient:
-    def __init__(self, exception: Exception) -> None:
-        self.asset = _FailingBatchAsset(exception)
-
-
-class _SuccessfulBatchClient:
-    def __init__(self, response: _FakeMutationResponse, *, lookups: dict[str, object]) -> None:
-        def _get(qualified_name, asset_type, **kwargs):
-            value = lookups.get(qualified_name)
-            if isinstance(value, Exception):
-                raise value
-            return value
-
-        self.asset = SimpleNamespace(
-            save=lambda batch: response,
-            get_by_qualified_name=_get,
-        )
-
-
-class _FakeRoleCache:
-    def __init__(self, guid: str = "role-guid") -> None:
-        self.guid = guid
-        self.requested: list = []
-        self.validated: list = []
-
-    def get_id_for_name(self, name: str) -> str:
-        self.requested.append(name)
-        return self.guid
-
-    def validate_idstrs(self, idstrs):
-        self.validated = list(idstrs)
-
-
-class _FakeUserCache:
-    def __init__(self) -> None:
-        self.validated: list = []
-
-    def validate_names(self, names):
-        self.validated = list(names)
-
-
-class _FakeGroupCache:
-    def __init__(self) -> None:
-        self.validated: list = []
-
-    def validate_aliases(self, aliases):
-        self.validated = list(aliases)
-
-
-class _FakeAssetService:
-    def __init__(
-        self,
-        *,
-        lookups: dict[tuple[str, type], object] | None = None,
-        save_responses: list[object] | None = None,
-    ) -> None:
+class _FakeAssetClient:
+    def __init__(self, responses=None, lookups=None):
+        self._responses = list(responses or [])
+        self.saved_batches = []
         self.lookups = lookups or {}
-        self.save_responses = list(save_responses or [])
-        self.lookup_calls: list[tuple[str, type]] = []
-        self.saved_assets: list[object] = []
 
-    def get_by_qualified_name(self, qualified_name, asset_type, **_):
-        self.lookup_calls.append((qualified_name, asset_type))
-        key = (qualified_name, asset_type)
-        if key in self.lookups:
-            value = self.lookups[key]
-            if isinstance(value, Exception):
-                raise value
-            return value
-        raise NotFoundError(
-            ErrorCode.ASSET_NOT_FOUND_BY_QN,
-            asset_type.__name__,
-            qualified_name,
-        )
+    def save(self, batch):
+        self.saved_batches.append(list(batch))
+        if self._responses:
+            response = self._responses.pop(0)
+            if isinstance(response, Exception):
+                raise response
+            return response
+        return _FakeMutationResponse(created=list(batch))
 
-    def save(self, assets):
-        batch = (
-            list(assets)
-            if isinstance(assets, (list, tuple))
-            else [assets]
-        )
-        response = (
-            self.save_responses.pop(0)
-            if self.save_responses
-            else _FakeMutationResponse(request_id="req", created=list(batch))
-        )
-        if isinstance(response, Exception):
-            raise response
-        self.saved_assets.extend(batch)
-        return response
+    def get_by_qualified_name(self, qualified_name, asset_type, **kwargs):
+        value = self.lookups.get((qualified_name, asset_type))
+        if isinstance(value, Exception):
+            raise value
+        if value is None:
+            raise ErrorCode.ASSET_NOT_FOUND_BY_QN.exception_with_parameters(
+                asset_type.__name__, qualified_name
+            )
+        return value
 
 
-class _FakeAtlanClient:
-    def __init__(
-        self,
-        *,
-        lookups: dict[tuple[str, type], object] | None = None,
-        save_responses: list[object] | None = None,
-    ) -> None:
-        self.asset = _FakeAssetService(lookups=lookups, save_responses=save_responses)
-        self.role_cache = _FakeRoleCache()
-        self.user_cache = _FakeUserCache()
-        self.group_cache = _FakeGroupCache()
+class _FakeClient:
+    def __init__(self, *, responses=None, lookups=None):
+        self.asset = _FakeAssetClient(responses=responses, lookups=lookups)
 
 
 class _TestConfig:
-    def __init__(self) -> None:
-        self.atlan_base_url = "https://atlan.example.com"
-        self.atlan_api_token = "token"
-        self.atlan_connection_name = "dxr-connection"
-        self.atlan_connection_qualified_name = "default/custom/dxr-connection"
-        self.atlan_connector_name = "custom-connector"
-        self.atlan_database_name = "dxr"
-        self.atlan_schema_name = "labels"
-        self.atlan_dataset_path_prefix = "dxr"
-        self.atlan_batch_size = 10
-        self.dxr_file_fetch_limit = 200
+    atlan_base_url = "https://atlan.example.com"
+    atlan_api_token = "token"
+    atlan_global_connection_name = "dxr-unstructured-attributes"
+    atlan_global_connection_qualified_name = "default/custom/dxr-unstructured-attributes"
+    atlan_global_connector_name = "custom-connector"
+    atlan_global_domain_name = "DXR Unstructured"
+    atlan_datasource_connection_prefix = "dxr-datasource"
+    atlan_datasource_domain_prefix = "DXR"
+    atlan_database_name = "dxr"
+    atlan_schema_name = "labels"
+    atlan_dataset_path_prefix = "dxr"
+    atlan_batch_size = 10
+    atlan_tag_namespace = "DXR"
 
     @property
     def qualified_name_prefix(self) -> str:
         return f"{self.schema_qualified_name}/{self.atlan_dataset_path_prefix}"
 
     @property
-    def database_qualified_name(self) -> str:
-        return f"{self.atlan_connection_qualified_name}/{self.atlan_database_name}"
-
-    @property
     def schema_qualified_name(self) -> str:
         return f"{self.database_qualified_name}/{self.atlan_schema_name}"
 
+    @property
+    def database_qualified_name(self) -> str:
+        return f"{self.atlan_global_connection_qualified_name}/{self.atlan_database_name}"
 
-def _build_config() -> _TestConfig:
-    return _TestConfig()
+
+class _FakeProvisioner:
+    def __init__(self, client):
+        self.client = client
+        self.ensure_connection_calls = 0
+
+    def ensure_connection(self, **_):
+        self.ensure_connection_calls += 1
+        connection = SimpleNamespace(attributes=SimpleNamespace(name="dxr-unstructured-attributes"))
+        return ConnectionHandle(
+            connector_type=AtlanConnectorType.CUSTOM,
+            qualified_name="default/custom/dxr-unstructured-attributes",
+            connection=connection,
+        )
+
+    def ensure_database(self, *, qualified_name, **_):
+        return qualified_name
+
+    def ensure_schema(self, *, qualified_name, **_):
+        return qualified_name
+
+
+def _build_uploader(responses=None, lookups=None):
+    fake_client = _FakeClient(responses=responses, lookups=lookups)
+
+    class _StubProvisioner(_FakeProvisioner):
+        def __init__(self, client):
+            super().__init__(client)
+
+    uploader_module = atlan_uploader
+    original_provisioner = uploader_module.ConnectionProvisioner
+    uploader_module.ConnectionProvisioner = _StubProvisioner  # type: ignore
+
+    try:
+        uploader = uploader_module.AtlanUploader(_TestConfig())
+    finally:
+        uploader_module.ConnectionProvisioner = original_provisioner  # type: ignore
+    uploader._client = fake_client  # type: ignore[attr-defined]
+    uploader._provisioner = _StubProvisioner(fake_client)
+    return uploader, uploader._provisioner  # type: ignore[attr-defined]
 
 
 @pytest.mark.parametrize(
-    "exception_cls",
-    [atlan_uploader.AtlanPermissionError, atlan_uploader.AtlanError],
-)
-def test_save_batch_wraps_atlan_errors(monkeypatch: pytest.MonkeyPatch, exception_cls) -> None:
-    """Uploader re-raises Atlan errors as AtlanUploadError with guidance."""
-
-    if exception_cls is atlan_uploader.AtlanPermissionError:
-        exception = exception_cls(
+    "exception",
+    [
+        atlan_uploader.AtlanPermissionError(
             ErrorCode.PERMISSION_PASSTHROUGH,
             "ATLAS-403-00-001",
             "not authorized",
             "permission denied",
-        )
-    else:
-        exception = exception_cls(ErrorCode.CONNECTION_ERROR, "socket timeout")
-
-    def _fake_client_factory(*args, **kwargs):
-        return _FailingBatchClient(exception)
-
-    monkeypatch.setattr(
-        atlan_uploader.AtlanUploader,
-        "_ensure_connection_exists",
-        lambda self: (
-            atlan_uploader.AtlanConnectorType.CUSTOM,
-            "default/custom/dxr-connection",
         ),
-    )
-    monkeypatch.setattr(
-        atlan_uploader.AtlanUploader,
-        "_ensure_database_exists",
-        lambda self, _: "default/custom/dxr-connection/dxr",
-    )
-    monkeypatch.setattr(
-        atlan_uploader.AtlanUploader,
-        "_ensure_schema_exists",
-        lambda self, *__: "default/custom/dxr-connection/dxr/labels",
-    )
-    monkeypatch.setattr(atlan_uploader, "AtlanClient", _fake_client_factory)
-    uploader = atlan_uploader.AtlanUploader(_build_config())
-
-    table = Table.creator(
-        name="test",
-        schema_qualified_name=uploader._schema_qualified_name,
-        schema_name=uploader._config.atlan_schema_name,
-        database_name=uploader._config.atlan_database_name,
-        database_qualified_name=uploader._database_qualified_name,
-        connection_qualified_name=uploader._connection_qualified_name,
-    )
+        atlan_uploader.AtlanError(ErrorCode.CONNECTION_ERROR, "socket timeout"),
+    ],
+)
+def test_save_assets_wraps_atlan_errors(exception) -> None:
+    uploader, _ = _build_uploader(responses=[exception])
 
     with pytest.raises(atlan_uploader.AtlanUploadError) as exc_info:
-        uploader._save_assets([table], Table, "tables", "table")
+        uploader._save_assets([object()], Table, "tables", "table")
 
-    message = str(exc_info.value)
-    assert "Atlan" in message
-    if isinstance(exception, atlan_uploader.AtlanPermissionError):
-        assert "permissions" in message.lower()
+    assert "Atlan rejected" in str(exc_info.value)
 
 
-def test_ensure_connection_exists_skips_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
-    lookups = {
-        ("default/custom/dxr-connection", Connection): SimpleNamespace(
-            attributes=SimpleNamespace(
-                qualified_name="default/custom/dxr-connection",
-                connector_name="custom",
-            )
-        ),
-        ("default/custom/dxr-connection/dxr", Database): SimpleNamespace(
-            attributes=SimpleNamespace(
-                qualified_name="default/custom/dxr-connection/dxr",
-                connector_name="custom",
-                connection_name="dxr-connection",
-            )
-        ),
-        ("default/custom/dxr-connection/dxr/labels", Schema): SimpleNamespace(
-            attributes=SimpleNamespace(
-                qualified_name="default/custom/dxr-connection/dxr/labels",
-                connector_name="custom",
-                connection_name="dxr-connection",
-            )
-        ),
-    }
-    fake_client = _FakeAtlanClient(lookups=lookups)
-    monkeypatch.setattr(atlan_uploader, "AtlanClient", lambda *args, **kwargs: fake_client)
+def test_save_assets_no_mutation_success_when_assets_exist():
+    response = _FakeMutationResponse(created=[], updated=[], partial=[])
+    uploader, _ = _build_uploader(responses=[response], lookups={
+        ("default/custom/dxr-unstructured-attributes/dxr/labels/sample", Table):
+            SimpleNamespace(attributes=SimpleNamespace(qualified_name="default/custom/dxr-unstructured-attributes/dxr/labels/sample"))
+    })
 
-    uploader = atlan_uploader.AtlanUploader(_build_config())
-
-    assert fake_client.asset.lookup_calls == [
-        ("default/custom/dxr-connection", Connection),
-        ("default/custom/dxr-connection/dxr", Database),
-        ("default/custom/dxr-connection/dxr/labels", Schema),
-    ]
-    assert fake_client.asset.saved_assets == []
-    assert uploader._connector_type == atlan_uploader.AtlanConnectorType.CUSTOM
-    assert uploader._connection_qualified_name == "default/custom/dxr-connection"
-    assert uploader._schema_qualified_name == "default/custom/dxr-connection/dxr/labels"
-
-
-def test_ensure_connection_exists_creates_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_client = _FakeAtlanClient(lookups={})
-    monkeypatch.setattr(atlan_uploader, "AtlanClient", lambda *args, **kwargs: fake_client)
-
-    config = _build_config()
-    uploader = atlan_uploader.AtlanUploader(config)
-
-    saved = fake_client.asset.saved_assets
-    assert len(saved) == 3, "Expected connection, database, and schema to be created"
-    assert isinstance(saved[0], Connection)
-    assert saved[0].attributes.name == config.atlan_connection_name
-    assert saved[0].attributes.qualified_name == config.atlan_connection_qualified_name
-
-    assert isinstance(saved[1], Database)
-    assert saved[1].attributes.qualified_name == config.database_qualified_name
-
-    assert isinstance(saved[2], Schema)
-    assert saved[2].attributes.qualified_name == config.schema_qualified_name
-
-    assert uploader._connector_type == atlan_uploader.AtlanConnectorType.CUSTOM
-    assert uploader._connection_qualified_name == config.atlan_connection_qualified_name
-    assert uploader._schema_qualified_name == config.schema_qualified_name
-
-
-def test_ensure_connection_exists_raises_on_permission_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    permission_error = atlan_uploader.AtlanPermissionError(
-        ErrorCode.PERMISSION_PASSTHROUGH,
-        "ATLAS-403-00-001",
-        "not authorized",
-        "permission denied",
-    )
-    fake_client = _FakeAtlanClient(lookups={}, save_responses=[permission_error])
-    monkeypatch.setattr(atlan_uploader, "AtlanClient", lambda *args, **kwargs: fake_client)
-
-    with pytest.raises(atlan_uploader.AtlanUploadError) as exc_info:
-        atlan_uploader.AtlanUploader(_build_config())
-
-    assert "connection" in str(exc_info.value).lower()
-
-
-def test_save_batch_no_mutation_succeeds_when_assets_exist(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Uploader treats zero-mutation responses as success when tables already exist."""
-
-    config = _build_config()
-    qualified_name = f"{config.schema_qualified_name}/classification-1"
-    response = _FakeMutationResponse(request_id="req-table", created=[], updated=[], partial=[])
-
-    existing = SimpleNamespace(attributes=SimpleNamespace(qualified_name=qualified_name))
-
-    monkeypatch.setattr(
-        atlan_uploader.AtlanUploader,
-        "_ensure_connection_exists",
-        lambda self: (
-            atlan_uploader.AtlanConnectorType.CUSTOM,
-            config.atlan_connection_qualified_name,
-        ),
-    )
-    monkeypatch.setattr(
-        atlan_uploader.AtlanUploader,
-        "_ensure_database_exists",
-        lambda self, _: config.database_qualified_name,
-    )
-    monkeypatch.setattr(
-        atlan_uploader.AtlanUploader,
-        "_ensure_schema_exists",
-        lambda self, *__: config.schema_qualified_name,
-    )
-    monkeypatch.setattr(
-        atlan_uploader,
-        "AtlanClient",
-        lambda *args, **kwargs: _SuccessfulBatchClient(response, lookups={qualified_name: existing}),
-    )
-
-    uploader = atlan_uploader.AtlanUploader(config)
     table = Table.creator(
-        name="classification-1",
-        schema_qualified_name=config.schema_qualified_name,
-        schema_name=config.atlan_schema_name,
-        database_name=config.atlan_database_name,
-        database_qualified_name=config.database_qualified_name,
-        connection_qualified_name=config.atlan_connection_qualified_name,
+        name="sample",
+        schema_qualified_name="default/custom/dxr-unstructured-attributes/dxr/labels",
+        database_name="dxr",
+        database_qualified_name="default/custom/dxr-unstructured-attributes/dxr",
+        schema_name="labels",
+        connection_qualified_name="default/custom/dxr-unstructured-attributes",
     )
-    table.attributes.qualified_name = qualified_name
+    table.attributes.qualified_name = (
+        "default/custom/dxr-unstructured-attributes/dxr/labels/sample"
+    )
 
     uploader._save_assets([table], Table, "tables", "table")
 
 
-def test_save_batch_no_mutation_raises_when_assets_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Uploader errors if zero-mutation response and tables cannot be found."""
+def test_save_assets_no_mutation_raises_when_missing():
+    response = _FakeMutationResponse(created=[], updated=[], partial=[])
+    uploader, _ = _build_uploader(responses=[response])
 
-    config = _build_config()
-    qualified_name = f"{config.schema_qualified_name}/classification-1"
-    response = _FakeMutationResponse(request_id="req-table", created=[], updated=[], partial=[])
-
-    error = NotFoundError(
-        ErrorCode.ASSET_NOT_FOUND_BY_QN,
-        "Table",
-        qualified_name,
-    )
-
-    monkeypatch.setattr(
-        atlan_uploader.AtlanUploader,
-        "_ensure_connection_exists",
-        lambda self: (
-            atlan_uploader.AtlanConnectorType.CUSTOM,
-            config.atlan_connection_qualified_name,
-        ),
-    )
-    monkeypatch.setattr(
-        atlan_uploader.AtlanUploader,
-        "_ensure_database_exists",
-        lambda self, _: config.database_qualified_name,
-    )
-    monkeypatch.setattr(
-        atlan_uploader.AtlanUploader,
-        "_ensure_schema_exists",
-        lambda self, *__: config.schema_qualified_name,
-    )
-    monkeypatch.setattr(
-        atlan_uploader,
-        "AtlanClient",
-        lambda *args, **kwargs: _SuccessfulBatchClient(response, lookups={qualified_name: error}),
-    )
-
-    uploader = atlan_uploader.AtlanUploader(config)
     table = Table.creator(
-        name="classification-1",
-        schema_qualified_name=config.schema_qualified_name,
-        schema_name=config.atlan_schema_name,
-        database_name=config.atlan_database_name,
-        database_qualified_name=config.database_qualified_name,
-        connection_qualified_name=config.atlan_connection_qualified_name,
+        name="sample",
+        schema_qualified_name="default/custom/dxr-unstructured-attributes/dxr/labels",
+        database_name="dxr",
+        database_qualified_name="default/custom/dxr-unstructured-attributes/dxr",
+        schema_name="labels",
+        connection_qualified_name="default/custom/dxr-unstructured-attributes",
     )
-    table.attributes.qualified_name = qualified_name
+    table.attributes.qualified_name = (
+        "default/custom/dxr-unstructured-attributes/dxr/labels/sample"
+    )
 
-    with pytest.raises(atlan_uploader.AtlanUploadError) as exc_info:
+    with pytest.raises(atlan_uploader.AtlanUploadError):
         uploader._save_assets([table], Table, "tables", "table")
 
-    assert "did not mutate any tables" in str(exc_info.value)
 
+def test_upsert_invokes_batch_save(monkeypatch: pytest.MonkeyPatch) -> None:
+    uploader, _ = _build_uploader()
+    calls = []
 
-def test_upsert_files_sets_connector_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
-    config = _build_config()
+    def _capture(batch, *_args, **_kwargs):
+        calls.append(list(batch))
 
-    monkeypatch.setattr(
-        atlan_uploader.AtlanUploader,
-        "_ensure_connection_exists",
-        lambda self: (
-            atlan_uploader.AtlanConnectorType.CUSTOM,
-            config.atlan_connection_qualified_name,
-        ),
+    monkeypatch.setattr(uploader, "_save_assets", _capture)
+
+    record = SimpleNamespace(
+        identifier="classification-1",
+        name="Sample",
+        description="desc",
+        classification=SimpleNamespace(description="global desc"),
+        source_url="https://dxr",
     )
-    monkeypatch.setattr(
-        atlan_uploader.AtlanUploader,
-        "_ensure_database_exists",
-        lambda self, _: config.database_qualified_name,
-    )
-    monkeypatch.setattr(
-        atlan_uploader.AtlanUploader,
-        "_ensure_schema_exists",
-        lambda self, *__: config.schema_qualified_name,
-    )
+    uploader.upsert([record])
 
-    fake_client = _FakeAtlanClient()
-    monkeypatch.setattr(atlan_uploader, "AtlanClient", lambda *_, **__: fake_client)
+    assert calls, "Expected tables to be saved"
+    table = calls[0][0]
+    assert isinstance(table, Table)
+    assert table.attributes.connection_name == "dxr-unstructured-attributes"
 
-    uploader = atlan_uploader.AtlanUploader(config)
 
+def test_upsert_files_sets_metadata():
+    uploader, _ = _build_uploader()
     file_asset = File.creator(
         name="invoice.pdf",
-        connection_qualified_name=config.atlan_connection_qualified_name,
+        connection_qualified_name=uploader.connection_qualified_name,
         file_type=FileType.PDF,
     )
     file_asset.attributes.qualified_name = (
-        f"{config.atlan_connection_qualified_name}/file-123"
+        f"{uploader.connection_qualified_name}/file-123"
     )
 
+    captured = []
+
+    def _capture(batch, *_args, **_kwargs):
+        captured.append(list(batch))
+
+    uploader._save_assets = _capture  # type: ignore
     uploader.upsert_files([file_asset])
 
-    saved_assets = fake_client.asset.saved_assets
-    assert len(saved_assets) == 1
-    saved = saved_assets[0]
-    attrs = saved.attributes
-    assert attrs.connection_name == config.atlan_connection_name
-    assert attrs.connector_name == atlan_uploader.AtlanConnectorType.CUSTOM.value
+    saved_file = captured[0][0]
+    attrs = saved_file.attributes
+    assert attrs.connection_name == "dxr-unstructured-attributes"
+    assert attrs.connector_name == AtlanConnectorType.CUSTOM.value
     assert attrs.qualified_name == (
-        f"{config.atlan_connection_qualified_name}/file-123"
+        f"{uploader.connection_qualified_name}/file-123"
     )

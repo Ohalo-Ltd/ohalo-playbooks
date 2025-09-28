@@ -45,13 +45,17 @@ def test_sanity_check_runs_with_sample_data(monkeypatch: pytest.MonkeyPatch) -> 
         dxr_file_fetch_limit=200,
         atlan_base_url="https://atlan.example.com",
         atlan_api_token="atlan-token",
-        atlan_connection_qualified_name="default/connection",
-        atlan_connection_name="dxr-connection",
-        atlan_connector_name="custom-connector",
+        atlan_global_connection_qualified_name="default/custom/dxr-unstructured-attributes",
+        atlan_global_connection_name="dxr-unstructured-attributes",
+        atlan_global_connector_name="custom-connector",
+        atlan_global_domain_name="DXR Unstructured",
+        atlan_datasource_connection_prefix="dxr-datasource",
+        atlan_datasource_domain_prefix="DXR",
         atlan_database_name="dxr",
         atlan_schema_name="labels",
         atlan_dataset_path_prefix="dxr",
         atlan_batch_size=10,
+        atlan_tag_namespace="DXR",
         log_level="INFO",
     )
 
@@ -106,4 +110,6 @@ def test_sanity_check_runs_with_sample_data(monkeypatch: pytest.MonkeyPatch) -> 
     sanity_check.run(sample_labels=1, max_files=10)
 
     assert captured["upserted"] == [["classification-1"]]
-    assert captured["lookups"] == ["default/connection/dxr/labels/classification-1"]
+    assert captured["lookups"] == [
+        "default/custom/dxr-unstructured-attributes/dxr/labels/classification-1"
+    ]

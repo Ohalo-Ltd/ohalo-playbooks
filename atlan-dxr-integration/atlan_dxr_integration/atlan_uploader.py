@@ -3,25 +3,18 @@
 from __future__ import annotations
 
 import logging
-from typing import Iterable, List, Optional, Type, TypeVar
+from typing import Iterable, List, Type, TypeVar
 
 from pyatlan.client.atlan import AtlanClient
-from pyatlan.errors import (
-    AtlanError,
-    NotFoundError,
-    PermissionError as AtlanPermissionError,
-)
-from pyatlan.model.assets.connection import Connection
+from pyatlan.errors import AtlanError, PermissionError as AtlanPermissionError
 from pyatlan.model.assets.core.asset import Asset
-from pyatlan.model.assets.core.database import Database
 from pyatlan.model.assets.core.file import File
-from pyatlan.model.assets.core.schema import Schema
 from pyatlan.model.assets.core.table import Table
 from pyatlan.model.enums import AtlanConnectorType
 
 from .config import Config
+from .connection_utils import ConnectionHandle, ConnectionProvisioner
 from .dataset_builder import DatasetRecord
-
 
 AssetType = TypeVar("AssetType", bound=Asset)
 
@@ -41,12 +34,26 @@ class AtlanUploader:
             base_url=config.atlan_base_url,
             api_key=config.atlan_api_token,
         )
-        connector_type, connection_qn = self._ensure_connection_exists()
-        self._connector_type = connector_type or AtlanConnectorType.CUSTOM
-        self._connection_qualified_name = connection_qn
-        self._database_qualified_name = self._ensure_database_exists(connection_qn)
+        self._provisioner = ConnectionProvisioner(self._client)
+
+        self._connection_handle = self._ensure_connection_exists()
+        self._connector_type = (
+            self._connection_handle.connector_type or AtlanConnectorType.CUSTOM
+        )
+        self._connection_qualified_name = self._connection_handle.qualified_name
+        self._connection_name = (
+            self._connection_handle.connection.attributes.name
+            if self._connection_handle.connection
+            and self._connection_handle.connection.attributes
+            else self._config.atlan_global_connection_name
+        )
+
+        self._database_qualified_name = self._ensure_database_exists(
+            self._connection_handle
+        )
         self._schema_qualified_name = self._ensure_schema_exists(
-            self._database_qualified_name, connection_qn
+            self._database_qualified_name,
+            self._connection_handle,
         )
 
     @property
@@ -77,7 +84,7 @@ class AtlanUploader:
         batch: List[File] = []
         for asset in assets:
             attrs = asset.attributes
-            attrs.connection_name = self._config.atlan_connection_name
+            attrs.connection_name = self._connection_name
             attrs.connector_name = self._connector_type.value
             if not attrs.connection_qualified_name:
                 attrs.connection_qualified_name = self._connection_qualified_name
@@ -110,7 +117,7 @@ class AtlanUploader:
         attrs.user_description = record.description
         attrs.source_url = record.source_url
         attrs.connector_name = self._connector_type.value
-        attrs.connection_name = self._config.atlan_connection_name
+        attrs.connection_name = self._connection_name
 
         return table
 
@@ -153,7 +160,7 @@ class AtlanUploader:
                 f"Atlan rejected the {noun_singular} upsert due to insufficient permissions. "
                 "Verify that the provided API token can create "
                 f"{noun_plural} for "
-                f"connection '{self._config.atlan_connection_name}'."
+                f"connection '{self._connection_name}'."
             )
             LOGGER.error("%s (original error: %s)", message, exc)
             raise AtlanUploadError(message) from exc
@@ -184,259 +191,35 @@ class AtlanUploader:
                 return False
         return True
 
-    def _ensure_connection_exists(self) -> tuple[AtlanConnectorType, str]:
-        qualified_name = self._config.atlan_connection_qualified_name
-        connection_name = self._config.atlan_connection_name
+    def _ensure_connection_exists(self) -> ConnectionHandle:
+        try:
+            return self._provisioner.ensure_connection(
+                qualified_name=self._config.atlan_global_connection_qualified_name,
+                connection_name=self._config.atlan_global_connection_name,
+                connector_name=self._config.atlan_global_connector_name,
+                domain_name=self._config.atlan_global_domain_name,
+            )
+        except RuntimeError as exc:  # pragma: no cover - escalated upstream
+            raise AtlanUploadError(str(exc)) from exc
 
-        connector_type = self._resolve_connector_type(
-            self._config.atlan_connector_name
+    def _ensure_database_exists(self, handle: ConnectionHandle) -> str:
+        database_qn = f"{handle.qualified_name.rstrip('/')}/{self._config.atlan_database_name}"
+        return self._provisioner.ensure_database(
+            name=self._config.atlan_database_name,
+            qualified_name=database_qn,
+            connection_handle=handle,
         )
-
-        try:
-            connection = self._client.asset.get_by_qualified_name(
-                qualified_name,
-                Connection,
-                ignore_relationships=True,
-            )
-            actual_qn = connection.attributes.qualified_name
-            connector_name = connection.attributes.connector_name
-            resolved_type = (
-                self._resolve_connector_type(connector_name)
-                if connector_name
-                else connector_type
-            )
-            if actual_qn and actual_qn != qualified_name:
-                LOGGER.warning(
-                    "Configured connection qualified name '%s' differs from Atlan record '%s'. "
-                    "Using the value reported by Atlan.",
-                    qualified_name,
-                    actual_qn,
-                )
-                qualified_name = actual_qn
-            LOGGER.debug(
-                "Atlan connection '%s' already exists; skipping creation.",
-                qualified_name,
-            )
-            return resolved_type, qualified_name
-        except NotFoundError:
-            LOGGER.info(
-                "Atlan connection '%s' not found; attempting to create it.",
-                qualified_name,
-            )
-        except AtlanError as exc:
-            message = (
-                f"Unable to verify existence of Atlan connection '{qualified_name}'. "
-                "Ensure the API token can read connections or pre-create the connection."
-            )
-            LOGGER.error("%s (original error: %s)", message, exc)
-            raise AtlanUploadError(message) from exc
-
-        try:
-            admin_role_guid = str(self._client.role_cache.get_id_for_name("$admin"))
-        except AtlanError as exc:
-            message = (
-                "Unable to resolve the '$admin' role while creating the connection. "
-                "Provide an API token with admin privileges or create the connection manually."
-            )
-            LOGGER.error("%s (original error: %s)", message, exc)
-            raise AtlanUploadError(message) from exc
-        except AttributeError as exc:
-            message = (
-                "Atlan client is missing role cache access; cannot auto-create the connection."
-            )
-            LOGGER.error(message)
-            raise AtlanUploadError(message) from exc
-
-        try:
-            connection = Connection.create(
-                client=self._client,
-                name=connection_name,
-                connector_type=connector_type,
-                admin_roles=[admin_role_guid],
-            )
-            connection.attributes.qualified_name = qualified_name
-            connection.attributes.connector_name = connector_type.value
-            connection.attributes.category = connector_type.category.value
-            response = self._client.asset.save(connection)
-            created = response.assets_created(Connection)
-            if created:
-                qualified_name = created[0].attributes.qualified_name
-            LOGGER.info(
-                "Created Atlan connection '%s' with qualified name '%s'.",
-                connection_name,
-                qualified_name,
-            )
-            return connector_type, qualified_name
-        except AtlanPermissionError as exc:
-            message = (
-                f"Insufficient permissions to create Atlan connection '{qualified_name}'. "
-                "Grant the API token connection-admin rights or create the connection manually."
-            )
-            LOGGER.error("%s (original error: %s)", message, exc)
-            raise AtlanUploadError(message) from exc
-        except AtlanError as exc:
-            message = f"Failed to create Atlan connection '{qualified_name}'."
-            LOGGER.error("%s (original error: %s)", message, exc)
-            raise AtlanUploadError(message) from exc
-
-    def _ensure_database_exists(self, connection_qn: str) -> str:
-        qualified_name = self._config.database_qualified_name
-        name = self._config.atlan_database_name
-
-        try:
-            database = self._client.asset.get_by_qualified_name(
-                qualified_name,
-                Database,
-                ignore_relationships=True,
-            )
-            actual_qn = database.attributes.qualified_name
-            if actual_qn and actual_qn != qualified_name:
-                LOGGER.warning(
-                    "Configured database qualified name '%s' differs from Atlan record '%s'. "
-                    "Using the value reported by Atlan.",
-                    qualified_name,
-                    actual_qn,
-                )
-                qualified_name = actual_qn
-            LOGGER.debug(
-                "Atlan database '%s' already exists; skipping creation.",
-                qualified_name,
-            )
-            return qualified_name
-        except NotFoundError:
-            LOGGER.info(
-                "Atlan database '%s' not found; attempting to create it.",
-                qualified_name,
-            )
-        except AtlanError as exc:
-            message = (
-                f"Unable to verify existence of Atlan database '{qualified_name}'. "
-                "Ensure the API token can read database assets or pre-create it."
-            )
-            LOGGER.error("%s (original error: %s)", message, exc)
-            raise AtlanUploadError(message) from exc
-
-        database = Database.creator(
-            name=name,
-            connection_qualified_name=connection_qn,
-        )
-        database.attributes.qualified_name = qualified_name
-        database.attributes.connector_name = self._connector_type.value
-        database.attributes.connection_name = self._config.atlan_connection_name
-        try:
-            response = self._client.asset.save(database)
-            created = response.assets_created(Database)
-            if created:
-                qualified_name = created[0].attributes.qualified_name
-            LOGGER.info(
-                "Created Atlan database '%s' with qualified name '%s'.",
-                name,
-                qualified_name,
-            )
-            return qualified_name
-        except AtlanPermissionError as exc:
-            message = (
-                f"Insufficient permissions to create Atlan database '{qualified_name}'. "
-                "Grant the API token database-admin rights or create it manually."
-            )
-            LOGGER.error("%s (original error: %s)", message, exc)
-            raise AtlanUploadError(message) from exc
-        except AtlanError as exc:
-            message = f"Failed to create Atlan database '{qualified_name}'."
-            LOGGER.error("%s (original error: %s)", message, exc)
-            raise AtlanUploadError(message) from exc
 
     def _ensure_schema_exists(
-        self, database_qn: str, connection_qn: str
+        self, database_qn: str, handle: ConnectionHandle
     ) -> str:
-        qualified_name = self._config.schema_qualified_name
-        name = self._config.atlan_schema_name
-
-        try:
-            schema = self._client.asset.get_by_qualified_name(
-                qualified_name,
-                Schema,
-                ignore_relationships=True,
-            )
-            actual_qn = schema.attributes.qualified_name
-            if actual_qn and actual_qn != qualified_name:
-                LOGGER.warning(
-                    "Configured schema qualified name '%s' differs from Atlan record '%s'. "
-                    "Using the value reported by Atlan.",
-                    qualified_name,
-                    actual_qn,
-                )
-                qualified_name = actual_qn
-            LOGGER.debug(
-                "Atlan schema '%s' already exists; skipping creation.",
-                qualified_name,
-            )
-            return qualified_name
-        except NotFoundError:
-            LOGGER.info(
-                "Atlan schema '%s' not found; attempting to create it.",
-                qualified_name,
-            )
-        except AtlanError as exc:
-            message = (
-                f"Unable to verify existence of Atlan schema '{qualified_name}'. "
-                "Ensure the API token can read schema assets or pre-create it."
-            )
-            LOGGER.error("%s (original error: %s)", message, exc)
-            raise AtlanUploadError(message) from exc
-
-        schema = Schema.creator(
-            name=name,
+        schema_qn = f"{database_qn.rstrip('/')}/{self._config.atlan_schema_name}"
+        return self._provisioner.ensure_schema(
+            name=self._config.atlan_schema_name,
+            qualified_name=schema_qn,
             database_qualified_name=database_qn,
-            database_name=self._config.atlan_database_name,
-            connection_qualified_name=connection_qn,
+            connection_handle=handle,
         )
-        schema.attributes.qualified_name = qualified_name
-        schema.attributes.connector_name = self._connector_type.value
-        schema.attributes.connection_name = self._config.atlan_connection_name
-        try:
-            response = self._client.asset.save(schema)
-            created = response.assets_created(Schema)
-            if created:
-                qualified_name = created[0].attributes.qualified_name
-            LOGGER.info(
-                "Created Atlan schema '%s' with qualified name '%s'.",
-                name,
-                qualified_name,
-            )
-            return qualified_name
-        except AtlanPermissionError as exc:
-            message = (
-                f"Insufficient permissions to create Atlan schema '{qualified_name}'. "
-                "Grant the API token schema-admin rights or create it manually."
-            )
-            LOGGER.error("%s (original error: %s)", message, exc)
-            raise AtlanUploadError(message) from exc
-        except AtlanError as exc:
-            message = f"Failed to create Atlan schema '{qualified_name}'."
-            LOGGER.error("%s (original error: %s)", message, exc)
-            raise AtlanUploadError(message) from exc
-
-    @staticmethod
-    def _resolve_connector_type(name: Optional[str]) -> AtlanConnectorType:
-        if not name:
-            return AtlanConnectorType.CUSTOM
-
-        normalised = name.replace("-", "_").replace(" ", "_").upper()
-        for candidate in (normalised, name.upper()):
-            if candidate in AtlanConnectorType.__members__:
-                return AtlanConnectorType[candidate]
-
-        lower_name = name.lower()
-        for member in AtlanConnectorType:
-            if member.value.lower() == lower_name:
-                return member
-
-        LOGGER.debug(
-            "Falling back to CUSTOM connector type for unrecognised connector name '%s'.",
-            name,
-        )
-        return AtlanConnectorType.CUSTOM
 
     @staticmethod
     def _table_name(record: DatasetRecord) -> str:
