@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import argparse
 import logging
-from typing import Iterable, List
+from typing import Iterable
 
 from pyatlan.errors import AtlanError
 from pyatlan.model.assets.core.table import Table
 
+from .atlan_uploader import AtlanUploader
 from .config import Config
 from .dataset_builder import DatasetBuilder, DatasetRecord
 from .dxr_client import DXRClient
-from .atlan_uploader import AtlanUploader
 
 LOGGER = logging.getLogger(__name__)
 
@@ -119,24 +119,19 @@ def main(argv: list[str] | None = None) -> None:  # pragma: no cover - CLI glue
         "--labels",
         type=int,
         default=1,
-        help="Number of DXR classifications to verify (default: 1)",
+        help="Number of label tables to verify (default: 1)",
     )
     parser.add_argument(
         "--max-files",
         type=int,
         default=500,
-        help="Maximum number of DXR file payloads to inspect (default: 500)",
+        help="Maximum number of files to sample across all labels (default: 500)",
     )
+
     args = parser.parse_args(argv)
-
-    try:
-        run(sample_labels=args.labels, max_files=args.max_files)
-    except SystemExit:
-        raise
-    except Exception as exc:  # pragma: no cover - defensive logging
-        LOGGER.error("Sanity check failed: %s", exc)
-        raise SystemExit(1) from exc
+    run(sample_labels=args.labels, max_files=args.max_files)
 
 
-if __name__ == "__main__":  # pragma: no cover - CLI glue
+if __name__ == "__main__":  # pragma: no cover - CLI entrypoint
     main()
+

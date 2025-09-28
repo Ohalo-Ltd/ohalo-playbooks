@@ -6,10 +6,12 @@ import logging
 import math
 import re
 import unicodedata
-from typing import Dict, Iterable, Mapping, Optional, Sequence, Set
+from dataclasses import dataclass, field
+from typing import Dict, Iterable, Mapping, Optional, Sequence
 from urllib.parse import urljoin
 
 from pyatlan.model.assets.core.file import File
+from pyatlan.model.core import AtlanTag
 from pyatlan.model.enums import AtlanTagColor, FileType
 
 from .global_attributes import GlobalAttributeManager
@@ -80,8 +82,13 @@ class FileAssetFactory:
             attrs.owner_users = {owner}
 
         tags = self._build_tags(payload, classification_tags)
-        if tags:
-            attrs.asset_tags = [handle.name for handle in sorted(tags, key=lambda h: h.name)]
+        if tags.handles:
+            attrs.asset_tags = [
+                handle.display_name
+                for handle in sorted(tags.handles.values(), key=lambda h: h.display_name)
+            ]
+        if tags.atlan_tags:
+            asset.atlan_tags = list(tags.atlan_tags.values())
 
         source_url = _derive_source_url(identifier, path, self._dxr_base_url)
         if source_url:
@@ -93,15 +100,15 @@ class FileAssetFactory:
         self,
         payload: Dict[str, object],
         classification_tags: Mapping[str, TagHandle],
-    ) -> Set[TagHandle]:
-        tags: Set[TagHandle] = set()
+    ) -> "_TagAssignments":
+        tags = _TagAssignments()
 
         def add_classification(identifier: Optional[str]) -> bool:
             if not identifier:
                 return False
             handle = classification_tags.get(identifier)
             if handle:
-                tags.add(handle)
+                tags.register(handle)
                 return True
             return False
 
@@ -117,7 +124,7 @@ class FileAssetFactory:
                         continue
                     name = _coalesce_str(item.get("name"))
                     if name:
-                        tags.add(
+                        tags.register(
                             self._tag_registry.ensure(
                                 slug_parts=["label", name],
                                 display_name=f"Label :: {name}",
@@ -144,7 +151,7 @@ class FileAssetFactory:
                 continue
             display = f"DLP :: {system or 'Unspecified'} :: {name}"
             slug_parts = ["dlp", system or "unspecified", name]
-            tags.add(
+            tags.register(
                 self._tag_registry.ensure(
                     slug_parts=slug_parts,
                     display_name=display,
@@ -157,7 +164,7 @@ class FileAssetFactory:
             has_classification = add_classification(_coalesce_str(annotator.get("id")))
             name = _coalesce_str(annotator.get("name"))
             if name and not has_classification:
-                tags.add(
+                tags.register(
                     self._tag_registry.ensure(
                         slug_parts=["annotator", name],
                         display_name=f"Annotator :: {name}",
@@ -171,7 +178,7 @@ class FileAssetFactory:
                 domain_id = _coalesce_str(domain.get("id"))
                 domain_name = _coalesce_str(domain.get("name"))
             if not add_classification(domain_id) and domain_name:
-                tags.add(
+                tags.register(
                     self._tag_registry.ensure(
                         slug_parts=["annotator-domain", domain_name],
                         display_name=f"Annotator Domain :: {domain_name}",
@@ -186,7 +193,7 @@ class FileAssetFactory:
                 account_type = (_coalesce_str(principal.get("accountType")) or "UNKNOWN").upper()
                 identifier = _coalesce_str(principal.get("email"), principal.get("name"))
                 if identifier:
-                    tags.add(
+                    tags.register(
                         self._tag_registry.ensure(
                             slug_parts=["entitlement", account_type, identifier],
                             display_name=f"Entitlement :: {account_type.title()} :: {identifier}",
@@ -201,7 +208,7 @@ class FileAssetFactory:
                 name = _coalesce_str(item.get("name"))
                 value = _coalesce_str(item.get("value"))
                 if name and value:
-                    tags.add(
+                    tags.register(
                         self._tag_registry.ensure(
                             slug_parts=["metadata", name, value],
                             display_name=f"Metadata :: {name} = {value}",
@@ -213,7 +220,7 @@ class FileAssetFactory:
             name = _coalesce_str(item.get("name"))
             value = _coalesce_str(item.get("value"))
             if name and value:
-                tags.add(
+                tags.register(
                     self._tag_registry.ensure(
                         slug_parts=["metadata", name, value],
                         display_name=f"Metadata :: {name} = {value}",
@@ -229,7 +236,7 @@ class FileAssetFactory:
             else:
                 name = _coalesce_str(category)
             if name:
-                tags.add(
+                tags.register(
                     self._tag_registry.ensure(
                         slug_parts=["category", name],
                         display_name=f"Category :: {name}",
@@ -238,6 +245,16 @@ class FileAssetFactory:
                 )
 
         return tags
+
+
+@dataclass
+class _TagAssignments:
+    handles: Dict[str, TagHandle] = field(default_factory=dict)
+    atlan_tags: Dict[str, AtlanTag] = field(default_factory=dict)
+
+    def register(self, handle: TagHandle) -> None:
+        self.handles[handle.slug] = handle
+        self.atlan_tags.setdefault(handle.type_name, AtlanTag.of(handle.type_name))
 
 
 def _extract_iterable_dict(value: object) -> Iterable[Dict[str, object]]:

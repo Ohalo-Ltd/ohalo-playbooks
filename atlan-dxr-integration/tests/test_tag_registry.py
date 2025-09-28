@@ -55,9 +55,13 @@ def test_tag_registry_creates_missing_tags():
         color=AtlanTagColor.YELLOW,
     )
 
-    assert handle.name == "DXR :: Credit Card"
+    assert handle.display_name == "DXR :: Credit Card"
+    assert handle.type_name.startswith("dxr__"), handle.type_name
     assert client.typedef.created, "Expected tag definition to be created"
     assert client.atlan_tag_cache.refresh_called is True
+    created_def = client.typedef.created[-1]
+    assert created_def.name == handle.type_name
+    assert created_def.display_name == handle.display_name
 
     # Calling again should reuse the server-side definition without creating another tag
     client.typedef.created.clear()
@@ -92,4 +96,5 @@ def test_global_attribute_manager_generates_handles():
 
     assert set(mapping) == {"cls-1"}
     handle = mapping["cls-1"]
-    assert handle.name == "DXR :: Annotator :: Sensitive"
+    assert handle.display_name == "DXR :: Annotator :: Sensitive"
+    assert handle.type_name.startswith("dxr__"), handle.type_name

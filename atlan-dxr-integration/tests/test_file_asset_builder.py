@@ -161,6 +161,18 @@ def test_factory_builds_enriched_file_asset():
     missing = expected - tag_names
     assert not missing, (tag_names, missing)
 
+    atlan_tag_names = {
+        str(tag.type_name)
+        for tag in asset.atlan_tags or []
+        if getattr(tag, "type_name", None)
+    }
+    assert classification_handle.type_name in atlan_tag_names
+    assert any("credit-card" in name for name in atlan_tag_names)
+    assert any("financially-sensitive" in name for name in atlan_tag_names)
+    assert any("contract-type" in name for name in atlan_tag_names)
+    registry_type_names = {handle.type_name for handle in tag_registry._handles.values()}  # type: ignore[attr-defined]
+    assert atlan_tag_names <= registry_type_names
+
 
 def test_factory_defaults_to_txt_without_type():
     _, factory = _build_factory()

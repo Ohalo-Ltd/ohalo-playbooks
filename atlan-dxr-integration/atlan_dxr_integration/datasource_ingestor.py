@@ -133,6 +133,14 @@ class DatasourceIngestionCoordinator:
                 context.connection_name,
                 getattr(response, "request_id", "unknown"),
             )
+            if partial:
+                for asset in partial:
+                    LOGGER.warning(
+                        "Partial update for file '%s' (qn=%s) classifications=%s",
+                        asset.attributes.display_name,
+                        asset.attributes.qualified_name,
+                        getattr(asset, "classifications", None),
+                    )
         except AtlanPermissionError as exc:
             raise AtlanUploadError(
                 f"Insufficient permissions to upsert files for connection '{context.connection_name}'."

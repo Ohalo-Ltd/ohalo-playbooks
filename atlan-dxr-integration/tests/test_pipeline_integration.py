@@ -40,8 +40,9 @@ class _StubTagRegistry:
 
     def ensure(self, *, slug_parts, display_name, **_):
         slug = "/".join(slug_parts)
-        name = f"{self.namespace} :: {display_name}"
-        return TagHandle(slug=slug, name=name)
+        type_name = f"{self.namespace.lower()}__{slug.replace('/', '__')}".replace(" ", "-")
+        display = f"{self.namespace} :: {display_name}"
+        return TagHandle(slug=slug, type_name=type_name, display_name=display)
 
 
 class _StubGlobalAttributeManager:
@@ -82,7 +83,9 @@ class _StubFileAssetFactory:
         attrs = asset.attributes
         attrs.qualified_name = f"{connection_qualified_name}/{identifier}"
         attrs.connection_name = connection_name
-        attrs.asset_tags = [handle.name for handle in classification_tags.values()]
+        attrs.asset_tags = [
+            handle.display_name for handle in classification_tags.values()
+        ]
         return asset
 
 
