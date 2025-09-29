@@ -138,22 +138,6 @@ against production tenants. Pass `--skip-soft-delete` to jump straight to the re
 deletion mode. Available delete types map to `pyatlan`'s `AtlanDeleteType` values
 (`hard`, `purge`).
 
-After purging connections you can remove any leftover tables or file assets by running
-`python scripts/purge_orphan_assets.py` (the same environment variables as the main
-pipeline apply).
-
-### Debugging tag assignments
-
-When diagnosing tag discrepancies, the helper below inspects DXR payloads and compares
-them with the corresponding Atlan assets:
-
-```bash
-python scripts/debug_file_tags.py --limit 3
-```
-
-Add `--skip-fetch-existing` to avoid calling Atlan (useful when testing against recorded
-payloads only).
-
 ## Development
 
 Run unit tests from the repository root:
