@@ -6,7 +6,7 @@ import logging
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from typing import Dict, Mapping, Optional
+from typing import Dict, Iterable, Mapping, Optional
 
 from pyatlan.errors import AtlanError, PermissionError as AtlanPermissionError
 from pyatlan.model.assets.core.file import File
@@ -18,7 +18,7 @@ from .connection_utils import (
     ConnectionProvisioner,
     resolve_connector_type,
 )
-from .file_asset_builder import FileAssetFactory
+from .file_asset_builder import BuiltFileAsset, FileAssetFactory
 from .tag_registry import TagHandle
 
 LOGGER = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ def _slugify(value: str) -> str:
 class _DatasourceContext:
     handle: ConnectionHandle
     connection_name: str
-    assets: list[File] = field(default_factory=list)
+    assets: list[BuiltFileAsset] = field(default_factory=list)
 
 
 class DatasourceIngestionCoordinator:
@@ -64,13 +64,13 @@ class DatasourceIngestionCoordinator:
         classification_tags: Mapping[str, TagHandle],
     ) -> None:
         context = self._ensure_context(payload.get("datasource"))
-        asset = self._factory.build(
+        built = self._factory.build(
             payload,
             connection_qualified_name=context.handle.qualified_name,
             connection_name=context.connection_name,
             classification_tags=classification_tags,
         )
-        context.assets.append(asset)
+        context.assets.append(built)
         if len(context.assets) >= self._batch_size:
             self._flush_context(context)
 
@@ -121,8 +121,10 @@ class DatasourceIngestionCoordinator:
     def _flush_context(self, context: _DatasourceContext) -> None:
         if not context.assets:
             return
+        pending = list(context.assets)
+
         try:
-            response = self._client.asset.save(context.assets)
+            response = self._client.asset.save([item.asset for item in pending])
             created = response.assets_created(File)
             updated = response.assets_updated(File)
             partial = response.assets_partially_updated(File)
@@ -141,6 +143,7 @@ class DatasourceIngestionCoordinator:
                         asset.attributes.qualified_name,
                         getattr(asset, "classifications", None),
                     )
+            self._apply_tags(pending)
         except AtlanPermissionError as exc:
             raise AtlanUploadError(
                 f"Insufficient permissions to upsert files for connection '{context.connection_name}'."
@@ -151,6 +154,44 @@ class DatasourceIngestionCoordinator:
             ) from exc
         finally:
             context.assets.clear()
+
+    def _apply_tags(self, items: Iterable[BuiltFileAsset]) -> None:
+        for built in items:
+            handles = built.tag_handles
+            if not handles:
+                continue
+            display_names = sorted({handle.display_name for handle in handles})
+            qualified_name = getattr(
+                built.asset.attributes, "qualified_name", None
+            )
+            if not qualified_name:
+                LOGGER.warning(
+                    "Skipping tag assignment for file with no qualified name: %s",
+                    built.asset,
+                )
+                continue
+            LOGGER.debug(
+                "Applying %d Atlan tag(s) to file '%s'",
+                len(display_names),
+                qualified_name,
+            )
+            try:
+                self._client.asset.add_atlan_tags(
+                    asset_type=File,
+                    qualified_name=qualified_name,
+                    atlan_tag_names=display_names,
+                    propagate=False,
+                    remove_propagation_on_delete=True,
+                    restrict_lineage_propagation=False,
+                    restrict_propagation_through_hierarchy=False,
+                )
+            except AtlanError as exc:  # pragma: no cover - remote failures
+                LOGGER.warning(
+                    "Unable to attach Atlan tags %s to file '%s': %s",
+                    display_names,
+                    qualified_name,
+                    exc,
+                )
 
     def _build_connection_name(self, key: str, display_name: Optional[str]) -> str:
         base = display_name or key

@@ -17,10 +17,24 @@ class _FakeTypeDefClient:
     def __init__(self, tag_cache):
         self.created = []
         self._tag_cache = tag_cache
+        self._stored: dict[str, SimpleNamespace] = {}
 
     def create(self, tag_def):  # pragma: no cover - exercised via registry
         self.created.append(tag_def)
-        self._tag_cache.register(tag_def.name)
+        hashed = f"hashed::{tag_def.display_name}"
+        tag_def.name = hashed
+        self._stored[hashed] = SimpleNamespace(
+            name=hashed,
+            display_name=tag_def.display_name,
+            entity_types=list(tag_def.entity_types or []),
+        )
+        self._tag_cache.register(tag_def.display_name, hashed)
+
+    def get_by_name(self, name):
+        return self._stored.get(name)
+
+    def update(self, tag_def):
+        self._stored[tag_def.name] = tag_def
 
 
 class _FakeTagCache:
@@ -34,14 +48,20 @@ class _FakeTagCache:
     def get_id_for_name(self, name: str) -> str | None:
         return self._ids.get(name)
 
-    def register(self, name: str) -> None:
-        self._ids[name] = f"tag-{len(self._ids)+1}"
+    def register(self, display_name: str, internal_name: str) -> None:
+        self._ids[display_name] = internal_name
 
 
 class _FakeClient:
     def __init__(self):
         self.atlan_tag_cache = _FakeTagCache()
         self.typedef = _FakeTypeDefClient(self.atlan_tag_cache)
+
+    def create_typedef(self, tag_def):
+        self.typedef.create(tag_def)
+
+    def update_typedef(self, tag_def):
+        self.typedef.update(tag_def)
 
 
 def test_tag_registry_creates_missing_tags():
@@ -56,11 +76,11 @@ def test_tag_registry_creates_missing_tags():
     )
 
     assert handle.display_name == "DXR :: Credit Card"
-    assert handle.type_name.startswith("dxr__"), handle.type_name
+    assert handle.hashed_name == "hashed::DXR :: Credit Card"
     assert client.typedef.created, "Expected tag definition to be created"
     assert client.atlan_tag_cache.refresh_called is True
     created_def = client.typedef.created[-1]
-    assert created_def.name == handle.type_name
+    assert created_def.name == handle.hashed_name
     assert created_def.display_name == handle.display_name
 
     # Calling again should reuse the server-side definition without creating another tag
@@ -97,4 +117,4 @@ def test_global_attribute_manager_generates_handles():
     assert set(mapping) == {"cls-1"}
     handle = mapping["cls-1"]
     assert handle.display_name == "DXR :: Annotator :: Sensitive"
-    assert handle.type_name.startswith("dxr__"), handle.type_name
+    assert handle.hashed_name == "hashed::DXR :: Annotator :: Sensitive"

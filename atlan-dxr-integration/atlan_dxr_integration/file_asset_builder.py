@@ -7,17 +7,24 @@ import math
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, Mapping, Optional, Sequence
+from typing import Dict, Iterable, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urljoin
 
 from pyatlan.model.assets.core.file import File
-from pyatlan.model.core import AtlanTag
 from pyatlan.model.enums import AtlanTagColor, FileType
 
 from .global_attributes import GlobalAttributeManager
 from .tag_registry import TagHandle, TagRegistry
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class BuiltFileAsset:
+    """Result of building a file asset along with its tag handles."""
+
+    asset: File
+    tag_handles: Tuple[TagHandle, ...]
 
 
 class FileAssetFactory:
@@ -41,7 +48,7 @@ class FileAssetFactory:
         connection_qualified_name: str,
         connection_name: str,
         classification_tags: Mapping[str, TagHandle],
-    ) -> File:
+    ) -> BuiltFileAsset:
         identifier = _file_identifier(payload)
         if not identifier:
             raise ValueError("DXR file payload missing unique identifier")
@@ -82,19 +89,17 @@ class FileAssetFactory:
             attrs.owner_users = {owner}
 
         tags = self._build_tags(payload, classification_tags)
-        if tags.handles:
-            attrs.asset_tags = [
-                handle.display_name
-                for handle in sorted(tags.handles.values(), key=lambda h: h.display_name)
-            ]
-        if tags.atlan_tags:
-            asset.atlan_tags = list(tags.atlan_tags.values())
+        handles = tuple(
+            sorted(tags.handles.values(), key=lambda h: h.display_name)
+        )
+        if handles:
+            attrs.asset_tags = [handle.display_name for handle in handles]
 
         source_url = _derive_source_url(identifier, path, self._dxr_base_url)
         if source_url:
             attrs.source_url = source_url
 
-        return asset
+        return BuiltFileAsset(asset=asset, tag_handles=handles)
 
     def _build_tags(
         self,
@@ -250,11 +255,9 @@ class FileAssetFactory:
 @dataclass
 class _TagAssignments:
     handles: Dict[str, TagHandle] = field(default_factory=dict)
-    atlan_tags: Dict[str, AtlanTag] = field(default_factory=dict)
 
     def register(self, handle: TagHandle) -> None:
         self.handles[handle.slug] = handle
-        self.atlan_tags.setdefault(handle.type_name, AtlanTag.of(handle.type_name))
 
 
 def _extract_iterable_dict(value: object) -> Iterable[Dict[str, object]]:
@@ -480,4 +483,4 @@ def _slugify(value: str) -> str:
     return cleaned or "unknown"
 
 
-__all__ = ["FileAssetFactory"]
+__all__ = ["BuiltFileAsset", "FileAssetFactory"]

@@ -6,16 +6,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from atlan_dxr_integration.file_asset_builder import FileAssetFactory
+from atlan_dxr_integration.file_asset_builder import BuiltFileAsset, FileAssetFactory
 from atlan_dxr_integration.tag_registry import TagRegistry
 from pyatlan.errors import ErrorCode
 from pyatlan.model.enums import FileType
 
 
 class _FakeTypeDefClient:
-    def __init__(self):
+    def __init__(self, tag_cache):
         self.created = []
         self._existing = {}
+        self._tag_cache = tag_cache
 
     def get_by_name(self, name):
         if name not in self._existing:
@@ -24,18 +25,40 @@ class _FakeTypeDefClient:
 
     def create(self, tag_def):
         self.created.append(tag_def)
+        hashed = f"hashed::{tag_def.display_name}"
+        tag_def.name = hashed
+        self._existing[hashed] = tag_def
+        self._tag_cache.register(tag_def.display_name, hashed)
+        return tag_def
+
+    def update(self, tag_def):
         self._existing[tag_def.name] = tag_def
 
 
 class _FakeTagCache:
+    def __init__(self):
+        self._ids: dict[str, str] = {}
+
     def refresh_cache(self):
         return None
+
+    def get_id_for_name(self, name: str):
+        return self._ids.get(name)
+
+    def register(self, display_name: str, internal_name: str):
+        self._ids[display_name] = internal_name
 
 
 class _FakeClient:
     def __init__(self):
-        self.typedef = _FakeTypeDefClient()
         self.atlan_tag_cache = _FakeTagCache()
+        self.typedef = _FakeTypeDefClient(self.atlan_tag_cache)
+
+    def create_typedef(self, tag_def):
+        self.typedef.create(tag_def)
+
+    def update_typedef(self, tag_def):
+        self.typedef.update(tag_def)
 
 
 def _build_factory():
@@ -124,7 +147,7 @@ def test_factory_builds_enriched_file_asset():
         display_name="Extractor :: Contract Type",
     )
 
-    asset = factory.build(
+    built = factory.build(
         _sample_payload(),
         connection_qualified_name="default/custom/dxr-datasource-finance",
         connection_name="dxr-datasource-finance",
@@ -136,6 +159,9 @@ def test_factory_builds_enriched_file_asset():
         },
     )
 
+    assert isinstance(built, BuiltFileAsset)
+
+    asset = built.asset
     attrs = asset.attributes
     assert attrs.connection_qualified_name == "default/custom/dxr-datasource-finance"
     assert attrs.connection_name == "dxr-datasource-finance"
@@ -161,17 +187,10 @@ def test_factory_builds_enriched_file_asset():
     missing = expected - tag_names
     assert not missing, (tag_names, missing)
 
-    atlan_tag_names = {
-        str(tag.type_name)
-        for tag in asset.atlan_tags or []
-        if getattr(tag, "type_name", None)
-    }
-    assert classification_handle.type_name in atlan_tag_names
-    assert any("credit-card" in name for name in atlan_tag_names)
-    assert any("financially-sensitive" in name for name in atlan_tag_names)
-    assert any("contract-type" in name for name in atlan_tag_names)
-    registry_type_names = {handle.type_name for handle in tag_registry._handles.values()}  # type: ignore[attr-defined]
-    assert atlan_tag_names <= registry_type_names
+    handle_display = {handle.display_name for handle in built.tag_handles}
+    assert handle_display == set(tag_names)
+    hashed_names = {handle.hashed_name for handle in built.tag_handles}
+    assert all(name.startswith("hashed::") for name in hashed_names)
 
 
 def test_factory_defaults_to_txt_without_type():
@@ -180,10 +199,10 @@ def test_factory_defaults_to_txt_without_type():
         "fileId": "abc123",
         "fileName": "readme",
     }
-    asset = factory.build(
+    built = factory.build(
         payload,
         connection_qualified_name="default/custom/dxr-datasource-sample",
         connection_name="dxr-datasource-sample",
         classification_tags={},
     )
-    assert asset.attributes.file_type == FileType.TXT
+    assert built.asset.attributes.file_type == FileType.TXT

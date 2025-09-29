@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from atlan_dxr_integration import sanity_check
+from scripts import sanity_check
 from atlan_dxr_integration.config import Config
 from atlan_dxr_integration.dxr_client import Classification
 

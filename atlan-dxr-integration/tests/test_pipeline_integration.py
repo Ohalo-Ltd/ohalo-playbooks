@@ -10,6 +10,7 @@ import pytest
 from atlan_dxr_integration import pipeline
 from atlan_dxr_integration.connection_utils import ConnectionHandle
 from atlan_dxr_integration.tag_registry import TagHandle
+from atlan_dxr_integration.file_asset_builder import BuiltFileAsset
 from atlan_dxr_integration.dxr_client import Classification
 from pyatlan.model.assets.core.file import File
 from pyatlan.model.assets.core.table import Table
@@ -40,9 +41,8 @@ class _StubTagRegistry:
 
     def ensure(self, *, slug_parts, display_name, **_):
         slug = "/".join(slug_parts)
-        type_name = f"{self.namespace.lower()}__{slug.replace('/', '__')}".replace(" ", "-")
         display = f"{self.namespace} :: {display_name}"
-        return TagHandle(slug=slug, type_name=type_name, display_name=display)
+        return TagHandle(slug=slug, display_name=display, hashed_name=f"hashed::{display}")
 
 
 class _StubGlobalAttributeManager:
@@ -73,7 +73,7 @@ class _StubFileAssetFactory:
         connection_qualified_name: str,
         connection_name: str,
         classification_tags,
-    ) -> File:
+    ) -> BuiltFileAsset:
         identifier = payload.get("id") or payload.get("fileId") or "file"
         asset = File.creator(
             name=payload.get("name") or payload.get("fileName") or str(identifier),
@@ -83,10 +83,9 @@ class _StubFileAssetFactory:
         attrs = asset.attributes
         attrs.qualified_name = f"{connection_qualified_name}/{identifier}"
         attrs.connection_name = connection_name
-        attrs.asset_tags = [
-            handle.display_name for handle in classification_tags.values()
-        ]
-        return asset
+        handles = tuple(classification_tags.values())
+        attrs.asset_tags = [handle.display_name for handle in handles]
+        return BuiltFileAsset(asset=asset, tag_handles=handles)
 
 
 class _StubConnectionProvisioner:
