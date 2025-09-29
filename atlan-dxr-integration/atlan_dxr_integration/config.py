@@ -46,20 +46,6 @@ class Config:
         return base
 
     @property
-    def atlan_connection_qualified_name(self) -> str:
-        """Backwards-compatible alias for the global connection qualified name."""
-
-        return self.atlan_global_connection_qualified_name
-
-    @property
-    def atlan_connection_name(self) -> str:  # pragma: no cover - compatibility
-        return self.atlan_global_connection_name
-
-    @property
-    def atlan_connector_name(self) -> str:  # pragma: no cover - compatibility
-        return self.atlan_global_connector_name
-
-    @property
     def global_connection_namespace(self) -> str:
         return self.atlan_global_connection_qualified_name.split("/")[0]
 
@@ -100,19 +86,9 @@ class Config:
 
         missing = [name for name in base_required if not os.getenv(name)]
 
-        # Support legacy env names while transitioning to the new architecture.
-        global_connection_qn = (
-            os.getenv("ATLAN_GLOBAL_CONNECTION_QUALIFIED_NAME")
-            or os.getenv("ATLAN_CONNECTION_QUALIFIED_NAME")
-        )
-        global_connection_name = (
-            os.getenv("ATLAN_GLOBAL_CONNECTION_NAME")
-            or os.getenv("ATLAN_CONNECTION_NAME")
-        )
-        global_connector_name = (
-            os.getenv("ATLAN_GLOBAL_CONNECTOR_NAME")
-            or os.getenv("ATLAN_CONNECTOR_NAME")
-        )
+        global_connection_qn = os.getenv("ATLAN_GLOBAL_CONNECTION_QUALIFIED_NAME")
+        global_connection_name = os.getenv("ATLAN_GLOBAL_CONNECTION_NAME")
+        global_connector_name = os.getenv("ATLAN_GLOBAL_CONNECTOR_NAME")
 
         if not global_connection_qn:
             missing.append("ATLAN_GLOBAL_CONNECTION_QUALIFIED_NAME")

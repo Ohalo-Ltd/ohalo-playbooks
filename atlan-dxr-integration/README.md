@@ -53,9 +53,13 @@ annotator metadata, DLP labels, extracted metadata pairs, entitlements, and cate
    Alternatively, run the module directly with Python:
 
    ```bash
-   pip install -r requirements.txt
+   python -m venv .venv
+   source .venv/bin/activate
+   python -m pip install -r requirements.txt
    python -m atlan_dxr_integration
    ```
+
+   On Windows, replace `source .venv/bin/activate` with `.\.venv\Scripts\activate`.
 
 3. The service logs progress and exits once the current batch has been synced.
    Schedule the container (for example through Atlan's embedded runtime, cron, or a
@@ -83,12 +87,9 @@ Environment variables (see `.env.example`):
 | `ATLAN_DATABASE_NAME` | Name of the Atlan database that will be created (if missing) under the connection. |
 | `ATLAN_SCHEMA_NAME` | Name of the Atlan schema that will be created (if missing) inside the database. |
 | `ATLAN_BATCH_SIZE` | Maximum number of tables to upsert in a single API call. |
+| `ATLAN_DATASET_PATH_PREFIX` | Optional suffix appended to dataset qualified names (default: `dxr`). |
 | `ATLAN_TAG_NAMESPACE` | Namespace prefix used when creating Atlan tag definitions (default: `DXR`). |
 | `LOG_LEVEL` | Logging verbosity (`INFO`, `DEBUG`, ...). |
-
-Legacy variables (`ATLAN_CONNECTION_QUALIFIED_NAME`, `ATLAN_CONNECTION_NAME`,
-`ATLAN_CONNECTOR_NAME`) are still recognised for backwards compatibility and map to the
-global connection settings above.
 
 ## Implementation notes
 
@@ -113,7 +114,7 @@ global connection settings above.
 Run a lightweight verification against live DXR and Atlan environments:
 
 ```bash
-python -m atlan_dxr_integration.sanity_check --labels 1 --max-files 200
+python scripts/sanity_check.py --labels 1 --max-files 200
 ```
 
 The command pulls a small sample of DXR classifications, pushes them to Atlan, and
@@ -123,9 +124,7 @@ acknowledge the upsert.
 
 ### Cleaning up connections during testing
 
-To hard-deleteAfter purging connections you can remove any leftover tables or file assets by running `python scripts/purge_orphan_assets.py` (same env vars apply).
-
- the configured Atlan connection (for example between integration test
+To hard-delete the configured Atlan connections (for example between integration test
 runs), use the dedicated helper:
 
 ```bash
@@ -138,6 +137,22 @@ delete). **This command is intended for development environments only**; avoid r
 against production tenants. Pass `--skip-soft-delete` to jump straight to the requested
 deletion mode. Available delete types map to `pyatlan`'s `AtlanDeleteType` values
 (`hard`, `purge`).
+
+After purging connections you can remove any leftover tables or file assets by running
+`python scripts/purge_orphan_assets.py` (the same environment variables as the main
+pipeline apply).
+
+### Debugging tag assignments
+
+When diagnosing tag discrepancies, the helper below inspects DXR payloads and compares
+them with the corresponding Atlan assets:
+
+```bash
+python scripts/debug_file_tags.py --limit 3
+```
+
+Add `--skip-fetch-existing` to avoid calling Atlan (useful when testing against recorded
+payloads only).
 
 ## Development
 
