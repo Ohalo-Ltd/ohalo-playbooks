@@ -25,7 +25,7 @@ This repository currently includes the following playbooks:
   Pulumi-managed guardrail that watches S3 staging zones, classifies files with Data X-Ray, and automatically quarantines risky payloads feeding unstructured ETL pipelines. The [README](./s3-etl-quarantine/README.md) covers prerequisites, deployment, and cleanup steps.
 
 - **[`atlan-dxr-integration`](./atlan-dxr-integration/)**
-  Containerised service that syncs Data X-Ray classifications into Atlan as `DataSet` assets using the official Python SDK. Review the [README](./atlan-dxr-integration/README.md) for configuration, runtime options, and deployment guidance.
+  Containerised service that syncs Data X-Ray classifications into Atlan as assets using the official Python SDK. Review the [README](./atlan-dxr-integration/README.md) for configuration, runtime options, and deployment guidance.
 
 ## Getting Started
 
