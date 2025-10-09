@@ -18,10 +18,15 @@ from .tag_registry import TagRegistry
 LOGGER = logging.getLogger(__name__)
 
 
-def run() -> None:
-    """Entry point for running the integration once."""
+def run(config: Optional[Config] = None) -> None:
+    """Entry point for running the integration once.
 
-    config = Config.from_env()
+    Args:
+        config: Optional pre-built configuration. When omitted the configuration is
+            loaded from environment variables via :meth:`Config.from_env`.
+    """
+
+    config = config or Config.from_env()
     logging.basicConfig(level=config.log_level.upper())
     LOGGER.info("Starting DXR → Atlan sync")
 

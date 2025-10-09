@@ -1,0 +1,220 @@
+{
+  "id": "dxr-sync",
+  "name": "DXR to Atlan Sync",
+  "logo": "",
+  "config": {
+    "properties": {
+      "dxr_base_url": {
+        "type": "string",
+        "required": true,
+        "ui": {
+          "label": "DXR base URL",
+          "placeholder": "https://atlan.dataxray.io/api",
+          "grid": 6
+        }
+      },
+      "dxr_pat": {
+        "type": "string",
+        "required": true,
+        "ui": {
+          "label": "DXR personal access token",
+          "widget": "password",
+          "grid": 6
+        }
+      },
+      "dxr_classification_types": {
+        "type": "string",
+        "required": false,
+        "ui": {
+          "label": "DXR classification types",
+          "placeholder": "LABEL,ANNOTATOR",
+          "helpText": "Comma separated whitelist. Leave blank to ingest all classifications.",
+          "grid": 12
+        }
+      },
+      "dxr_sample_file_limit": {
+        "type": "integer",
+        "required": true,
+        "ui": {
+          "label": "DXR sample file limit",
+          "placeholder": "5",
+          "grid": 6
+        }
+      },
+      "dxr_file_fetch_limit": {
+        "type": "integer",
+        "required": true,
+        "ui": {
+          "label": "DXR per-label fetch limit",
+          "placeholder": "200",
+          "grid": 6
+        }
+      },
+      "atlan_base_url": {
+        "type": "string",
+        "required": true,
+        "ui": {
+          "label": "Atlan base URL",
+          "placeholder": "https://workspace.atlan.com",
+          "grid": 6
+        }
+      },
+      "atlan_api_token": {
+        "type": "string",
+        "required": true,
+        "ui": {
+          "label": "Atlan API token",
+          "widget": "password",
+          "grid": 6
+        }
+      },
+      "atlan_global_connection_qualified_name": {
+        "type": "string",
+        "required": true,
+        "ui": {
+          "label": "Global connection qualified name",
+          "placeholder": "default/custom/dxr-unstructured-attributes",
+          "grid": 12
+        }
+      },
+      "atlan_global_connection_name": {
+        "type": "string",
+        "required": true,
+        "ui": {
+          "label": "Global connection name",
+          "placeholder": "dxr-unstructured-attributes",
+          "grid": 6
+        }
+      },
+      "atlan_global_connector_name": {
+        "type": "string",
+        "required": true,
+        "ui": {
+          "label": "Global connector name",
+          "placeholder": "custom",
+          "grid": 6
+        }
+      },
+      "atlan_global_domain_name": {
+        "type": "string",
+        "required": false,
+        "ui": {
+          "label": "Global domain (optional)",
+          "placeholder": "DXR Unstructured",
+          "grid": 6
+        }
+      },
+      "atlan_database_name": {
+        "type": "string",
+        "required": true,
+        "ui": {
+          "label": "Database name",
+          "placeholder": "dxr",
+          "grid": 6
+        }
+      },
+      "atlan_schema_name": {
+        "type": "string",
+        "required": true,
+        "ui": {
+          "label": "Schema name",
+          "placeholder": "labels",
+          "grid": 6
+        }
+      },
+      "atlan_dataset_path_prefix": {
+        "type": "string",
+        "required": false,
+        "ui": {
+          "label": "Dataset path prefix",
+          "placeholder": "dxr",
+          "grid": 6
+        }
+      },
+      "atlan_datasource_connection_prefix": {
+        "type": "string",
+        "required": true,
+        "ui": {
+          "label": "Datasource connection prefix",
+          "placeholder": "dxr-datasource",
+          "grid": 6
+        }
+      },
+      "atlan_datasource_domain_prefix": {
+        "type": "string",
+        "required": false,
+        "ui": {
+          "label": "Datasource domain prefix (optional)",
+          "placeholder": "DXR",
+          "grid": 6
+        }
+      },
+      "atlan_batch_size": {
+        "type": "integer",
+        "required": true,
+        "ui": {
+          "label": "Atlan batch size",
+          "placeholder": "20",
+          "grid": 6
+        }
+      },
+      "atlan_tag_namespace": {
+        "type": "string",
+        "required": true,
+        "ui": {
+          "label": "Atlan tag namespace",
+          "placeholder": "DXR",
+          "grid": 6
+        }
+      },
+      "log_level": {
+        "type": "string",
+        "required": true,
+        "ui": {
+          "label": "Log level",
+          "placeholder": "INFO",
+          "grid": 6
+        }
+      }
+    },
+    "steps": [
+      {
+        "id": "dxr-config",
+        "title": "DXR configuration",
+        "properties": [
+          "dxr_base_url",
+          "dxr_pat",
+          "dxr_classification_types",
+          "dxr_sample_file_limit",
+          "dxr_file_fetch_limit"
+        ]
+      },
+      {
+        "id": "atlan-config",
+        "title": "Atlan configuration",
+        "properties": [
+          "atlan_base_url",
+          "atlan_api_token",
+          "atlan_global_connection_qualified_name",
+          "atlan_global_connection_name",
+          "atlan_global_connector_name",
+          "atlan_global_domain_name",
+          "atlan_database_name",
+          "atlan_schema_name",
+          "atlan_dataset_path_prefix",
+          "atlan_datasource_connection_prefix",
+          "atlan_datasource_domain_prefix",
+          "atlan_batch_size",
+          "atlan_tag_namespace"
+        ]
+      },
+      {
+        "id": "logging",
+        "title": "Logging",
+        "properties": [
+          "log_level"
+        ]
+      }
+    ]
+  }
+}

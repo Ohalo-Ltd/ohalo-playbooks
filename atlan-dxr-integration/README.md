@@ -41,29 +41,50 @@ annotator metadata, DLP labels, extracted metadata pairs, entitlements, and cate
 
 ## Getting started
 
-1. Copy `.env.example` to `.env` and populate it with valid credentials.
-2. Build and run the container:
+1. Copy `.env.example` to `.env` and populate it with valid credentials, mirroring the
+   configuration section below. These variables are loaded automatically by the runtime.
+2. Create and activate a virtual environment managed by `uv`:
 
    ```bash
-   cd atlan-dxr-integration
-   docker build -t atlan-dxr-sync .
-   docker run --rm --env-file .env atlan-dxr-sync
+   uv venv
+   source .venv/bin/activate  # Windows: .venv\Scripts\activate
+   uv sync
    ```
 
-   Alternatively, run the module directly with Python:
+3. Start the local dependencies required by the Application SDK (Temporal + Dapr):
 
    ```bash
-   python -m venv .venv
-   source .venv/bin/activate
-   python -m pip install -r requirements.txt
-   python -m atlan_dxr_integration
+   uv run poe start-deps
    ```
 
-   On Windows, replace `source .venv/bin/activate` with `.\.venv\Scripts\activate`.
+   Stop the background services when you finish:
 
-3. The service logs progress and exits once the current batch has been synced.
-   Schedule the container (for example through Atlan's embedded runtime, cron, or a
-   workflow orchestrator) to refresh tables periodically.
+   ```bash
+   uv run poe stop-deps
+   ```
+
+4. Launch the DXR application worker and API:
+
+   ```bash
+   uv run main.py
+   ```
+
+   The workflow becomes available through the Atlan application runtime, including the
+   frontend configuration exposed via `app/frontend/workflow.json`. Open
+   <http://localhost:8000> to launch the built-in configuration UI — it mirrors the keys in
+   `.env.example`, persists values in the browser, and starts the ingestion once you click
+   **Run sync**. The submitted settings are also stored in the Temporal state store, so they
+   rehydrate automatically the next time you open the UI. You can trigger workflows directly
+   from Temporal/Dapr endpoints or via Atlan's runtime drawer as well.
+
+To execute the one-shot sync without the Application SDK (for example in CI), run:
+
+```bash
+uv run python -m atlan_dxr_integration
+```
+
+The service logs progress and exits once the current batch has been synced. Schedule the
+workflow via Atlan’s runtime or any external orchestrator to refresh tables periodically.
 
 ## Configuration
 

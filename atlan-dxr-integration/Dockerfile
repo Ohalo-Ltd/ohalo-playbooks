@@ -1,13 +1,23 @@
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    UV_LINK_MODE=copy \
+    PATH="/root/.local/bin:${PATH}"
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl build-essential git && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
 WORKDIR /app
 
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY pyproject.toml README.md ./
 
-COPY atlan_dxr_integration/ atlan_dxr_integration/
+# Install dependencies into a project-local virtual environment
+RUN uv venv && uv sync
 
-CMD ["python", "-m", "atlan_dxr_integration"]
+# Copy the remainder of the application code
+COPY . .
+
+ENTRYPOINT ["uv", "run", "main.py"]

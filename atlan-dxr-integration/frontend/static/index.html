@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DXR → Atlan application</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="icon" type="image/png" sizes="32x32" href="https://atlan.com/favicon-32x32.png" />
+  </head>
+  <body>
+    <div class="background-accent" aria-hidden="true"></div>
+    <div class="page-shell">
+      <header class="page-header">
+        <div class="page-header__intro">
+          <span class="pill">DXR Integration</span>
+          <h1>Configure &amp; launch the DXR → Atlan sync</h1>
+          <p>
+            Provide the same credentials you would place in <code>.env</code>, preview the payload, and trigger a single
+            workflow execution without leaving your browser.
+          </p>
+        </div>
+        <div class="page-header__meta">
+          <div class="meta-card">
+            <span class="meta-label">Runtime</span>
+            <span class="meta-value" id="app-version">Temporal gateway:</span>
+          </div>
+          <div class="meta-card">
+            <span class="meta-label">Tip</span>
+            <span class="meta-value">Values live only in this browser until you hit <strong>Run sync</strong>.</span>
+          </div>
+        </div>
+      </header>
+
+      <main class="content">
+        <section id="status-banner" class="status hidden" role="status" aria-live="polite"></section>
+
+        <form id="config-form" class="config-form" novalidate>
+          <div id="form-sections" class="form-sections"></div>
+
+          <div class="form-actions">
+            <div class="left">
+              <button type="button" id="reset-defaults" class="btn secondary">Reset to defaults</button>
+              <button type="button" id="clear-storage" class="btn secondary">Clear saved values</button>
+            </div>
+            <div class="right">
+              <button type="submit" id="run-workflow" class="btn primary">
+                <span class="btn-icon" aria-hidden="true">▶</span>
+                Run sync
+              </button>
+            </div>
+          </div>
+        </form>
+      </main>
+
+      <footer class="page-footer">
+        <p>
+          Prefer the CLI? Run <code>uv run python -m atlan_dxr_integration</code> with the same configuration values.
+        </p>
+      </footer>
+    </div>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
