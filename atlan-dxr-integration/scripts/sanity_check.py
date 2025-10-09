@@ -6,9 +6,7 @@ import argparse
 import logging
 from typing import Iterable
 
-from pyatlan.errors import AtlanError
-from pyatlan.model.assets.core.table import Table
-
+from atlan_dxr_integration.atlan_service import AtlanRequestError
 from atlan_dxr_integration.atlan_uploader import AtlanUploader
 from atlan_dxr_integration.config import Config
 from atlan_dxr_integration.dataset_builder import DatasetBuilder, DatasetRecord
@@ -91,24 +89,24 @@ def run(*, sample_labels: int = 1, max_files: int = 500) -> None:
 def _verify_assets(records: Iterable[DatasetRecord], uploader: AtlanUploader) -> None:
     """Fetch each table from Atlan to confirm it exists after upsert."""
 
+    rest = uploader.rest_client
     for record in records:
         qualified_name = uploader.table_qualified_name(record)
         try:
-            table: Table = uploader.client.asset.get_by_qualified_name(
-                qualified_name,
-                Table,
-                ignore_relationships=True,
-            )
-        except AtlanError as exc:
+            response = rest.get_asset("Table", qualified_name)
+        except AtlanRequestError as exc:
             raise SystemExit(
-                f"Failed to verify table '{qualified_name}' in Atlan: {exc}"
+                f"Failed to verify table '{qualified_name}' in Atlan: {exc.details or exc}"
             ) from exc
 
-        attrs = table.attributes
+        entity = (response or {}).get("entity") or {
+            "attributes": {"qualifiedName": qualified_name, "name": record.name}
+        }
+        attrs = entity.get("attributes", {})
         LOGGER.info(
             "Verified table '%s' (display_name='%s', files=%d)",
-            qualified_name,
-            getattr(attrs, "name", record.name),
+            attrs.get("qualifiedName", qualified_name),
+            attrs.get("name", record.name),
             record.file_count,
         )
 

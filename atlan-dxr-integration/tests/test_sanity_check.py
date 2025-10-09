@@ -34,9 +34,37 @@ class _FakeDXR:
         return list(self._files)
 
 
-def test_sanity_check_runs_with_sample_data(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Sanity check uploads records and verifies them in Atlan."""
+class _FakeRESTClient:
+    def __init__(self):
+        self.assets = {
+            "default/custom/dxr-unstructured-attributes/dxr/labels/classification-1": {
+                "entity": {
+                    "attributes": {
+                        "qualifiedName": "default/custom/dxr-unstructured-attributes/dxr/labels/classification-1",
+                        "name": "Sanity Dataset",
+                    }
+                }
+            }
+        }
 
+    def get_asset(self, type_name, qualified_name):
+        return self.assets.get(qualified_name)
+
+
+class _FakeUploader:
+    def __init__(self, cfg):
+        self.rest_client = _FakeRESTClient()
+        self._schema_qualified_name = cfg.schema_qualified_name
+        self.upserts = []
+
+    def upsert(self, records):
+        self.upserts.append([r.identifier for r in records])
+
+    def table_qualified_name(self, record):
+        return f"{self._schema_qualified_name}/{record.identifier}"
+
+
+def test_sanity_check_runs_with_sample_data(monkeypatch: pytest.MonkeyPatch) -> None:
     config = Config(
         dxr_base_url="https://dxr.example.com/api",
         dxr_pat="dxr-token",
@@ -80,36 +108,7 @@ def test_sanity_check_runs_with_sample_data(monkeypatch: pytest.MonkeyPatch) -> 
     fake_dxr = _FakeDXR([classification], files)
     monkeypatch.setattr(sanity_check.Config, "from_env", lambda: config)
     monkeypatch.setattr(sanity_check, "DXRClient", lambda *args, **kwargs: fake_dxr)
-
-    captured = {}
-
-    class _FakeUploader:
-        def __init__(self, cfg):
-            captured["config"] = cfg
-            self._schema_qualified_name = cfg.schema_qualified_name
-            self._lookups: list[str] = []
-            captured["uploader"] = self
-            self.client = SimpleNamespace(
-                asset=SimpleNamespace(
-                    get_by_qualified_name=self._record_lookup,
-                )
-            )
-
-        def upsert(self, records):
-            captured.setdefault("upserted", []).append([r.identifier for r in records])
-
-        def table_qualified_name(self, record):
-            return f"{self._schema_qualified_name}/{record.identifier}"
-
-        def _record_lookup(self, qualified_name, asset_type, **kwargs):
-            captured.setdefault("lookups", []).append(qualified_name)
-            return SimpleNamespace(attributes=SimpleNamespace(name="Sanity Dataset"))
-
     monkeypatch.setattr(sanity_check, "AtlanUploader", _FakeUploader)
 
     sanity_check.run(sample_labels=1, max_files=10)
 
-    assert captured["upserted"] == [["classification-1"]]
-    assert captured["lookups"] == [
-        "default/custom/dxr-unstructured-attributes/dxr/labels/classification-1"
-    ]

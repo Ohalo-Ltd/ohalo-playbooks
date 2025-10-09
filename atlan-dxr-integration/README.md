@@ -10,8 +10,9 @@ model:
   streaming file metadata. File assets belonging to that datasource live beneath the
   dedicated connection and are decorated with the global Atlan tags.
 
-The service is inspired by the existing Purview integration but uses Atlan's Python SDK
-(`pyatlan`) to manage metadata directly through Atlan's APIs.
+The service is inspired by the existing Purview integration but uses the Atlan Application
+SDK’s workflow tooling plus direct REST calls (wrapped by a lightweight helper) to
+manage metadata in Atlan.
 
 ## High-level flow
 
@@ -116,9 +117,9 @@ Environment variables (see `.env.example`):
 
 - `DXR` interactions rely on the documented `/api/vbeta/classifications` and
   `/api/vbeta/files` endpoints.
-- Metadata is written to Atlan via `pyatlan`'s synchronous client
-  (`AtlanClient.asset.save`). Classification tags are auto-created when missing using the
-  namespace configured via `ATLAN_TAG_NAMESPACE`.
+- Metadata is written to Atlan via REST calls issued by the embedded helper client.
+  Classification tags are auto-created when missing using the namespace configured via
+  `ATLAN_TAG_NAMESPACE`.
 - The module is idempotent: rerunning the service overwrites tables and file assets with
   the same qualified names.
 - On startup the uploader verifies the referenced global connection, database, and schema
@@ -156,8 +157,7 @@ The helper enumerates every connection whose name matches the configured global
 connection or datasource prefix and deletes it (soft delete followed by the requested hard
 delete). **This command is intended for development environments only**; avoid running it
 against production tenants. Pass `--skip-soft-delete` to jump straight to the requested
-deletion mode. Available delete types map to `pyatlan`'s `AtlanDeleteType` values
-(`hard`, `purge`).
+deletion mode (`hard`, `purge`).
 
 ## Development
 
