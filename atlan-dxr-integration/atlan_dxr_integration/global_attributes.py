@@ -5,19 +5,17 @@ from __future__ import annotations
 import logging
 from typing import Dict, Iterable, Optional
 
-from pyatlan.client.atlan import AtlanClient
-from pyatlan.model.enums import AtlanTagColor
-
 from .dxr_client import Classification
 from .tag_registry import TagHandle, TagRegistry
+from .atlan_types import TagColor
 
 LOGGER = logging.getLogger(__name__)
 
 
 _CLASSIFICATION_COLOR_MAP = {
-    "ANNOTATOR": AtlanTagColor.YELLOW,
-    "EXTRACTOR": AtlanTagColor.GREEN,
-    "CLASSIFICATION": AtlanTagColor.RED,
+    "ANNOTATOR": TagColor.YELLOW,
+    "EXTRACTOR": TagColor.GREEN,
+    "CLASSIFICATION": TagColor.RED,
 }
 
 
@@ -27,10 +25,8 @@ class GlobalAttributeManager:
     def __init__(
         self,
         *,
-        client: AtlanClient,
         tag_registry: TagRegistry,
     ) -> None:
-        self._client = client
         self._tag_registry = tag_registry
 
     def ensure_classification_tags(
@@ -46,7 +42,7 @@ class GlobalAttributeManager:
                 continue
 
             type_key = (classification.type or "classification").upper()
-            color = _CLASSIFICATION_COLOR_MAP.get(type_key, AtlanTagColor.GRAY)
+            color = _CLASSIFICATION_COLOR_MAP.get(type_key, TagColor.GRAY)
             display = classification.name or identifier
             description = classification.description
             slug_parts = ["classification", type_key, identifier]

@@ -7,12 +7,12 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Dict, Optional
 
-from app.atlan_service import AtlanRESTClient, AtlanRequestError
+from .atlan_service import AtlanRESTClient, AtlanRequestError
 
 LOGGER = logging.getLogger(__name__)
 
 
-def _normalise_connector_name(name: str) -> str:
+def normalise_connector_name(name: str) -> str:
     return (name or "custom").strip() or "custom"
 
 
@@ -43,7 +43,7 @@ class ConnectionProvisioner:
         connector_name: str,
         domain_name: Optional[str] = None,
     ) -> ConnectionHandle:
-        connector = _normalise_connector_name(connector_name)
+        connector = normalise_connector_name(connector_name)
         connection = self._get_entity("Connection", qualified_name)
         if not connection:
             LOGGER.info("Connection '%s' not found; creating it", qualified_name)
@@ -185,4 +185,4 @@ def _to_record(entity: Dict[str, Any]) -> ConnectionRecord:
     )
 
 
-__all__ = ["ConnectionProvisioner", "ConnectionHandle"]
+__all__ = ["ConnectionProvisioner", "ConnectionHandle", "normalise_connector_name"]

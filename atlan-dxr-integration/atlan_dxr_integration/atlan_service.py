@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 import httpx
 
@@ -155,6 +154,12 @@ class AtlanRESTClient:
             "POST",
             "/api/meta/atlas/types/typedefs",
             json_body=payload,
+        )
+
+    def get_typedef(self, name: str) -> Any:
+        return self.request(
+            "GET",
+            f"/api/meta/atlas/types/typedef/name/{name}",
         )
 
 

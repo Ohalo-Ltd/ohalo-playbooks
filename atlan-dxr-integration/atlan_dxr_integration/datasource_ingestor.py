@@ -8,16 +8,9 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, Mapping, Optional
 
-from pyatlan.errors import AtlanError, PermissionError as AtlanPermissionError
-from pyatlan.model.assets.core.file import File
-
-from .atlan_uploader import AtlanUploadError
+from .atlan_uploader import AtlanUploadError, AtlanUploader
 from .config import Config
-from .connection_utils import (
-    ConnectionHandle,
-    ConnectionProvisioner,
-    resolve_connector_type,
-)
+from .connection_utils import ConnectionHandle, ConnectionProvisioner, normalise_connector_name
 from .file_asset_builder import BuiltFileAsset, FileAssetFactory
 from .tag_registry import TagHandle
 
@@ -46,12 +39,13 @@ class DatasourceIngestionCoordinator:
         self,
         *,
         config: Config,
-        client,
+        uploader: AtlanUploader,
         provisioner: ConnectionProvisioner,
         factory: FileAssetFactory,
     ) -> None:
         self._config = config
-        self._client = client
+        self._uploader = uploader
+        self._rest_client = uploader.rest_client
         self._provisioner = provisioner
         self._factory = factory
         self._batch_size = config.atlan_batch_size
@@ -124,74 +118,11 @@ class DatasourceIngestionCoordinator:
         pending = list(context.assets)
 
         try:
-            response = self._client.asset.save([item.asset for item in pending])
-            created = response.assets_created(File)
-            updated = response.assets_updated(File)
-            partial = response.assets_partially_updated(File)
-            mutated = len(created) + len(updated) + len(partial)
-            LOGGER.info(
-                "Upserted %d file asset(s) for connection '%s' (request id: %s)",
-                mutated,
-                context.connection_name,
-                getattr(response, "request_id", "unknown"),
-            )
-            if partial:
-                for asset in partial:
-                    LOGGER.warning(
-                        "Partial update for file '%s' (qn=%s) classifications=%s",
-                        asset.attributes.display_name,
-                        asset.attributes.qualified_name,
-                        getattr(asset, "classifications", None),
-                    )
-            self._apply_tags(pending)
-        except AtlanPermissionError as exc:
-            raise AtlanUploadError(
-                f"Insufficient permissions to upsert files for connection '{context.connection_name}'."
-            ) from exc
-        except AtlanError as exc:
-            raise AtlanUploadError(
-                f"Failed to upsert files for connection '{context.connection_name}'."
-            ) from exc
+            self._uploader.upsert_files([item.asset for item in pending])
+        except AtlanUploadError:
+            raise
         finally:
             context.assets.clear()
-
-    def _apply_tags(self, items: Iterable[BuiltFileAsset]) -> None:
-        for built in items:
-            handles = built.tag_handles
-            if not handles:
-                continue
-            display_names = sorted({handle.display_name for handle in handles})
-            qualified_name = getattr(
-                built.asset.attributes, "qualified_name", None
-            )
-            if not qualified_name:
-                LOGGER.warning(
-                    "Skipping tag assignment for file with no qualified name: %s",
-                    built.asset,
-                )
-                continue
-            LOGGER.debug(
-                "Applying %d Atlan tag(s) to file '%s'",
-                len(display_names),
-                qualified_name,
-            )
-            try:
-                self._client.asset.add_atlan_tags(
-                    asset_type=File,
-                    qualified_name=qualified_name,
-                    atlan_tag_names=display_names,
-                    propagate=False,
-                    remove_propagation_on_delete=True,
-                    restrict_lineage_propagation=False,
-                    restrict_propagation_through_hierarchy=False,
-                )
-            except AtlanError as exc:  # pragma: no cover - remote failures
-                LOGGER.warning(
-                    "Unable to attach Atlan tags %s to file '%s': %s",
-                    display_names,
-                    qualified_name,
-                    exc,
-                )
 
     def _build_connection_name(self, key: str, display_name: Optional[str]) -> str:
         base = display_name or key
@@ -201,11 +132,10 @@ class DatasourceIngestionCoordinator:
     def _build_connection_qualified_name(
         self, connection_name: str, connector_name: Optional[str]
     ) -> str:
-        connector_type = resolve_connector_type(
+        connector_segment = normalise_connector_name(
             connector_name or self._config.atlan_global_connector_name
-        )
+        ).replace(" ", "-")
         namespace = self._config.global_connection_namespace
-        connector_segment = connector_type.value
         return f"{namespace}/{connector_segment}/{connection_name}"
 
     def _build_domain_name(self, datasource_name: str) -> Optional[str]:

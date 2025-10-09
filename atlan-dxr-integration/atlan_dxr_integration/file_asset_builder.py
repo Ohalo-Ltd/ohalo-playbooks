@@ -7,13 +7,10 @@ import math
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urljoin
 
-from pyatlan.model.assets.core.file import File
-from pyatlan.model.enums import AtlanTagColor, FileType
-
-from .global_attributes import GlobalAttributeManager
+from .atlan_types import TagColor
 from .tag_registry import TagHandle, TagRegistry
 
 LOGGER = logging.getLogger(__name__)
@@ -23,7 +20,7 @@ LOGGER = logging.getLogger(__name__)
 class BuiltFileAsset:
     """Result of building a file asset along with its tag handles."""
 
-    asset: File
+    asset: Dict[str, Any]
     tag_handles: Tuple[TagHandle, ...]
 
 
@@ -60,21 +57,25 @@ class FileAssetFactory:
             identifier,
         )
 
-        asset = File.creator(
-            name=name,
-            connection_qualified_name=connection_qualified_name,
-            file_type=_resolve_file_type(payload, name=name),
-        )
-
-        attrs = asset.attributes
-        attrs.qualified_name = f"{connection_qualified_name}/{identifier}"
-        attrs.connection_name = connection_name
-        attrs.display_name = name
+        qualified_name = f"{connection_qualified_name}/{identifier}"
+        asset = {
+            "typeName": "File",
+            "attributes": {
+                "qualifiedName": qualified_name,
+                "name": name,
+                "displayName": name,
+                "connectionQualifiedName": connection_qualified_name,
+                "connectionName": connection_name,
+                "connectorName": None,
+                "fileType": _resolve_file_type(payload, name=name),
+            },
+        }
+        attrs = asset["attributes"]
 
         description = _build_description(payload)
         if description:
-            attrs.description = description
-            attrs.user_description = description
+            attrs["description"] = description
+            attrs["userDescription"] = description
 
         path = _coalesce_str(
             payload.get("filePath"),
@@ -82,22 +83,29 @@ class FileAssetFactory:
             payload.get("filepath"),
         )
         if path:
-            attrs.file_path = path
+            attrs["filePath"] = path
 
         owner = _extract_owner(payload)
         if owner:
-            attrs.owner_users = {owner}
+            attrs["ownerUsers"] = sorted({owner})
 
         tags = self._build_tags(payload, classification_tags)
         handles = tuple(
             sorted(tags.handles.values(), key=lambda h: h.display_name)
         )
         if handles:
-            attrs.asset_tags = [handle.display_name for handle in handles]
+            attrs["assetTags"] = [handle.display_name for handle in handles]
+            asset["classifications"] = [
+                {
+                    "typeName": handle.hashed_name,
+                }
+                for handle in handles
+                if handle.hashed_name
+            ]
 
         source_url = _derive_source_url(identifier, path, self._dxr_base_url)
         if source_url:
-            attrs.source_url = source_url
+            attrs["sourceURL"] = source_url
 
         return BuiltFileAsset(asset=asset, tag_handles=handles)
 
@@ -133,7 +141,7 @@ class FileAssetFactory:
                             self._tag_registry.ensure(
                                 slug_parts=["label", name],
                                 display_name=f"Label :: {name}",
-                                color=AtlanTagColor.GRAY,
+                                color=TagColor.GRAY,
                             )
                         )
                 elif isinstance(item, str):
@@ -160,7 +168,7 @@ class FileAssetFactory:
                 self._tag_registry.ensure(
                     slug_parts=slug_parts,
                     display_name=display,
-                    color=AtlanTagColor.YELLOW,
+                    color=TagColor.YELLOW,
                 )
             )
 
@@ -173,7 +181,7 @@ class FileAssetFactory:
                     self._tag_registry.ensure(
                         slug_parts=["annotator", name],
                         display_name=f"Annotator :: {name}",
-                        color=AtlanTagColor.GREEN,
+                        color=TagColor.GREEN,
                     )
                 )
             domain = annotator.get("domain")
@@ -187,7 +195,7 @@ class FileAssetFactory:
                     self._tag_registry.ensure(
                         slug_parts=["annotator-domain", domain_name],
                         display_name=f"Annotator Domain :: {domain_name}",
-                        color=AtlanTagColor.GREEN,
+                        color=TagColor.GREEN,
                     )
                 )
 
@@ -202,7 +210,7 @@ class FileAssetFactory:
                         self._tag_registry.ensure(
                             slug_parts=["entitlement", account_type, identifier],
                             display_name=f"Entitlement :: {account_type.title()} :: {identifier}",
-                            color=AtlanTagColor.RED,
+                            color=TagColor.RED,
                         )
                     )
 
@@ -217,7 +225,7 @@ class FileAssetFactory:
                         self._tag_registry.ensure(
                             slug_parts=["metadata", name, value],
                             display_name=f"Metadata :: {name} = {value}",
-                            color=AtlanTagColor.GRAY,
+                            color=TagColor.GRAY,
                         )
                     )
                 continue
@@ -229,7 +237,7 @@ class FileAssetFactory:
                     self._tag_registry.ensure(
                         slug_parts=["metadata", name, value],
                         display_name=f"Metadata :: {name} = {value}",
-                        color=AtlanTagColor.GRAY,
+                        color=TagColor.GRAY,
                     )
                 )
 
@@ -245,7 +253,7 @@ class FileAssetFactory:
                     self._tag_registry.ensure(
                         slug_parts=["category", name],
                         display_name=f"Category :: {name}",
-                        color=AtlanTagColor.GRAY,
+                        color=TagColor.GRAY,
                     )
                 )
 
@@ -314,38 +322,38 @@ def _resolve_file_type(payload: Dict[str, object], *, name: str) -> FileType:
     return FileType.TXT
 
 
-_MIME_TYPE_MAP: Dict[str, FileType] = {
-    "application/pdf": FileType.PDF,
-    "application/msword": FileType.DOC,
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": FileType.DOC,
-    "application/vnd.ms-excel": FileType.XLS,
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": FileType.XLS,
-    "application/vnd.ms-powerpoint": FileType.PPT,
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation": FileType.PPT,
-    "text/csv": FileType.CSV,
-    "text/plain": FileType.TXT,
-    "application/json": FileType.JSON,
-    "application/xml": FileType.XML,
-    "application/zip": FileType.ZIP,
+_MIME_TYPE_MAP: Dict[str, str] = {
+    "application/pdf": "PDF",
+    "application/msword": "DOC",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "DOC",
+    "application/vnd.ms-excel": "XLS",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "XLS",
+    "application/vnd.ms-powerpoint": "PPT",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "PPT",
+    "text/csv": "CSV",
+    "text/plain": "TXT",
+    "application/json": "JSON",
+    "application/xml": "XML",
+    "application/zip": "ZIP",
 }
 
 
-_EXTENSION_MAP: Dict[str, FileType] = {
-    ".pdf": FileType.PDF,
-    ".doc": FileType.DOC,
-    ".docx": FileType.DOC,
-    ".xls": FileType.XLS,
-    ".xlsx": FileType.XLS,
-    ".xlsm": FileType.XLSM,
-    ".ppt": FileType.PPT,
-    ".pptx": FileType.PPT,
-    ".csv": FileType.CSV,
-    ".txt": FileType.TXT,
-    ".json": FileType.JSON,
-    ".xml": FileType.XML,
-    ".zip": FileType.ZIP,
-    ".yxdb": FileType.YXDB,
-    ".hyper": FileType.HYPER,
+_EXTENSION_MAP: Dict[str, str] = {
+    ".pdf": "PDF",
+    ".doc": "DOC",
+    ".docx": "DOC",
+    ".xls": "XLS",
+    ".xlsx": "XLS",
+    ".xlsm": "XLSM",
+    ".ppt": "PPT",
+    ".pptx": "PPT",
+    ".csv": "CSV",
+    ".txt": "TXT",
+    ".json": "JSON",
+    ".xml": "XML",
+    ".zip": "ZIP",
+    ".yxdb": "YXDB",
+    ".hyper": "HYPER",
 }
 
 

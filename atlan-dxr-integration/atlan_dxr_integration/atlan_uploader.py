@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Iterable, List
 
-from app.atlan_service import AtlanRESTClient, AtlanRequestError
+from .atlan_service import AtlanRESTClient, AtlanRequestError
 
 from .config import Config
 from .connection_utils import ConnectionHandle, ConnectionProvisioner
@@ -52,6 +52,10 @@ class AtlanUploader:
     @property
     def rest_client(self) -> AtlanRESTClient:
         return self._client
+
+    @property
+    def provisioner(self) -> ConnectionProvisioner:
+        return self._provisioner
 
     def upsert(self, records: Iterable[DatasetRecord]) -> None:
         batch: List[Dict[str, Any]] = []
