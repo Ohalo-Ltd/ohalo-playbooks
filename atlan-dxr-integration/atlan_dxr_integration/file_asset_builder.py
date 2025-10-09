@@ -319,7 +319,7 @@ def _resolve_file_type(payload: Dict[str, object], *, name: str) -> FileType:
         "Falling back to TXT file type for payload with unknown extension/mime: %s",
         payload,
     )
-    return FileType.TXT
+    return "TXT"
 
 
 _MIME_TYPE_MAP: Dict[str, str] = {

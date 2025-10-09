@@ -2,37 +2,36 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+from typing import Any
 
 import pytest
-from pyatlan.errors import ErrorCode, NotFoundError
-from pyatlan.model.enums import AtlanDeleteType
 
-from atlan_dxr_integration.connection_manager import purge_connection
+from atlan_dxr_integration import connection_manager
 from atlan_dxr_integration.config import Config
 
 
-class _FakeAssetService:
+class _StubRESTClient:
     def __init__(self, *, connections=None):
         self.connections = list(connections or [])
         self.deleted: list[str] = []
-        self.purged: list[tuple[str, AtlanDeleteType]] = []
+        self.purged: list[str] = []
 
-    def search(self, request):  # pragma: no cover - exercised indirectly
-        return SimpleNamespace(entities=list(self.connections))
+    def search_assets(self, payload: dict[str, Any]):
+        must = payload.get("dsl", {}).get("query", {}).get("bool", {}).get("must", [])
+        values = {
+            term.get("term", {}).get("__typeName.keyword")
+            for term in must
+            if isinstance(term, dict)
+        }
+        if "Connection" in values:
+            return {"entities": list(self.connections)}
+        return {"entities": []}
 
-    def delete_by_guid(self, guid):
+    def delete_asset(self, guid: str):
         self.deleted.append(guid)
-        return SimpleNamespace(request_id="soft-req")
 
-    def purge_by_guid(self, guid, delete_type: AtlanDeleteType):
-        self.purged.append((guid, delete_type))
-        return SimpleNamespace(request_id="hard-req")
-
-
-class _FakeAtlanClient:
-    def __init__(self, asset_service: _FakeAssetService):
-        self.asset = asset_service
+    def purge_asset(self, guid: str):
+        self.purged.append(guid)
 
 
 def _build_config() -> Config:
@@ -61,71 +60,70 @@ def _build_config() -> Config:
 
 def test_purge_connection_soft_then_hard(monkeypatch: pytest.MonkeyPatch) -> None:
     config = _build_config()
-    connection = SimpleNamespace(
-        guid="conn-guid",
-        attributes=SimpleNamespace(
-            name="dxr-unstructured-attributes",
-            qualified_name="default/custom/dxr-unstructured-attributes",
-        ),
-    )
-    asset_service = _FakeAssetService(connections=[connection])
-    client = _FakeAtlanClient(asset_service)
+    connection = {
+        "guid": "conn-guid",
+        "attributes": {
+            "name": "dxr-unstructured-attributes",
+            "qualifiedName": "default/custom/dxr-unstructured-attributes",
+        },
+    }
+    client = _StubRESTClient(connections=[connection])
 
-    purge_connection(
+    connection_manager.purge_connection(
         config,
-        delete_type=AtlanDeleteType.PURGE,
+        delete_type=connection_manager.DeleteType.PURGE,
         soft_delete_first=True,
         client=client,
     )
 
-    assert asset_service.deleted == ["conn-guid"]
-    assert asset_service.purged == [("conn-guid", AtlanDeleteType.PURGE)]
+    assert client.deleted == ["conn-guid"]
+    assert client.purged == ["conn-guid"]
 
 
 def test_purge_connection_skips_soft_delete(monkeypatch: pytest.MonkeyPatch) -> None:
     config = _build_config()
-    connection = SimpleNamespace(
-        guid="conn-guid",
-        attributes=SimpleNamespace(
-            name="dxr-unstructured-attributes",
-            qualified_name="default/custom/dxr-unstructured-attributes",
-        ),
-    )
-    asset_service = _FakeAssetService(connections=[connection])
-    client = _FakeAtlanClient(asset_service)
+    connection = {
+        "guid": "conn-guid",
+        "attributes": {
+            "name": "dxr-unstructured-attributes",
+            "qualifiedName": "default/custom/dxr-unstructured-attributes",
+        },
+    }
+    client = _StubRESTClient(connections=[connection])
 
-    purge_connection(
+    connection_manager.purge_connection(
         config,
-        delete_type=AtlanDeleteType.HARD,
+        delete_type=connection_manager.DeleteType.HARD,
         soft_delete_first=False,
         client=client,
     )
 
-    assert asset_service.deleted == []
-    assert asset_service.purged == [("conn-guid", AtlanDeleteType.HARD)]
+    assert client.deleted == []
+    assert client.purged == ["conn-guid"]
 
 
-def test_purge_connection_raises_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_purge_connection_raises_when_missing():
     config = _build_config()
-    asset_service = _FakeAssetService(connections=[])
-    client = _FakeAtlanClient(asset_service)
+    client = _StubRESTClient(connections=[])
 
     with pytest.raises(SystemExit) as exc_info:
-        purge_connection(config, client=client)
+        connection_manager.purge_connection(config, client=client)
 
     assert "nothing to purge" in str(exc_info.value).lower()
 
 
-def test_purge_connection_requires_guid(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_purge_connection_requires_guid():
     config = _build_config()
-    connection = SimpleNamespace(
-        guid=None,
-        attributes=SimpleNamespace(name="dxr-datasource-foo", qualified_name="default/custom/dxr-datasource-foo"),
-    )
-    asset_service = _FakeAssetService(connections=[connection])
-    client = _FakeAtlanClient(asset_service)
+    connection = {
+        "guid": None,
+        "attributes": {
+            "name": "dxr-datasource-foo",
+            "qualifiedName": "default/custom/dxr-datasource-foo",
+        },
+    }
+    client = _StubRESTClient(connections=[connection])
 
     with pytest.raises(SystemExit) as exc_info:
-        purge_connection(config, client=client)
+        connection_manager.purge_connection(config, client=client)
 
     assert "does not expose a guid" in str(exc_info.value).lower()
