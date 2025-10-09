@@ -4,81 +4,36 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from types import SimpleNamespace
+from typing import Any, Dict, Optional
 
-from pyatlan.client.atlan import AtlanClient
-from pyatlan.errors import AtlanError, NotFoundError
-from pyatlan.model.assets.connection import Connection
-from pyatlan.model.assets.core.database import Database
-from pyatlan.model.assets.core.schema import Schema
-from pyatlan.model.assets.core.data_domain import DataDomain
-from pyatlan.model.enums import AtlanConnectorType
+from app.atlan_service import AtlanRESTClient, AtlanRequestError
 
 LOGGER = logging.getLogger(__name__)
 
 
-def resolve_connector_type(name: str) -> AtlanConnectorType:
-    normalised = (name or "").strip()
-    if not normalised:
-        return AtlanConnectorType.CUSTOM
-
-    token = normalised.replace("-", "_").replace(" ", "_").upper()
-    if token in AtlanConnectorType.__members__:
-        return AtlanConnectorType[token]
-
-    lowered = normalised.lower()
-    for member in AtlanConnectorType:
-        if member.value.lower() == lowered:
-            return member
-
-    LOGGER.debug(
-        "Unknown connector '%s'; defaulting to CUSTOM",
-        name,
-    )
-    return AtlanConnectorType.CUSTOM
+def _normalise_connector_name(name: str) -> str:
+    return (name or "custom").strip() or "custom"
 
 
-class DomainManager:
-    """Ensure data domains exist and expose their GUIDs."""
-
-    def __init__(self, client: AtlanClient) -> None:
-        self._client = client
-        self._cache: Dict[str, DataDomain] = {}
-
-    def ensure(self, name: str) -> DataDomain:
-        normalized = name.strip()
-        if not normalized:
-            raise ValueError("Domain name must be non-empty")
-
-        if normalized in self._cache:
-            return self._cache[normalized]
-
-        try:
-            domain = self._client.asset.find_domain_by_name(normalized)
-        except NotFoundError:
-            LOGGER.info("Creating Atlan domain '%s'", normalized)
-            domain = DataDomain.creator(name=normalized)
-            response = self._client.asset.save(domain)
-            created = response.assets_created(DataDomain)
-            if created:
-                domain = created[0]
-        self._cache[normalized] = domain
-        return domain
+@dataclass
+class ConnectionRecord:
+    guid: Optional[str]
+    attributes: SimpleNamespace
 
 
 @dataclass
 class ConnectionHandle:
-    connector_type: AtlanConnectorType
+    connector_name: str
     qualified_name: str
-    connection: Connection
+    connection: ConnectionRecord
 
 
 class ConnectionProvisioner:
     """Create or reuse Atlan assets needed for the DXR integrations."""
 
-    def __init__(self, client: AtlanClient) -> None:
+    def __init__(self, client: AtlanRESTClient) -> None:
         self._client = client
-        self._domain_manager = DomainManager(client)
 
     def ensure_connection(
         self,
@@ -88,59 +43,44 @@ class ConnectionProvisioner:
         connector_name: str,
         domain_name: Optional[str] = None,
     ) -> ConnectionHandle:
-        connector_type = resolve_connector_type(connector_name)
-
-        try:
-            connection = self._client.asset.get_by_qualified_name(
-                qualified_name,
-                Connection,
-                ignore_relationships=True,
-            )
-            actual_qn = connection.attributes.qualified_name or qualified_name
-            if actual_qn != qualified_name:
-                LOGGER.warning(
-                    "Configured connection QN '%s' differs from Atlan record '%s'. Using returned value.",
-                    qualified_name,
-                    actual_qn,
-                )
-                qualified_name = actual_qn
-            connection_handle = ConnectionHandle(
-                connector_type=connector_type,
-                qualified_name=qualified_name,
-                connection=connection,
-            )
-        except NotFoundError:
+        connector = _normalise_connector_name(connector_name)
+        connection = self._get_entity("Connection", qualified_name)
+        if not connection:
             LOGGER.info("Connection '%s' not found; creating it", qualified_name)
-            admin_role_guid = str(
-                self._client.role_cache.get_id_for_name("$admin")
-            )
-            connection = Connection.creator(
-                client=self._client,
-                name=connection_name,
-                connector_type=connector_type,
-                admin_roles=[admin_role_guid],
-            )
-            attrs = connection.attributes
-            attrs.qualified_name = qualified_name
-            attrs.name = connection_name
-            response = self._client.asset.save(connection)
-            created = response.assets_created(Connection)
-            if created:
-                connection = created[0]
-            connection_handle = ConnectionHandle(
-                connector_type=connector_type,
-                qualified_name=qualified_name,
-                connection=connection,
-            )
-        except AtlanError as exc:
-            raise RuntimeError(
-                f"Unable to resolve connection '{qualified_name}': {exc}"
-            ) from exc
+            payload = {
+                "typeName": "Connection",
+                "attributes": {
+                    "qualifiedName": qualified_name,
+                    "name": connection_name,
+                    "connectorName": connector,
+                    "connectionType": connector,
+                    "adminRoles": [],
+                    "adminGroups": [],
+                },
+            }
+            connection = self._upsert_single(payload, "Connection")
 
+        actual_qn = connection["attributes"].get("qualifiedName") or qualified_name
+        if actual_qn != qualified_name:
+            LOGGER.warning(
+                "Configured connection QN '%s' differs from Atlan record '%s'. Using returned value.",
+                qualified_name,
+                actual_qn,
+            )
+            qualified_name = actual_qn
+
+        record = _to_record(connection)
         if domain_name:
-            self._ensure_domain_assignment(connection_handle.connection, domain_name)
+            LOGGER.debug(
+                "Domain assignment for connection '%s' requested but currently not implemented; skipping.",
+                qualified_name,
+            )
 
-        return connection_handle
+        return ConnectionHandle(
+            connector_name=connector,
+            qualified_name=qualified_name,
+            connection=record,
+        )
 
     def ensure_database(
         self,
@@ -149,29 +89,22 @@ class ConnectionProvisioner:
         qualified_name: str,
         connection_handle: ConnectionHandle,
     ) -> str:
-        try:
-            database = self._client.asset.get_by_qualified_name(
-                qualified_name,
-                Database,
-                ignore_relationships=True,
-            )
-            actual_qn = database.attributes.qualified_name or qualified_name
-            return actual_qn
-        except NotFoundError:
-            LOGGER.info("Creating database '%s'", qualified_name)
-            database = Database.creator(
-                name=name,
-                connection_qualified_name=connection_handle.qualified_name,
-            )
-            attrs = database.attributes
-            attrs.qualified_name = qualified_name
-            attrs.connection_name = connection_handle.connection.attributes.name
-            attrs.connection_qualified_name = connection_handle.qualified_name
-            response = self._client.asset.save(database)
-            created = response.assets_created(Database)
-            if created:
-                database = created[0]
-            return database.attributes.qualified_name
+        database = self._get_entity("Database", qualified_name)
+        if database:
+            return database["attributes"].get("qualifiedName") or qualified_name
+
+        LOGGER.info("Creating database '%s'", qualified_name)
+        payload = {
+            "typeName": "Database",
+            "attributes": {
+                "qualifiedName": qualified_name,
+                "name": name,
+                "connectionQualifiedName": connection_handle.qualified_name,
+                "connectionName": connection_handle.connection.attributes.name,
+            },
+        }
+        entity = self._upsert_single(payload, "Database")
+        return entity["attributes"].get("qualifiedName") or qualified_name
 
     def ensure_schema(
         self,
@@ -181,51 +114,75 @@ class ConnectionProvisioner:
         database_qualified_name: str,
         connection_handle: ConnectionHandle,
     ) -> str:
+        schema = self._get_entity("Schema", qualified_name)
+        if schema:
+            return schema["attributes"].get("qualifiedName") or qualified_name
+
+        LOGGER.info("Creating schema '%s'", qualified_name)
+        payload = {
+            "typeName": "Schema",
+            "attributes": {
+                "qualifiedName": qualified_name,
+                "name": name,
+                "connectionQualifiedName": connection_handle.qualified_name,
+                "connectionName": connection_handle.connection.attributes.name,
+                "databaseQualifiedName": database_qualified_name,
+                "databaseName": name,
+            },
+        }
+        entity = self._upsert_single(payload, "Schema")
+        return entity["attributes"].get("qualifiedName") or qualified_name
+
+    def _get_entity(self, type_name: str, qualified_name: str) -> Optional[Dict[str, Any]]:
         try:
-            schema = self._client.asset.get_by_qualified_name(
-                qualified_name,
-                Schema,
-                ignore_relationships=True,
-            )
-            actual_qn = schema.attributes.qualified_name or qualified_name
-            return actual_qn
-        except NotFoundError:
-            LOGGER.info("Creating schema '%s'", qualified_name)
-            schema = Schema.creator(
-                name=name,
-                connection_qualified_name=connection_handle.qualified_name,
-                database_qualified_name=database_qualified_name,
-            )
-            attrs = schema.attributes
-            attrs.qualified_name = qualified_name
-            attrs.connection_name = connection_handle.connection.attributes.name
-            attrs.connection_qualified_name = connection_handle.qualified_name
-            attrs.database_name = name if not attrs.database_name else attrs.database_name
-            attrs.database_qualified_name = database_qualified_name
-            response = self._client.asset.save(schema)
-            created = response.assets_created(Schema)
-            if created:
-                schema = created[0]
-            return schema.attributes.qualified_name
+            data = self._client.get_asset(type_name, qualified_name)
+        except AtlanRequestError as exc:
+            if exc.status_code == 404:
+                return None
+            raise
+        return _extract_entity(data)
 
-    def ensure_domain(self, name: str) -> DataDomain:
-        return self._domain_manager.ensure(name)
+    def _upsert_single(self, entity: Dict[str, Any], type_name: str) -> Dict[str, Any]:
+        response = self._client.upsert_assets([entity])
+        mutated = _extract_mutated_entity(response, type_name)
+        if mutated:
+            return mutated
+        retrieved = self._get_entity(type_name, entity["attributes"]["qualifiedName"])
+        if retrieved:
+            return retrieved
+        raise RuntimeError(f"Unable to create or retrieve {type_name} asset.")
 
-    def _ensure_domain_assignment(
-        self, connection: Connection, domain_name: str
-    ) -> None:
-        domain = self._domain_manager.ensure(domain_name)
-        attrs = connection.attributes
-        existing = set(attrs.domain_g_u_i_ds or [])
-        if domain.guid and str(domain.guid) not in existing:
-            attrs.domain_g_u_i_ds = existing.union({str(domain.guid)})
-            try:
-                self._client.asset.save(connection)
-            except AtlanError as exc:  # pragma: no cover - defensive
-                LOGGER.warning(
-                    "Failed to update domain assignment for connection '%s': %s",
-                    attrs.qualified_name,
-                    exc,
-                )
 
-__all__ = ["ConnectionProvisioner", "ConnectionHandle", "DomainManager", "resolve_connector_type"]
+def _extract_entity(payload: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return None
+    if "entity" in payload and isinstance(payload["entity"], dict):
+        return payload["entity"]
+    if "entities" in payload and isinstance(payload["entities"], list):
+        for entity in payload["entities"]:
+            if isinstance(entity, dict):
+                return entity
+    return None
+
+
+def _extract_mutated_entity(response: Any, type_name: str) -> Optional[Dict[str, Any]]:
+    if not isinstance(response, dict):
+        return None
+    mutated = response.get("mutatedEntities") or {}
+    for bucket in ("CREATE", "UPDATE", "PARTIAL_UPDATE"):
+        entities = mutated.get(bucket) or []
+        for entity in entities:
+            if isinstance(entity, dict) and entity.get("typeName") == type_name:
+                return entity
+    return None
+
+
+def _to_record(entity: Dict[str, Any]) -> ConnectionRecord:
+    attrs = entity.get("attributes") or {}
+    return ConnectionRecord(
+        guid=entity.get("guid"),
+        attributes=SimpleNamespace(**attrs),
+    )
+
+
+__all__ = ["ConnectionProvisioner", "ConnectionHandle"]
