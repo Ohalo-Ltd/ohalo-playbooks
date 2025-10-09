@@ -104,6 +104,12 @@ body {
   border: 1px solid rgba(148, 163, 184, 0.25);
 }
 
+.meta-card--link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
 .meta-label {
   display: block;
   font-size: 0.75rem;
@@ -117,6 +123,26 @@ body {
   font-weight: 600;
   font-size: 0.95rem;
   color: var(--fd-foreground);
+}
+
+.meta-link {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--fd-primary-dark);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.meta-link::after {
+  content: "↗";
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.meta-link:hover {
+  text-decoration: underline;
 }
 
 .content {

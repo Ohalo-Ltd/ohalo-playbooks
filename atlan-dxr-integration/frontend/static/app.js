@@ -207,6 +207,7 @@ const DEFAULT_ENV_VALUES = FIELD_GROUPS.flatMap((group) => group.fields).reduce(
 
 const STATUS_ELEMENT = document.getElementById("status-banner");
 const VERSION_ELEMENT = document.getElementById("app-version");
+const TEMPORAL_LINK_ELEMENT = document.getElementById("temporal-link");
 const FORM_ELEMENT = document.getElementById("config-form");
 const SECTIONS_CONTAINER = document.getElementById("form-sections");
 const RUN_BUTTON = document.getElementById("run-workflow");
@@ -607,12 +608,28 @@ async function clearStoredValues() {
   );
 }
 
-function updateAppMeta() {
-  if (!VERSION_ELEMENT) {
-    return;
+function updateAppMeta(envValues = {}) {
+  const origin = window.location.origin;
+  if (VERSION_ELEMENT) {
+    VERSION_ELEMENT.textContent = `Temporal gateway: ${origin}`;
   }
-  const host = window.location.origin;
-  VERSION_ELEMENT.textContent = `Temporal gateway: ${host}`;
+
+  if (TEMPORAL_LINK_ELEMENT) {
+    const configHost = envValues.atlan_workflow_ui_host?.trim();
+    const baseHost = configHost || window.location.hostname || "localhost";
+
+    const configPort = envValues.atlan_workflow_ui_port?.toString().trim();
+    const storedPort = localStorage.getItem("temporal_ui_port");
+    const defaultPort = window.location.protocol === "https:" ? "443" : "8233";
+    const port = configPort || storedPort || defaultPort;
+
+    const namespace = envValues.atlan_workflow_namespace?.trim()
+      || localStorage.getItem("temporal_namespace")
+      || "default";
+
+    const protocol = window.location.protocol === "https:" ? "https" : "http";
+    TEMPORAL_LINK_ELEMENT.href = `${protocol}://${baseHost}:${port}/namespaces/${namespace}/workflows`;
+  }
 }
 
 async function initialise() {
@@ -626,7 +643,7 @@ async function initialise() {
   const initialEnv = { ...DEFAULT_ENV_VALUES, ...serverEnv, ...browserEnv };
   applyConfig(initialEnv);
   saveBrowserConfig(initialEnv);
-  updateAppMeta();
+  updateAppMeta(convertEnvToPayload(initialEnv));
   clearStatus();
 
   FORM_ELEMENT?.addEventListener("submit", runWorkflow);
