@@ -1,0 +1,35 @@
+[
+  {
+    "box_classification_key": "internal",
+    "dxr_label_key": "DXR_INTERNAL",
+    "http_status": null,
+    "item_id": "9001",
+    "item_name": "Customer_List.xlsx",
+    "item_type": "file",
+    "response": null,
+    "status": "dry_run",
+    "synced_at": "2025-09-17T16:15:47.694017+00:00"
+  },
+  {
+    "box_classification_key": "confidential",
+    "dxr_label_key": "DXR_CONFIDENTIAL",
+    "http_status": null,
+    "item_id": "9002",
+    "item_name": "Quarterly_Report.pdf",
+    "item_type": "file",
+    "response": null,
+    "status": "dry_run",
+    "synced_at": "2025-09-17T16:15:47.694270+00:00"
+  },
+  {
+    "box_classification_key": "public",
+    "dxr_label_key": "DXR_PUBLIC",
+    "http_status": null,
+    "item_id": "9003",
+    "item_name": "Marketing_Brochure.pptx",
+    "item_type": "file",
+    "response": null,
+    "status": "dry_run",
+    "synced_at": "2025-09-17T16:15:47.694277+00:00"
+  }
+]

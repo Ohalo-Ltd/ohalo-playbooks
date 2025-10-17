@@ -1,0 +1,44 @@
+{
+  "items": [
+    {
+      "file_id": "9001",
+      "file_name": "Customer_List.xlsx",
+      "file_type": "file",
+      "dxr_labels": [
+        {
+          "label_key": "DXR_INTERNAL",
+          "label_name": "Internal",
+          "applied_at": "2025-02-10T10:50:00Z"
+        }
+      ]
+    },
+    {
+      "file_id": "9002",
+      "file_name": "Quarterly_Report.pdf",
+      "file_type": "file",
+      "dxr_labels": [
+        {
+          "label_key": "DXR_CONFIDENTIAL",
+          "label_name": "Confidential",
+          "applied_at": "2025-02-11T08:45:00Z"
+        }
+      ]
+    },
+    {
+      "file_id": "9003",
+      "file_name": "Marketing_Brochure.pptx",
+      "file_type": "file",
+      "dxr_labels": [
+        {
+          "label_key": "DXR_PUBLIC",
+          "label_name": "Public",
+          "applied_at": "2025-02-09T12:00:00Z"
+        }
+      ]
+    }
+  ],
+  "page_info": {
+    "has_more": false,
+    "next_cursor": null
+  }
+}

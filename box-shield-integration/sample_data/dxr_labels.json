@@ -1,0 +1,23 @@
+{
+  "9001": [
+    {
+      "label_key": "DXR_INTERNAL",
+      "label_name": "Internal",
+      "applied_at": "2025-02-10T10:50:00Z"
+    }
+  ],
+  "9002": [
+    {
+      "label_key": "DXR_CONFIDENTIAL",
+      "label_name": "Confidential",
+      "applied_at": "2025-02-11T08:45:00Z"
+    }
+  ],
+  "9003": [
+    {
+      "label_key": "DXR_PUBLIC",
+      "label_name": "Public",
+      "applied_at": "2025-02-09T12:00:00Z"
+    }
+  ]
+}

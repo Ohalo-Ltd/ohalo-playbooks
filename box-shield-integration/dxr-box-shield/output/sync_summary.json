@@ -1,0 +1,11 @@
+{
+  "dry_run": true,
+  "failed_items": 0,
+  "generated_at": "2025-09-17T16:15:47.694586+00:00",
+  "processed_items": 3,
+  "totals": {
+    "confidential": 1,
+    "internal": 1,
+    "public": 1
+  }
+}

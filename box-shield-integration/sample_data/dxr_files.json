@@ -1,0 +1,23 @@
+{
+  "items": [
+    {
+      "file_id": "9001",
+      "file_name": "Customer_List.xlsx",
+      "file_type": "file"
+    },
+    {
+      "file_id": "9002",
+      "file_name": "Quarterly_Report.pdf",
+      "file_type": "file"
+    },
+    {
+      "file_id": "9003",
+      "file_name": "Marketing_Brochure.pptx",
+      "file_type": "file"
+    }
+  ],
+  "page_info": {
+    "has_more": false,
+    "next_cursor": null
+  }
+}

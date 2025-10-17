@@ -1,0 +1,2 @@
+PyYAML==6.0.2
+boxsdk[jwt]==3.14.0

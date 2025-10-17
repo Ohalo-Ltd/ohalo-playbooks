@@ -1,0 +1,32 @@
+box:
+  base_url: "https://api.box.com/2.0"
+  classification_template_key: "securityClassification-6VMVochwUWo"
+  oauth_url: "https://api.box.com/oauth2/token"
+  jwt_config_file: "sample_data/box_config.json"
+
+dxr:
+  base_url: "https://localhost:8443"
+  api_token: "YOUR_DXR_API_TOKEN"
+  datasource_id: "demo-datasource-id"
+  files_endpoint: "/api/internal/datasources/{datasource_id}/files"
+  labels_endpoint: "/api/internal/files/{file_id}/labels"
+  page_size: 500
+
+dry_run_fixture:
+  files: "sample_data/dxr_files.json"
+  labels: "sample_data/dxr_labels.json"
+
+labels:
+  mapping:
+    DXR_PUBLIC: "public"
+    DXR_INTERNAL: "internal"
+    DXR_CONFIDENTIAL: "confidential"
+
+sync:
+  output_dir: "./output"
+  batch_size: 50
+  retry_attempts: 3
+
+logging:
+  level: "INFO"
+  file_name: "sync_run.log"

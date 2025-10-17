@@ -1,0 +1,12 @@
+2025-10-08 14:24:26,193 INFO Starting DXR → Box Shield sync | config=/Users/joe/Desktop/projects/dxr/dxr-box-shield/config.example.yml
+2025-10-08 14:24:26,193 INFO Log file: /Users/joe/Desktop/projects/dxr/dxr-box-shield/output/sync_run.log
+2025-10-08 14:24:26,194 INFO Enumerated 3 files from DXR
+2025-10-08 14:24:26,195 INFO Retrieved labels for 3 files
+2025-10-08 14:24:26,195 INFO DRY-RUN Box update | item=9001 classification=internal
+2025-10-08 14:24:26,196 INFO Applied classification internal to 9001 (Customer_List.xlsx) [status=dry_run]
+2025-10-08 14:24:26,196 INFO DRY-RUN Box update | item=9002 classification=confidential
+2025-10-08 14:24:26,196 INFO Applied classification confidential to 9002 (Quarterly_Report.pdf) [status=dry_run]
+2025-10-08 14:24:26,196 INFO DRY-RUN Box update | item=9003 classification=public
+2025-10-08 14:24:26,196 INFO Applied classification public to 9003 (Marketing_Brochure.pptx) [status=dry_run]
+2025-10-08 14:24:26,197 INFO Processing complete | processed=3 classified=3 skipped=0 failed=0
+2025-10-08 14:24:26,197 INFO DXR → Box Shield sync completed successfully
