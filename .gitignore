@@ -29,3 +29,6 @@ response.json
 .env
 python/
 .pytest_cache/
+
+# helpful docs
+docs/
