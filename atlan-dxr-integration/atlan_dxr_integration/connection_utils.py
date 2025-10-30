@@ -137,7 +137,13 @@ class ConnectionProvisioner:
         try:
             data = self._client.get_asset(type_name, qualified_name)
         except AtlanRequestError as exc:
-            if exc.status_code == 404:
+            if exc.status_code in (403, 404):
+                LOGGER.warning(
+                    "Unable to fetch %s '%s' due to %s: treating as missing.",
+                    type_name,
+                    qualified_name,
+                    f"HTTP {exc.status_code}",
+                )
                 return None
             raise
         return _extract_entity(data)

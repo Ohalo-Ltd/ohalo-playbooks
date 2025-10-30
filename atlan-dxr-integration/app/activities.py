@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from application_sdk.activities import ActivitiesInterface
 from application_sdk.observability.logger_adaptor import get_logger
 from temporalio import activity
 
+from application_sdk.services.statestore import StateStore, StateType
 from atlan_dxr_integration.config import Config
 from atlan_dxr_integration.pipeline import run as run_pipeline
 
@@ -30,11 +31,30 @@ class ActivitiesClass(ActivitiesInterface):
         return self._handler
 
     @activity.defn
-    def get_workflow_args(self, initial_config: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    async def get_workflow_args(
+        self, initial_config: Dict[str, Any] | None = None
+    ) -> Dict[str, Any]:
         """Return the runtime configuration for the workflow."""
 
         handler = self._get_handler()
-        merged_config = handler.build_runtime_config(initial_config or {})
+        overrides: Dict[str, Any] = dict(initial_config or {})
+        workflow_id = overrides.get("workflow_id")
+        if workflow_id:
+            try:
+                saved_state = await StateStore.get_state(
+                    workflow_id, StateType.WORKFLOWS
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Unable to load workflow overrides for %s: %s", workflow_id, exc
+                )
+                saved_state = {}
+            # State store payload already includes workflow_id, so ensure request wins.
+            merged_input = {**saved_state, **overrides}
+        else:
+            merged_input = overrides
+
+        merged_config = handler.build_runtime_config(merged_input)
         logger.debug("Resolved workflow configuration: %s", merged_config)
         return merged_config
 
@@ -44,6 +64,7 @@ class ActivitiesClass(ActivitiesInterface):
 
         config_payload = dict(workflow_config)
         types_value = config_payload.get("dxr_classification_types")
+        cleaned: Optional[set[str]] = None
         if types_value:
             if isinstance(types_value, str):
                 cleaned = {
