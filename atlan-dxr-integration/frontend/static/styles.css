@@ -247,7 +247,15 @@ select {
   border-radius: 12px;
   border: 1px solid rgba(148, 163, 184, 0.55);
   background: hsla(0, 0%, 100%, 0.9);
+  color: var(--fd-foreground);
+  caret-color: var(--fd-primary-dark);
   transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--fd-muted-foreground);
+  opacity: 0.9;
 }
 
 input:focus,

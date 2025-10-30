@@ -60,6 +60,22 @@ class ActivitiesClass(ActivitiesInterface):
             else:
                 cleaned = set()
         config_payload["dxr_classification_types"] = cleaned or None
+
+        required_fields = (
+            "dxr_base_url",
+            "dxr_pat",
+            "atlan_base_url",
+            "atlan_api_token",
+            "atlan_global_connection_qualified_name",
+            "atlan_global_connection_name",
+            "atlan_global_connector_name",
+        )
+        missing = [field for field in required_fields if not config_payload.get(field)]
+        if missing:
+            raise ValueError(
+                "Missing required configuration values: " + ", ".join(missing)
+            )
+
         config = Config(**config_payload)
         logger.info("Executing DXR sync via activity")
         run_pipeline(config=config)

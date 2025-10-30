@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Optional, Set
+from typing import List, Optional, Set
 
 from dotenv import load_dotenv
 
@@ -72,30 +72,36 @@ class Config:
         return self.schema_qualified_name
 
     @classmethod
-    def from_env(cls) -> "Config":
-        """Build configuration from environment variables."""
+    def from_env(cls, *, require_all: bool = True) -> "Config":
+        """Build configuration from environment variables.
+
+        Args:
+            require_all: When ``True`` (default), a :class:`ValueError` is raised if any
+                mandatory environment variables are missing. When ``False``, missing
+                values fall back to empty strings so the application can rely on
+                runtime-supplied overrides (for example via the frontend UI).
+        """
 
         load_dotenv()
 
-        base_required = (
-            "DXR_BASE_URL",
-            "DXR_PAT",
-            "ATLAN_BASE_URL",
-            "ATLAN_API_TOKEN",
-        )
+        missing: List[str] = []
 
-        missing = [name for name in base_required if not os.getenv(name)]
+        def _get_required(name: str, *, default: str = "") -> str:
+            value = os.getenv(name)
+            if value:
+                return value
+            if require_all:
+                missing.append(name)
+            return default
 
-        global_connection_qn = os.getenv("ATLAN_GLOBAL_CONNECTION_QUALIFIED_NAME")
-        global_connection_name = os.getenv("ATLAN_GLOBAL_CONNECTION_NAME")
-        global_connector_name = os.getenv("ATLAN_GLOBAL_CONNECTOR_NAME")
+        dxr_base_url = _get_required("DXR_BASE_URL")
+        dxr_pat = _get_required("DXR_PAT")
+        atlan_base_url = _get_required("ATLAN_BASE_URL")
+        atlan_api_token = _get_required("ATLAN_API_TOKEN")
+        global_connection_qn = _get_required("ATLAN_GLOBAL_CONNECTION_QUALIFIED_NAME")
+        global_connection_name = _get_required("ATLAN_GLOBAL_CONNECTION_NAME")
+        global_connector_name = _get_required("ATLAN_GLOBAL_CONNECTOR_NAME")
 
-        if not global_connection_qn:
-            missing.append("ATLAN_GLOBAL_CONNECTION_QUALIFIED_NAME")
-        if not global_connection_name:
-            missing.append("ATLAN_GLOBAL_CONNECTION_NAME")
-        if not global_connector_name:
-            missing.append("ATLAN_GLOBAL_CONNECTOR_NAME")
         if missing:
             raise ValueError(
                 "Missing required environment variables: " + ", ".join(missing)
@@ -111,13 +117,13 @@ class Config:
         )
 
         return cls(
-            dxr_base_url=_strip_trailing_slash(os.environ["DXR_BASE_URL"]),
-            dxr_pat=os.environ["DXR_PAT"],
+            dxr_base_url=_strip_trailing_slash(dxr_base_url),
+            dxr_pat=dxr_pat,
             dxr_classification_types=classification_types,
             dxr_sample_file_limit=sample_file_limit,
             dxr_file_fetch_limit=file_fetch_limit,
-            atlan_base_url=_strip_trailing_slash(os.environ["ATLAN_BASE_URL"]),
-            atlan_api_token=os.environ["ATLAN_API_TOKEN"],
+            atlan_base_url=_strip_trailing_slash(atlan_base_url),
+            atlan_api_token=atlan_api_token,
             atlan_global_connection_qualified_name=global_connection_qn,
             atlan_global_connection_name=global_connection_name,
             atlan_global_connector_name=global_connector_name,

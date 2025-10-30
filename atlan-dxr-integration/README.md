@@ -42,8 +42,9 @@ annotator metadata, DLP labels, extracted metadata pairs, entitlements, and cate
 
 ## Getting started
 
-1. Copy `.env.example` to `.env` and populate it with valid credentials, mirroring the
-   configuration section below. These variables are loaded automatically by the runtime.
+1. (Optional) Copy `.env.example` to `.env` if you prefer to populate defaults locally or
+   plan to run the sync via the CLI. The Application UI will prompt for any missing values,
+   so you can skip storing secrets on disk when running through the frontend.
 2. Create and activate a virtual environment managed by `uv`:
 
    ```bash
@@ -52,7 +53,13 @@ annotator metadata, DLP labels, extracted metadata pairs, entitlements, and cate
    uv sync
    ```
 
-3. Start the local dependencies required by the Application SDK (Temporal + Dapr):
+3. Bootstrap the Dapr component definitions (skip this step on subsequent runs unless you upgrade the SDK or set `FORCE_REFRESH_COMPONENTS=1`):
+
+   ```bash
+   uv run poe download-components
+   ```
+
+4. Start the local dependencies required by the Application SDK (Temporal + Dapr):
 
    ```bash
    uv run poe start-deps
@@ -64,7 +71,7 @@ annotator metadata, DLP labels, extracted metadata pairs, entitlements, and cate
    uv run poe stop-deps
    ```
 
-4. Launch the DXR application worker and API:
+5. Launch the DXR application worker and API:
 
    ```bash
    uv run main.py
@@ -86,6 +93,8 @@ uv run python -m atlan_dxr_integration
 
 The service logs progress and exits once the current batch has been synced. Schedule the
 workflow via Atlan’s runtime or any external orchestrator to refresh tables periodically.
+When invoking the CLI directly, ensure the required environment variables from
+`.env.example` are exported.
 
 ## Configuration
 

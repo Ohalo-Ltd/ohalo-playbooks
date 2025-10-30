@@ -26,7 +26,14 @@ class ClientClass:
     """Lifecycle helpers for DXR and Atlan clients."""
 
     def __init__(self, config: Optional[Config] = None):
-        self._config = config or Config.from_env()
+        if config is not None:
+            self._config = config
+        else:
+            try:
+                self._config = Config.from_env()
+            except ValueError:
+                # Allow the application to boot without local environment variables.
+                self._config = Config.from_env(require_all=False)
 
     @property
     def config(self) -> Config:

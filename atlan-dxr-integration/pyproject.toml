@@ -23,7 +23,7 @@ dev = [
 [tool.poe.tasks]
 start-dapr = "dapr run --enable-api-logging --log-level debug --app-id dxr-app --app-port 3000 --scheduler-host-address '' --placement-host-address '' --max-body-size 1024Mi --dapr-http-port 3500 --dapr-grpc-port 50001 --resources-path components"
 start-temporal = "temporal server start-dev --db-filename ./temporal.db"
-start-deps.shell = "poe start-dapr & poe start-temporal &"
+start-deps.shell = "poe download-components && (poe start-dapr &) && (poe start-temporal &)"
 stop-deps.shell = "lsof -ti:3000,3500,7233,50001 | xargs kill -9 2>/dev/null || true"
 
 [tool.poe.tasks.download-components]
@@ -35,7 +35,14 @@ import pathlib
 import requests
 
 components_dir = pathlib.Path("components")
+
 components_dir.mkdir(exist_ok=True)
+existing_files = list(components_dir.glob("*.yaml"))
+force_refresh = os.getenv("FORCE_REFRESH_COMPONENTS") == "1"
+
+if existing_files and not force_refresh:
+    print("Components already present; skipping download. Set FORCE_REFRESH_COMPONENTS=1 to refresh.")
+    raise SystemExit(0)
 
 api_url = "https://api.github.com/repos/atlanhq/application-sdk/contents/components"
 response = requests.get(api_url, params={"ref": os.getenv("SDK_VERSION")})
