@@ -143,6 +143,16 @@ class AtlanRESTClient:
         except AtlanError as exc:  # pragma: no cover - defensive
             raise _wrap_error(exc) from exc
 
+    def get_role_id(self, role_name: str) -> Optional[str]:
+        """Return the GUID for a named Atlan role, if it exists."""
+
+        try:
+            role_id = self._client.role_cache.get_id_for_name(role_name)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Unable to resolve role '%s': %s", role_name, exc)
+            return None
+        return str(role_id) if role_id else None
+
     # ------------------------------------------------------------------- Typedefs
     def create_typedefs(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         classification_defs = payload.get("classificationDefs") or []

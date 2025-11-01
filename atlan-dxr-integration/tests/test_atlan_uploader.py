@@ -76,6 +76,7 @@ class _TestConfig:
     atlan_dataset_path_prefix = "dxr"
     atlan_batch_size = 10
     atlan_tag_namespace = "DXR"
+    atlan_connection_admin_user = None
 
     @property
     def database_qualified_name(self) -> str:

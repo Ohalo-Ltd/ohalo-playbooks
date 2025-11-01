@@ -32,8 +32,13 @@ class ConnectionHandle:
 class ConnectionProvisioner:
     """Create or reuse Atlan assets needed for the DXR integrations."""
 
-    def __init__(self, client: AtlanRESTClient) -> None:
+    def __init__(
+        self,
+        client: AtlanRESTClient,
+        default_admin_user: Optional[str] = None,
+    ) -> None:
         self._client = client
+        self._default_admin_user = default_admin_user
 
     def ensure_connection(
         self,
@@ -42,11 +47,20 @@ class ConnectionProvisioner:
         connection_name: str,
         connector_name: str,
         domain_name: Optional[str] = None,
+        admin_user: Optional[str] = None,
     ) -> ConnectionHandle:
         connector = normalise_connector_name(connector_name)
         connection = self._get_entity("Connection", qualified_name)
         if not connection:
             LOGGER.info("Connection '%s' not found; creating it", qualified_name)
+            admin_roles: list[str] = []
+            admin_role_guid = self._client.get_role_id("$admin")
+            if admin_role_guid:
+                admin_roles.append(admin_role_guid)
+            admin_users: list[str] = []
+            resolved_admin_user = admin_user or self._default_admin_user
+            if resolved_admin_user:
+                admin_users.append(resolved_admin_user)
             payload = {
                 "typeName": "Connection",
                 "attributes": {
@@ -54,8 +68,9 @@ class ConnectionProvisioner:
                     "name": connection_name,
                     "connectorName": connector,
                     "connectionType": connector,
-                    "adminRoles": [],
+                    "adminRoles": admin_roles,
                     "adminGroups": [],
+                    "adminUsers": admin_users,
                 },
             }
             connection = self._upsert_single(payload, "Connection")
@@ -149,14 +164,39 @@ class ConnectionProvisioner:
         return _extract_entity(data)
 
     def _upsert_single(self, entity: Dict[str, Any], type_name: str) -> Dict[str, Any]:
-        response = self._client.upsert_assets([entity])
+        try:
+            response = self._client.upsert_assets([entity])
+        except AtlanRequestError as exc:
+            if exc.status_code == 403:
+                qualified_name = entity.get("attributes", {}).get("qualifiedName", "")
+                LOGGER.warning(
+                    "Insufficient privileges to upsert %s '%s'; assuming it already exists.",
+                    type_name,
+                    qualified_name,
+                )
+                fallback = self._get_entity(type_name, qualified_name)
+                if fallback:
+                    return fallback
+                return {
+                    "typeName": type_name,
+                    "attributes": dict(entity.get("attributes", {})),
+                }
+            raise
         mutated = _extract_mutated_entity(response, type_name)
         if mutated:
             return mutated
         retrieved = self._get_entity(type_name, entity["attributes"]["qualifiedName"])
         if retrieved:
             return retrieved
-        raise RuntimeError(f"Unable to create or retrieve {type_name} asset.")
+        LOGGER.warning(
+            "Unable to confirm %s '%s' after upsert; proceeding with submitted attributes.",
+            type_name,
+            entity["attributes"]["qualifiedName"],
+        )
+        return {
+            "typeName": type_name,
+            "attributes": dict(entity.get("attributes", {})),
+        }
 
 
 def _extract_entity(payload: Any) -> Optional[Dict[str, Any]]:

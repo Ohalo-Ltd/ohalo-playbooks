@@ -32,6 +32,7 @@ class Config:
     atlan_dataset_path_prefix: str
     atlan_batch_size: int
     atlan_tag_namespace: str
+    atlan_connection_admin_user: Optional[str]
 
     log_level: str
 
@@ -139,6 +140,7 @@ class Config:
             atlan_dataset_path_prefix=os.getenv("ATLAN_DATASET_PATH_PREFIX", "dxr"),
             atlan_batch_size=batch_size,
             atlan_tag_namespace=os.getenv("ATLAN_TAG_NAMESPACE", "DXR"),
+            atlan_connection_admin_user=os.getenv("ATLAN_CONNECTION_ADMIN_USER"),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
         )
 

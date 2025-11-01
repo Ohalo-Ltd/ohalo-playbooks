@@ -27,7 +27,10 @@ class AtlanUploader:
             base_url=config.atlan_base_url,
             api_key=config.atlan_api_token,
         )
-        self._provisioner = ConnectionProvisioner(self._client)
+        self._provisioner = ConnectionProvisioner(
+            self._client,
+            default_admin_user=config.atlan_connection_admin_user,
+        )
 
         self._connection_handle = self._ensure_connection_exists()
         self._connector_name = self._connection_handle.connector_name

@@ -120,6 +120,7 @@ Environment variables (see `.env.example`):
 | `ATLAN_BATCH_SIZE` | Maximum number of tables to upsert in a single API call. |
 | `ATLAN_DATASET_PATH_PREFIX` | Optional suffix appended to dataset qualified names (default: `dxr`). |
 | `ATLAN_TAG_NAMESPACE` | Namespace prefix used when creating Atlan tag definitions (default: `DXR`). |
+| `ATLAN_CONNECTION_ADMIN_USER` | Optional Atlan user or service-account ID to assign as a connection admin when provisioning the global connection. Use the token's `service-account-apikey-…` identifier if the API token needs direct connection admin access. |
 | `LOG_LEVEL` | Logging verbosity (`INFO`, `DEBUG`, ...). |
 
 ## Implementation notes

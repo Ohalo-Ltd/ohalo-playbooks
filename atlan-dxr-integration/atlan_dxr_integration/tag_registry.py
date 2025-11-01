@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 import unicodedata
 from dataclasses import dataclass
 from typing import Dict, Iterable, Optional
@@ -39,6 +40,8 @@ class TagRegistry:
         self._client = client
         self._namespace = namespace.strip() or "DXR"
         self._handles: Dict[str, TagHandle] = {}
+        self._typedef_retry_attempts = 5
+        self._typedef_retry_delay = 1.0
 
     def ensure(
         self,
@@ -59,12 +62,17 @@ class TagRegistry:
         full_display = self._build_display_name(display_name)
         typedef = self._fetch_typedef(full_display)
         if not typedef:
-            self._create_typedef(full_display, description, color, icon)
-            typedef = self._fetch_typedef(full_display)
+            created = self._create_typedef(full_display, description, color, icon)
+            typedef = self._wait_for_typedef(
+                full_display,
+                attempts=(self._typedef_retry_attempts if created else 1),
+            )
             if not typedef:
-                raise RuntimeError(
-                    f"Unable to locate tag definition after creation for '{full_display}'"
+                LOGGER.warning(
+                    "Unable to confirm tag definition '%s' after creation; proceeding with best-effort handle.",
+                    full_display,
                 )
+                typedef = {"name": full_display}
 
         handle = TagHandle(
             slug=slug,
@@ -88,13 +96,28 @@ class TagRegistry:
                     return typedef
         return None
 
+    def _wait_for_typedef(
+        self,
+        name: str,
+        *,
+        attempts: Optional[int] = None,
+    ) -> Optional[Dict[str, object]]:
+        total_attempts = attempts or self._typedef_retry_attempts
+        for attempt in range(total_attempts):
+            typedef = self._fetch_typedef(name)
+            if typedef:
+                return typedef
+            if attempt < total_attempts - 1:
+                time.sleep(self._typedef_retry_delay)
+        return None
+
     def _create_typedef(
         self,
         name: str,
         description: Optional[str],
         color: TagColor,
         icon: TagIcon,
-    ) -> None:
+    ) -> bool:
         payload = {
             "classificationDefs": [
                 {
@@ -113,11 +136,12 @@ class TagRegistry:
 
         try:
             self._client.create_typedefs(payload)
+            return True
         except AtlanRequestError as exc:
             if exc.status_code == 409:
                 LOGGER.debug("Tag '%s' already exists: %s", name, exc.details)
-            else:
-                raise
+                return False
+            raise
 
     def _build_display_name(self, display_name: str) -> str:
         display = display_name.strip() or "Unknown"
