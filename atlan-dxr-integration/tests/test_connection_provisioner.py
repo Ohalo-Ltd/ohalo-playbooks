@@ -49,7 +49,27 @@ class _StubRESTClient:
                 self.assets[key] = self.fallback_after_upsert
             raise self.upsert_error
 
-        return self.upsert_response or {}
+        # Simulate persistence for update scenarios when no explicit response is provided
+        if self.upsert_response is None:
+            for entity in assets:
+                attrs = dict(entity.get("attributes") or {})
+                qn = attrs.get("qualifiedName")
+                if not qn:
+                    continue
+                existing = self.assets.get(self._key(entity["typeName"], qn)) or {
+                    "typeName": entity["typeName"],
+                    "guid": entity.get("guid", f"guid-{len(self.assets)+1}"),
+                    "attributes": {},
+                }
+                existing_attrs = existing.get("attributes") or {}
+                existing_attrs.update(attrs)
+                existing["attributes"] = existing_attrs
+                if entity.get("guid"):
+                    existing["guid"] = entity["guid"]
+                self.assets[self._key(entity["typeName"], qn)] = existing
+            return {}
+
+        return self.upsert_response
 
     def get_role_id(self, role_name: str) -> Optional[str]:
         return self.role_id if role_name == "$admin" else None
@@ -61,6 +81,7 @@ def _connection_entity(
     name: str = "dxr-unstructured-attributes",
     guid: str = "connection-guid",
     admin_users: Optional[List[str]] = None,
+    admin_roles: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     return {
         "entity": {
@@ -70,6 +91,7 @@ def _connection_entity(
                 "qualifiedName": qualified_name,
                 "name": name,
                 "adminUsers": admin_users or [],
+                "adminRoles": admin_roles or [],
             },
         }
     }
@@ -148,6 +170,30 @@ def test_ensure_connection_falls_back_when_upsert_forbidden() -> None:
     assert handle.connection.guid == "fallback-guid"
     assert handle.connection.attributes.qualifiedName == qualified_name
     assert client.upsert_calls, "Upsert should still be attempted before falling back"
+
+
+def test_ensure_connection_updates_existing_admins() -> None:
+    qualified_name = "default/custom/dxr-unstructured-attributes"
+    existing_connection = _connection_entity(
+        qualified_name=qualified_name,
+        guid="existing-guid",
+        admin_users=[],
+    )
+    assets = {("Connection", qualified_name): existing_connection}
+    client = _StubRESTClient(assets=assets, role_id="admin-role-guid")
+    provisioner = ConnectionProvisioner(client, default_admin_user="token-user")
+
+    handle = provisioner.ensure_connection(
+        qualified_name=qualified_name,
+        connection_name="dxr-unstructured-attributes",
+        connector_name="custom",
+    )
+
+    updated = client.assets[("Connection", qualified_name)]["attributes"]
+    assert "admin-role-guid" in updated.get("adminRoles", [])
+    assert "token-user" in updated.get("adminUsers", [])
+    assert "admin-role-guid" in updated.get("adminRoles", [])
+    assert handle.connection.guid == "existing-guid"
 
 
 def test_ensure_connection_handles_upsert_without_mutation() -> None:

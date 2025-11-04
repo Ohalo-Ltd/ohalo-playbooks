@@ -11,10 +11,12 @@ from atlan_dxr_integration.config import Config
 
 
 class _StubRESTClient:
-    def __init__(self, *, connections=None):
+    def __init__(self, *, connections=None, typedefs=None):
         self.connections = list(connections or [])
+        self.typedefs = list(typedefs or [])
         self.deleted: list[str] = []
         self.purged: list[str] = []
+        self.purged_typedefs: list[str] = []
 
     def search_assets(self, payload: dict[str, Any]):
         must = payload.get("dsl", {}).get("query", {}).get("bool", {}).get("must", [])
@@ -32,6 +34,12 @@ class _StubRESTClient:
 
     def purge_asset(self, guid: str):
         self.purged.append(guid)
+
+    def list_classification_typedefs(self):
+        return list(self.typedefs)
+
+    def purge_typedef(self, name: str):
+        self.purged_typedefs.append(name)
 
 
 def _build_config() -> Config:
@@ -103,6 +111,33 @@ def test_purge_connection_skips_soft_delete(monkeypatch: pytest.MonkeyPatch) -> 
     assert client.purged == ["conn-guid"]
 
 
+def test_purge_connection_purges_namespace_tags(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _build_config()
+    connection = {
+        "guid": "conn-guid",
+        "attributes": {
+            "name": "dxr-unstructured-attributes",
+            "qualifiedName": "default/custom/dxr-unstructured-attributes",
+        },
+    }
+    typedefs = [
+        {"name": "hash-1", "displayName": "DXR :: Example"},
+        {"name": "hash-2", "displayName": "Other :: Skip"},
+    ]
+    client = _StubRESTClient(connections=[connection], typedefs=typedefs)
+
+    connection_manager.purge_connection(
+        config,
+        delete_type=connection_manager.DeleteType.PURGE,
+        soft_delete_first=False,
+        purge_tags=True,
+        client=client,
+    )
+
+    assert "hash-1" in client.purged_typedefs
+    assert "hash-2" not in client.purged_typedefs
+
+
 def test_purge_connection_raises_when_missing():
     config = _build_config()
     client = _StubRESTClient(connections=[])
@@ -128,3 +163,20 @@ def test_purge_connection_requires_guid():
         connection_manager.purge_connection(config, client=client)
 
     assert "does not expose a guid" in str(exc_info.value).lower()
+
+
+def test_purge_environment_wrapper(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _build_config()
+    calls: dict[str, Any] = {}
+
+    def _mock_purge_connection(*args, **kwargs):
+        calls.update(kwargs)
+
+    monkeypatch.setattr(connection_manager, "purge_connection", _mock_purge_connection)
+
+    connection_manager.purge_environment(config, client="client")
+
+    assert calls["delete_type"] == connection_manager.DeleteType.PURGE
+    assert calls["soft_delete_first"] is False
+    assert calls["purge_tags"] is True
+    assert calls["client"] == "client"

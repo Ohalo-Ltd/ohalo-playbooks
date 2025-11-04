@@ -160,14 +160,22 @@ To hard-delete the configured Atlan connections (for example between integration
 runs), use the dedicated helper:
 
 ```bash
-python -m atlan_dxr_integration.connection_manager --delete-type purge
+python -m atlan_dxr_integration.connection_manager --delete-type purge --skip-soft-delete --purge-tags
 ```
 
 The helper enumerates every connection whose name matches the configured global
-connection or datasource prefix and deletes it (soft delete followed by the requested hard
-delete). **This command is intended for development environments only**; avoid running it
-against production tenants. Pass `--skip-soft-delete` to jump straight to the requested
-deletion mode (`hard`, `purge`).
+connection or datasource prefix, deletes any file or table assets underneath it, and then
+removes the connection itself. **This command is intended for development environments
+only**; avoid running it against production tenants. Pass `--skip-soft-delete` to jump
+straight to the requested deletion mode (`hard`, `purge`).
+
+Including `--purge-tags` hard-deletes every classification typedef whose display name
+starts with your configured `ATLAN_TAG_NAMESPACE` (for example `DXR :: Label :: …`). If
+you prefer to keep the tag definitions, simply omit that flag.
+
+You can invoke the same behaviour from Python via
+`connection_manager.purge_environment(Config.from_env())`, which defaults to a hard
+delete, skips the soft delete, and purges the namespaced classifications.
 
 ## Development
 

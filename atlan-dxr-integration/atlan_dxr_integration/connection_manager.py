@@ -28,6 +28,7 @@ def purge_connection(
     *,
     delete_type: str = DeleteType.HARD,
     soft_delete_first: bool = True,
+    purge_tags: bool = False,
     client: Optional[AtlanRESTClient] = None,
 ) -> None:
     """Hard-delete matching Atlan connections for development reset scenarios."""
@@ -62,6 +63,13 @@ def purge_connection(
             delete_type=delete_type,
             soft_delete_first=soft_delete_first,
         )
+        _purge_tables_for_connection(
+            client,
+            connection_qualified_name=qualified_name or "",
+            connection_name=display,
+            delete_type=delete_type,
+            soft_delete_first=soft_delete_first,
+        )
         domain_guids = attrs.get("domainGuids") or attrs.get("domainGUIDs") or []
         _purge_domains(
             client,
@@ -81,6 +89,16 @@ def purge_connection(
             guid,
         )
         _purge_asset(client, guid)
+
+    if purge_tags:
+        try:
+            _purge_tag_typedefs(
+                client,
+                namespace=config.atlan_tag_namespace,
+            )
+        except Exception:  # pragma: no cover - defensive logging
+            LOGGER.exception("Failed to purge classification typedefs")
+            raise
 
 
 def _find_connections(client: AtlanRESTClient, config: Config) -> List[Dict[str, Any]]:
@@ -163,6 +181,59 @@ def _purge_files_for_connection(
         _purge_asset(client, guid)
 
 
+def _purge_tables_for_connection(
+    client: AtlanRESTClient,
+    *,
+    connection_qualified_name: str,
+    connection_name: str,
+    delete_type: str,
+    soft_delete_first: bool,
+) -> None:
+    if not connection_qualified_name:
+        return
+
+    payload = {
+        "dsl": {
+            "query": {
+                "bool": {
+                    "must": [
+                        {"term": {"__typeName.keyword": "Table"}},
+                        {"term": {"connectionQualifiedName": connection_qualified_name}},
+                    ]
+                }
+            },
+            "size": 1000,
+        }
+    }
+
+    try:
+        results = client.search_assets(payload)
+    except AtlanRequestError as exc:
+        LOGGER.warning(
+            "Unable to enumerate tables for connection '%s': %s",
+            connection_name,
+            exc,
+        )
+        return
+
+    entities = _extract_entities(results)
+    if not entities:
+        return
+
+    LOGGER.info(
+        "Deleting %d table asset(s) under connection '%s'",
+        len(entities),
+        connection_name,
+    )
+    for entity in entities:
+        guid = entity.get("guid")
+        if not guid:
+            continue
+        if soft_delete_first:
+            _delete_asset(client, guid)
+        _purge_asset(client, guid)
+
+
 def _purge_domains(
     client: AtlanRESTClient,
     *,
@@ -187,6 +258,56 @@ def _purge_domains(
             _purge_asset(client, guid)
         except AtlanRequestError as exc:
             LOGGER.warning("Unable to purge domain %s: %s", guid, exc)
+
+
+def _purge_tag_typedefs(
+    client: AtlanRESTClient,
+    *,
+    namespace: str,
+) -> None:
+    prefix = (namespace or "").strip()
+    if not prefix:
+        LOGGER.info("Tag namespace not configured; skipping classification purge.")
+        return
+
+    try:
+        typedefs = client.list_classification_typedefs()
+    except AtlanRequestError as exc:
+        LOGGER.warning("Unable to enumerate classification typedefs: %s", exc)
+        return
+
+    display_prefix = f"{prefix} ::"
+    to_purge: List[tuple[str, str]] = []
+    for typedef in typedefs:
+        display = str(typedef.get("displayName") or "")
+        hashed = str(typedef.get("name") or "")
+        if not hashed:
+            continue
+        if display.startswith(display_prefix) or hashed.startswith(prefix):
+            to_purge.append((hashed, display or hashed))
+
+    if not to_purge:
+        LOGGER.info(
+            "No classification typedefs found for namespace '%s'; nothing to purge.",
+            prefix,
+        )
+        return
+
+    LOGGER.info(
+        "Purging %d classification typedef(s) for namespace '%s'.",
+        len(to_purge),
+        prefix,
+    )
+    for hashed, display in to_purge:
+        try:
+            client.purge_typedef(hashed)
+        except AtlanRequestError as exc:
+            LOGGER.warning(
+                "Unable to purge classification '%s' (%s): %s",
+                display,
+                hashed,
+                exc.details or exc,
+            )
 
 
 def _matches_connection(name: Optional[str], config: Config) -> bool:
@@ -234,6 +355,22 @@ def _parse_delete_type(raw: str) -> str:
     return _DELETE_TYPE_MAP[key]
 
 
+def purge_environment(
+    config: Config,
+    *,
+    client: Optional[AtlanRESTClient] = None,
+) -> None:
+    """Convenience helper to hard-delete DXR assets in development environments."""
+
+    purge_connection(
+        config,
+        delete_type=DeleteType.PURGE,
+        soft_delete_first=False,
+        purge_tags=True,
+        client=client,
+    )
+
+
 def main(argv: Optional[list[str]] = None) -> None:  # pragma: no cover - CLI glue
     parser = argparse.ArgumentParser(
         description="Utility for deleting the configured Atlan connection."
@@ -250,6 +387,11 @@ def main(argv: Optional[list[str]] = None) -> None:  # pragma: no cover - CLI gl
         help="Invoke the hard delete directly without issuing a preceding soft delete.",
     )
     parser.add_argument(
+        "--purge-tags",
+        action="store_true",
+        help="Also purge classification typedefs matching the configured namespace.",
+    )
+    parser.add_argument(
         "--log-level",
         default=None,
         help="Optional logging level override (e.g. DEBUG).",
@@ -264,6 +406,7 @@ def main(argv: Optional[list[str]] = None) -> None:  # pragma: no cover - CLI gl
             config,
             delete_type=_parse_delete_type(args.delete_type),
             soft_delete_first=not args.skip_soft_delete,
+            purge_tags=args.purge_tags,
         )
     except SystemExit:
         raise
@@ -276,4 +419,4 @@ if __name__ == "__main__":  # pragma: no cover - CLI glue
     main()
 
 
-__all__ = ["purge_connection"]
+__all__ = ["purge_connection", "purge_environment"]

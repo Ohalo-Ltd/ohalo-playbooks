@@ -100,7 +100,7 @@ class FileAssetFactory:
                     "typeName": handle.hashed_name,
                 }
                 for handle in handles
-                if handle.hashed_name
+                if handle.hashed_name and handle.hashed_name.upper() != "DELETED"
             ]
 
         source_url = _derive_source_url(identifier, path, self._dxr_base_url)
@@ -319,41 +319,41 @@ def _resolve_file_type(payload: Dict[str, object], *, name: str) -> FileType:
         "Falling back to TXT file type for payload with unknown extension/mime: %s",
         payload,
     )
-    return "TXT"
+    return "txt"
 
 
 _MIME_TYPE_MAP: Dict[str, str] = {
-    "application/pdf": "PDF",
-    "application/msword": "DOC",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "DOC",
-    "application/vnd.ms-excel": "XLS",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "XLS",
-    "application/vnd.ms-powerpoint": "PPT",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "PPT",
-    "text/csv": "CSV",
-    "text/plain": "TXT",
-    "application/json": "JSON",
-    "application/xml": "XML",
-    "application/zip": "ZIP",
+    "application/pdf": "pdf",
+    "application/msword": "doc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "doc",
+    "application/vnd.ms-excel": "xls",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xls",
+    "application/vnd.ms-powerpoint": "ppt",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "ppt",
+    "text/csv": "csv",
+    "text/plain": "txt",
+    "application/json": "json",
+    "application/xml": "xml",
+    "application/zip": "zip",
 }
 
 
 _EXTENSION_MAP: Dict[str, str] = {
-    ".pdf": "PDF",
-    ".doc": "DOC",
-    ".docx": "DOC",
-    ".xls": "XLS",
-    ".xlsx": "XLS",
-    ".xlsm": "XLSM",
-    ".ppt": "PPT",
-    ".pptx": "PPT",
-    ".csv": "CSV",
-    ".txt": "TXT",
-    ".json": "JSON",
-    ".xml": "XML",
-    ".zip": "ZIP",
-    ".yxdb": "YXDB",
-    ".hyper": "HYPER",
+    ".pdf": "pdf",
+    ".doc": "doc",
+    ".docx": "doc",
+    ".xls": "xls",
+    ".xlsx": "xls",
+    ".xlsm": "xlsm",
+    ".ppt": "ppt",
+    ".pptx": "ppt",
+    ".csv": "csv",
+    ".txt": "txt",
+    ".json": "json",
+    ".xml": "xml",
+    ".zip": "zip",
+    ".yxdb": "yxdb",
+    ".hyper": "hyper",
 }
 
 

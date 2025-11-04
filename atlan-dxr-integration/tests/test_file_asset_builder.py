@@ -9,7 +9,7 @@ import pytest
 from atlan_dxr_integration.atlan_service import AtlanRequestError
 from atlan_dxr_integration.atlan_types import TagColor
 from atlan_dxr_integration.file_asset_builder import BuiltFileAsset, FileAssetFactory
-from atlan_dxr_integration.tag_registry import TagRegistry
+from atlan_dxr_integration.tag_registry import TagHandle, TagRegistry
 
 
 class _StubRESTClient:
@@ -19,13 +19,20 @@ class _StubRESTClient:
     def create_typedefs(self, payload):
         for typedef in payload.get("classificationDefs", []):
             name = typedef["name"]
-            self.typedefs[name] = typedef | {"name": name}
+            hashed = f"hashed::{name}"
+            enriched = typedef | {"name": hashed, "displayName": name}
+            self.typedefs[name] = enriched
+            self.typedefs[hashed] = enriched
+        return {"classificationDefs": list(self.typedefs.values())}
 
     def get_typedef(self, name: str):
         typedef = self.typedefs.get(name)
         if not typedef:
             raise AtlanRequestError("not found", status_code=404, details=None)
         return {"classificationDefs": [typedef]}
+
+    def list_classification_typedefs(self):
+        return list(self.typedefs.values())
 
 
 def _build_registry() -> TagRegistry:
@@ -89,7 +96,7 @@ def test_factory_builds_enriched_file_asset():
     attrs = asset["attributes"]
     assert attrs["connectionQualifiedName"] == "default/custom/dxr-datasource-finance"
     assert attrs["connectionName"] == "dxr-datasource-finance"
-    assert attrs["fileType"] == "PDF"
+    assert attrs["fileType"] == "pdf"
     assert attrs["filePath"].startswith("Documents/Confidential Folder")
     assert attrs["sourceURL"] == "https://dxr.example.com/files/0KQUMpgBVo-c9i0dUnJ8"
 
@@ -114,4 +121,22 @@ def test_factory_defaults_to_txt_without_type():
     )
 
     attrs = built.asset["attributes"]
-    assert attrs["fileType"] == "TXT"
+    assert attrs["fileType"] == "txt"
+
+
+def test_factory_skips_deleted_classification_handles():
+    registry, _ = _build_registry()
+    factory = FileAssetFactory(tag_registry=registry, tag_namespace="DXR")
+
+    payload = {"fileId": "abc123", "fileName": "report.txt", "labels": [{"id": "cls"}]}
+    deleted_handle = TagHandle(slug="cls", display_name="DXR :: Test", hashed_name="DELETED")
+
+    built = factory.build(
+        payload,
+        connection_qualified_name="default/custom/dxr-datasource-test",
+        connection_name="dxr-datasource-test",
+        classification_tags={"cls": deleted_handle},
+    )
+
+    classifications = built.asset.get("classifications", [])
+    assert not any(c.get("typeName") == "DELETED" for c in classifications)

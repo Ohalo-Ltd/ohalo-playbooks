@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional
 
+from http import HTTPStatus
+
 import pyatlan.model.assets as asset_models
 from application_sdk.clients.atlan import get_client as get_atlan_client
 from application_sdk.constants import ATLAN_API_KEY, ATLAN_BASE_URL
@@ -11,11 +13,17 @@ from application_sdk.observability.logger_adaptor import get_logger
 from pydantic.v1 import ValidationError
 from pyatlan.client.atlan import AtlanClient
 from pyatlan.errors import AtlanError, NotFoundError
+from pyatlan.utils import API, EndPoint, HTTPMethod
 from pyatlan.model.assets.core.asset import Asset as AtlanAsset
-from pyatlan.model.enums import AtlanDeleteType, AtlanTagColor, AtlanIcon
+from pyatlan.model.enums import (
+    AtlanDeleteType,
+    AtlanTagColor,
+    AtlanIcon,
+    AtlanTypeCategory,
+)
 from pyatlan.model.response import AssetMutationResponse
 from pyatlan.model.search import IndexSearchRequest
-from pyatlan.model.typedef import AtlanTagDef, TypeDef
+from pyatlan.model.typedef import AtlanTagDef
 
 logger = get_logger(__name__)
 
@@ -89,7 +97,7 @@ class AtlanRESTClient:
         entities = [_asset_to_dict(asset) for asset in results.current_page()]
         return {
             "entities": entities,
-            "approximateCount": results.count(),
+            "approximateCount": results.count,
         }
 
     def delete_asset(self, guid: str) -> None:
@@ -186,16 +194,42 @@ class AtlanRESTClient:
 
         return {"classificationDefs": created}
 
-    def get_typedef(self, name: str) -> Dict[str, Any]:
+    def list_classification_typedefs(self) -> List[Dict[str, Any]]:
         try:
-            typedef: TypeDef = self._client.typedef.get_by_name(name)
-        except NotFoundError as exc:
-            raise AtlanRequestError(str(exc), status_code=404, details=None) from exc
+            response = self._client.typedef.get(AtlanTypeCategory.CLASSIFICATION)
+        except AtlanError as exc:  # pragma: no cover - defensive
+            raise _wrap_error(exc) from exc
+
+        typedefs: List[Dict[str, Any]] = []
+        for typedef in response.atlan_tag_defs:
+            payload = typedef.dict(by_alias=True, exclude_none=True)
+            payload.setdefault("displayName", typedef.display_name)
+            typedefs.append(payload)
+        return typedefs
+
+    def get_typedef(self, name: str) -> Optional[Dict[str, Any]]:
+        try:
+            typedef = self._client.typedef.get_by_name(name)
+        except NotFoundError:
+            return None
         except AtlanError as exc:  # pragma: no cover - defensive
             raise _wrap_error(exc) from exc
 
         payload = typedef.dict(by_alias=True, exclude_none=True)
-        return {"classificationDefs": [payload]}
+        payload.setdefault("displayName", typedef.display_name)
+        return payload
+
+    def purge_typedef(self, internal_name: str) -> None:
+        try:
+            api = API(
+                f"types/typedef/name/{internal_name}",
+                HTTPMethod.DELETE,
+                HTTPStatus.NO_CONTENT,
+                EndPoint.ATLAS,
+            )
+            self._client._call_api(api, None)
+        except AtlanError as exc:  # pragma: no cover - defensive
+            raise _wrap_error(exc) from exc
 
     # ---------------------------------------------------------------- Lifecycle
     def close(self) -> None:  # pragma: no cover - retained for API compatibility
@@ -257,3 +291,4 @@ def _coerce_tag_icon(raw: str) -> AtlanIcon:
 
 
 __all__ = ["AtlanRESTClient", "AtlanRequestError"]
+from pyatlan.errors import AtlanError

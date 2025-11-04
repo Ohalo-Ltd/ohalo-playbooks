@@ -14,12 +14,13 @@ from atlan_dxr_integration.dxr_client import Classification
 
 
 class _StubRESTClient:
-    def __init__(self, *, responses=None, existing=None):
+    def __init__(self, *, responses=None, existing=None, typedefs=None):
         self.responses = list(responses or [])
         self.existing = existing or {}
         self.calls: list[list[dict]] = []
         self.deleted: list[str] = []
         self.purged: list[str] = []
+        self.typedefs = typedefs or {}
 
     def upsert_assets(self, assets):
         self.calls.append(assets)
@@ -41,6 +42,12 @@ class _StubRESTClient:
 
     def search_assets(self, _payload):  # pragma: no cover - not used in tests
         return {"entities": []}
+
+    def get_typedef(self, name: str):
+        value = self.typedefs.get(name)
+        if isinstance(value, Exception):
+            raise value
+        return value
 
 
 class _StubProvisioner:
@@ -150,6 +157,7 @@ def test_upsert_raises_on_failure(uploader):
 
 def test_upsert_files_delegates_to_rest(uploader):
     instance, rest = uploader
+    rest.typedefs["valid"] = {"name": "valid", "entityStatus": "ACTIVE"}
 
     asset = {
         "typeName": "File",
@@ -158,6 +166,7 @@ def test_upsert_files_delegates_to_rest(uploader):
             "name": "file-1",
             "displayName": "file-1",
         },
+        "classifications": [{"typeName": "valid"}],
     }
 
     instance.upsert_files([asset])
@@ -165,3 +174,28 @@ def test_upsert_files_delegates_to_rest(uploader):
     assert rest.calls, "Expected file upsert call"
     entity = rest.calls[-1][0]
     assert entity["typeName"] == "File"
+
+
+def test_upsert_files_strips_deleted_classifications(uploader):
+    instance, rest = uploader
+    rest.typedefs["valid"] = {"name": "valid", "entityStatus": "ACTIVE"}
+    asset = {
+        "typeName": "File",
+        "attributes": {
+            "qualifiedName": "default/custom/dxr-unstructured-attributes/file-1",
+            "name": "file-1",
+        },
+        "classifications": [
+            {"typeName": "DELETED"},
+            {"typeName": " valid "},
+            {"typeName": ""},
+        ],
+    }
+
+    instance.upsert_files([asset])
+
+    payload = rest.calls[-1][0]
+    classifications = payload.get("classifications", [])
+    assert all(c["typeName"].strip().upper() != "DELETED" for c in classifications)
+    assert len(classifications) == 1
+    assert classifications[0]["typeName"] == " valid "

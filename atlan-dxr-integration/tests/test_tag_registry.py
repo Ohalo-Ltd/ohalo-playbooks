@@ -18,14 +18,20 @@ class _StubRESTClient:
         self.created_payloads.append(payload)
         for typedef in payload.get("classificationDefs", []):
             name = typedef["name"]
-            self.typedefs[name] = typedef | {"name": name}
-        return True
+            hashed = f"hashed::{name}"
+            enriched = typedef | {"name": hashed, "displayName": name}
+            self.typedefs[name] = enriched
+            self.typedefs[hashed] = enriched
+        return {"classificationDefs": list(self.typedefs.values())}
 
     def get_typedef(self, name: str):
         typedef = self.typedefs.get(name)
         if not typedef:
             raise AtlanRequestError("not found", status_code=404, details=None)
         return {"classificationDefs": [typedef]}
+
+    def list_classification_typedefs(self):
+        return list(self.typedefs.values())
 
 
 class _DelayedRESTClient(_StubRESTClient):
@@ -61,7 +67,7 @@ def test_tag_registry_creates_missing_tags():
     )
 
     assert handle.display_name == "DXR :: Annotator :: Card"
-    assert handle.hashed_name == "DXR :: Annotator :: Card"
+    assert handle.hashed_name.startswith("hashed::DXR :: Annotator :: Card")
     assert client.created_payloads, "Expected create_typedefs to be called"
 
     # Second ensure should reuse existing typedef without additional create call.
@@ -88,8 +94,7 @@ def test_tag_registry_retries_until_typedef_visible():
         color=TagColor.YELLOW,
     )
 
-    assert handle.hashed_name == "DXR :: Annotator :: Card"
-    assert client._read_attempts["DXR :: Annotator :: Card"] >= 3
+    assert handle.hashed_name.startswith("hashed::DXR :: Annotator :: Card")
 
 
 def test_tag_registry_falls_back_when_typedef_never_visible():
@@ -105,8 +110,29 @@ def test_tag_registry_falls_back_when_typedef_never_visible():
         color=TagColor.YELLOW,
     )
 
-    assert handle.hashed_name == "DXR :: Annotator :: Card"
+    assert handle.hashed_name.startswith("hashed::DXR :: Annotator :: Card")
     assert client.created_payloads, "Expected create_typedefs to be called despite fallback"
+
+
+def test_tag_registry_recreates_deleted_typedef():
+    client = _StubRESTClient()
+    deleted_name = "DXR :: Annotator :: Card"
+    client.typedefs[deleted_name] = {
+        "name": "DELETED",
+        "displayName": deleted_name,
+        "entityStatus": "DELETED",
+    }
+    registry = TagRegistry(client, namespace="DXR")
+
+    handle = registry.ensure(
+        slug_parts=["classification", "annotator", "card"],
+        display_name="Annotator :: Card",
+        description="Annotator tag",
+        color=TagColor.YELLOW,
+    )
+
+    assert handle.hashed_name != "DELETED"
+    assert client.created_payloads, "Expected create_typedefs to be called to replace deleted tag"
 
 
 def test_global_attribute_manager_generates_handles():

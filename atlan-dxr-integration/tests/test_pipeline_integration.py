@@ -48,7 +48,8 @@ class _StubTagRegistry:
 
     def ensure(self, *, slug_parts, display_name, **_):
         slug = "/".join(slug_parts)
-        return SimpleNamespace(slug=slug, display_name=f"DXR :: {display_name}", hashed_name=f"DXR :: {display_name}")
+        full_display = f"DXR :: {display_name}"
+        return SimpleNamespace(slug=slug, display_name=full_display, hashed_name=f"hashed::{full_display}")
 
 
 class _StubGlobalAttributeManager:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 from .atlan_service import AtlanRESTClient, AtlanRequestError
 
@@ -51,16 +51,15 @@ class ConnectionProvisioner:
     ) -> ConnectionHandle:
         connector = normalise_connector_name(connector_name)
         connection = self._get_entity("Connection", qualified_name)
+        resolved_admin_user = admin_user or self._default_admin_user
+        admin_users: list[str] = [resolved_admin_user] if resolved_admin_user else []
+        admin_roles: list[str] = []
+        admin_role_guid = self._client.get_role_id("$admin")
+        if admin_role_guid:
+            admin_roles.append(admin_role_guid)
+
         if not connection:
             LOGGER.info("Connection '%s' not found; creating it", qualified_name)
-            admin_roles: list[str] = []
-            admin_role_guid = self._client.get_role_id("$admin")
-            if admin_role_guid:
-                admin_roles.append(admin_role_guid)
-            admin_users: list[str] = []
-            resolved_admin_user = admin_user or self._default_admin_user
-            if resolved_admin_user:
-                admin_users.append(resolved_admin_user)
             payload = {
                 "typeName": "Connection",
                 "attributes": {
@@ -75,7 +74,8 @@ class ConnectionProvisioner:
             }
             connection = self._upsert_single(payload, "Connection")
 
-        actual_qn = connection["attributes"].get("qualifiedName") or qualified_name
+        attributes = dict(connection.get("attributes") or {})
+        actual_qn = attributes.get("qualifiedName") or qualified_name
         if actual_qn != qualified_name:
             LOGGER.warning(
                 "Configured connection QN '%s' differs from Atlan record '%s'. Using returned value.",
@@ -83,6 +83,29 @@ class ConnectionProvisioner:
                 actual_qn,
             )
             qualified_name = actual_qn
+
+        needs_update = False
+        existing_roles = set(attributes.get("adminRoles") or [])
+        for role in admin_roles:
+            if role and role not in existing_roles:
+                existing_roles.add(role)
+                needs_update = True
+
+        existing_users = set(attributes.get("adminUsers") or [])
+        for user in admin_users:
+            if user and user not in existing_users:
+                existing_users.add(user)
+                needs_update = True
+
+        if needs_update:
+            attributes["adminRoles"] = list(existing_roles)
+            attributes["adminUsers"] = list(existing_users)
+            update_payload = {
+                "typeName": "Connection",
+                "guid": connection.get("guid"),
+                "attributes": attributes,
+            }
+            connection = self._upsert_single(update_payload, "Connection")
 
         record = _to_record(connection)
         if domain_name:
