@@ -10,6 +10,7 @@ import pytest
 from atlan_dxr_integration import pipeline
 from atlan_dxr_integration.config import Config
 from atlan_dxr_integration.dxr_client import Classification
+from atlan_dxr_integration.file_asset_builder import BuiltFileAsset
 
 
 class _StubUploader:
@@ -79,8 +80,7 @@ class _StubFileAssetFactory:
                 "name": payload.get("name", "file"),
             },
         }
-        handles = tuple(classification_tags.values())
-        return SimpleNamespace(asset=asset, tag_handles=handles)
+        return BuiltFileAsset(asset=asset, custom_metadata={})
 
 
 class _StubDatasourceCoordinator:
@@ -95,14 +95,14 @@ class _StubDatasourceCoordinator:
         if not self._buffer:
             return
         for item in self._buffer:
-            self._uploader.upsert_files([
-                {
-                    "typeName": "File",
-                    "attributes": {
-                        "qualifiedName": f"qn::{item['payload'].get('id', 'file')}",
-                    },
-                }
-            ])
+            asset = {
+                "typeName": "File",
+                "attributes": {
+                    "qualifiedName": f"qn::{item['payload'].get('id', 'file')}",
+                },
+            }
+            built = BuiltFileAsset(asset=asset, custom_metadata={})
+            self._uploader.upsert_files([built])
         self._buffer.clear()
 
 
@@ -170,6 +170,7 @@ def test_pipeline_runs(monkeypatch: pytest.MonkeyPatch, file_count: int) -> None
     monkeypatch.setattr(pipeline, "GlobalAttributeManager", _StubGlobalAttributeManager)
     monkeypatch.setattr(pipeline, "FileAssetFactory", _StubFileAssetFactory)
     monkeypatch.setattr(pipeline, "DatasourceIngestionCoordinator", _StubDatasourceCoordinator)
+    monkeypatch.setattr(pipeline, "ensure_default_sets", lambda _config: None)
     monkeypatch.setattr(pipeline.Config, "from_env", staticmethod(_build_config))
 
     _StubUploader.instances.clear()

@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import copy
 import logging
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
+
+from pyatlan.model.custom_metadata import CustomMetadataDict
 
 from .atlan_service import AtlanRESTClient, AtlanRequestError
 
 from .config import Config
 from .connection_utils import ConnectionHandle, ConnectionProvisioner
 from .dataset_builder import DatasetRecord
+from .file_asset_builder import BuiltFileAsset
 
 LOGGER = logging.getLogger(__name__)
 
@@ -65,23 +68,44 @@ class AtlanUploader:
         return self._provisioner
 
     def upsert(self, records: Iterable[DatasetRecord]) -> None:
-        batch: List[Dict[str, Any]] = []
+        batch_entities: List[Dict[str, Any]] = []
+        batch_metadata: List[Dict[str, Dict[str, object]]] = []
         for record in records:
-            entity = self._build_table_entity(record)
-            batch.append(entity)
-            if len(batch) >= self._config.atlan_batch_size:
-                self._save_entities(batch, "Table", "tables", "table")
-                batch = []
-        if batch:
-            self._save_entities(batch, "Table", "tables", "table")
+            entity, metadata = self._build_table_entity(record)
+            batch_entities.append(entity)
+            batch_metadata.append(metadata)
+            if len(batch_entities) >= self._config.atlan_batch_size:
+                self._save_entities(
+                    batch_entities,
+                    "Table",
+                    "tables",
+                    "table",
+                    metadata_batch=batch_metadata,
+                )
+                batch_entities = []
+                batch_metadata = []
+        if batch_entities:
+            self._save_entities(
+                batch_entities,
+                "Table",
+                "tables",
+                "table",
+                metadata_batch=batch_metadata,
+            )
 
     def table_qualified_name(self, record: DatasetRecord) -> str:
         return f"{self._schema_qualified_name}/{self._table_name(record)}"
 
     def upsert_files(self, assets: Iterable[Any]) -> None:
-        batch: List[Dict[str, Any]] = []
+        batch_entities: List[Dict[str, Any]] = []
+        batch_metadata: List[Dict[str, Dict[str, object]]] = []
         for asset in assets:
-            entity = _asset_to_entity(asset)
+            if isinstance(asset, BuiltFileAsset):
+                entity = _asset_to_entity(asset.asset)
+                metadata = asset.custom_metadata
+            else:
+                entity = _asset_to_entity(asset)
+                metadata = {}
             attrs = entity.setdefault("attributes", {})
             attrs.setdefault("connectionQualifiedName", self._connection_qualified_name)
             attrs.setdefault("connectionName", self._connection_name)
@@ -89,17 +113,31 @@ class AtlanUploader:
             if not attrs.get("qualifiedName"):
                 name = attrs.get("name") or attrs.get("displayName") or attrs.get("filePath")
                 attrs["qualifiedName"] = f"{self._connection_qualified_name}/{name}"
-            batch.append(entity)
-            if len(batch) >= self._config.atlan_batch_size:
-                self._save_entities(batch, "File", "file assets", "file asset")
-                batch = []
-        if batch:
-            self._save_entities(batch, "File", "file assets", "file asset")
+            batch_entities.append(entity)
+            batch_metadata.append(metadata)
+            if len(batch_entities) >= self._config.atlan_batch_size:
+                self._save_entities(
+                    batch_entities,
+                    "File",
+                    "file assets",
+                    "file asset",
+                    metadata_batch=batch_metadata,
+                )
+                batch_entities = []
+                batch_metadata = []
+        if batch_entities:
+            self._save_entities(
+                batch_entities,
+                "File",
+                "file assets",
+                "file asset",
+                metadata_batch=batch_metadata,
+            )
 
-    def _build_table_entity(self, record: DatasetRecord) -> Dict[str, Any]:
+    def _build_table_entity(self, record: DatasetRecord) -> tuple[Dict[str, Any], Dict[str, Dict[str, object]]]:
         table_name = self._table_name(record)
         qualified_name = self.table_qualified_name(record)
-        return {
+        entity = {
             "typeName": "Table",
             "attributes": {
                 "qualifiedName": qualified_name,
@@ -117,6 +155,33 @@ class AtlanUploader:
                 "databaseQualifiedName": self._database_qualified_name,
             },
         }
+        classification_metadata: Dict[str, object] = {}
+        identifier = record.classification.identifier
+        if identifier:
+            classification_metadata["DXR Classification ID"] = identifier
+        if record.classification.type:
+            classification_metadata["DXR Classification Type"] = record.classification.type
+        if record.classification.subtype:
+            classification_metadata["DXR Classification Subtype"] = record.classification.subtype
+        classification_metadata["DXR File Count"] = record.file_count
+        sample_entries = [sample.render() for sample in record.sample_files if sample.render()]
+        if sample_entries:
+            classification_metadata["DXR Sample Files"] = sample_entries
+        if record.classification.link:
+            classification_metadata["DXR Detail URL"] = record.classification.link
+        if record.source_url:
+            classification_metadata["DXR Search URL"] = record.source_url
+
+        metadata_map: Dict[str, Dict[str, object]] = {}
+        cleaned_metadata = {
+            key: value
+            for key, value in classification_metadata.items()
+            if value not in (None, [], "")
+        }
+        if cleaned_metadata:
+            metadata_map["DXR Classification Metadata"] = cleaned_metadata
+
+        return entity, metadata_map
 
     def _save_entities(
         self,
@@ -124,11 +189,14 @@ class AtlanUploader:
         type_name: str,
         noun_plural: str,
         noun_singular: str,
+        *,
+        metadata_batch: Optional[Sequence[Dict[str, Dict[str, object]]]] = None,
     ) -> None:
         sanitized_batch: List[Dict[str, Any]] = []
         try:
-            for entity in batch:
-                sanitized_batch.append(self._sanitize_entity(entity))
+            for index, entity in enumerate(batch):
+                metadata = metadata_batch[index] if metadata_batch else None
+                sanitized_batch.append(self._sanitize_entity(entity, metadata))
             LOGGER.debug("Prepared %s payload: %s", noun_singular, sanitized_batch)
             response = self._client.upsert_assets(sanitized_batch)
             mutated = _extract_mutation_count(response, type_name)
@@ -246,10 +314,65 @@ class AtlanUploader:
     def _table_name(self, record: DatasetRecord) -> str:
         return record.identifier
 
-    def _sanitize_entity(self, entity: Dict[str, Any]) -> Dict[str, Any]:
+    def _sanitize_entity(
+        self,
+        entity: Dict[str, Any],
+        metadata: Optional[Dict[str, Dict[str, object]]] = None,
+    ) -> Dict[str, Any]:
         sanitized = copy.deepcopy(entity)
         self._strip_invalid_classifications(sanitized)
+        if metadata:
+            self._apply_custom_metadata(sanitized, metadata)
         return sanitized
+
+    def _apply_custom_metadata(
+        self,
+        entity: Dict[str, Any],
+        metadata: Dict[str, Dict[str, object]],
+    ) -> None:
+        if not metadata:
+            return
+
+        business_attributes = entity.setdefault("businessAttributes", {})
+        client = self._client.atlan_client
+
+        for set_name, attributes in metadata.items():
+            if not attributes:
+                continue
+            try:
+                cm = CustomMetadataDict(client=client, name=set_name)
+            except Exception as exc:  # pragma: no cover - defensive
+                LOGGER.warning("Unable to initialize custom metadata set '%s': %s", set_name, exc)
+                continue
+
+            for attr_name, value in attributes.items():
+                if value is None:
+                    continue
+                if isinstance(value, list) and not value:
+                    continue
+                try:
+                    cm[attr_name] = value
+                except KeyError:
+                    LOGGER.warning(
+                        "Skipping unknown custom metadata attribute '%s' in set '%s'.",
+                        attr_name,
+                        set_name,
+                    )
+                except Exception as exc:  # pragma: no cover - defensive
+                    LOGGER.warning(
+                        "Failed setting custom metadata attribute '%s' in set '%s': %s",
+                        attr_name,
+                        set_name,
+                        exc,
+                    )
+            if not cm.data:
+                continue
+            try:
+                set_id = client.custom_metadata_cache.get_id_for_name(set_name)
+            except Exception as exc:  # pragma: no cover - defensive
+                LOGGER.warning("Unable to resolve custom metadata set '%s': %s", set_name, exc)
+                continue
+            business_attributes.setdefault(set_id, {}).update(cm.business_attributes)
 
     def _strip_invalid_classifications(self, entity: Dict[str, Any]) -> None:
         def _filter(container: Dict[str, Any], key: str) -> None:

@@ -4,11 +4,12 @@ This playbook ingests Data X-Ray (DXR) metadata into Atlan using a layered conne
 model:
 
 - A **global `dxr-unstructured-attributes` connection** stores dataset-style summaries for
-  each DXR classification and owns the Atlan tag definitions that describe DXR attributes
-  (classifications, annotators, DLP labels, entitlements, etc.).
+  each DXR classification and provisions the custom metadata structures that capture
+  DXR-specific context (DLP labels, annotators, entitlements, and so on).
 - A **per-datasource connection** is created for every datasource encountered while
   streaming file metadata. File assets belonging to that datasource live beneath the
-  dedicated connection and are decorated with the global Atlan tags.
+  dedicated connection and are tagged only with their DXR classification labels, while
+  supplementary context is recorded through the `DXR File Metadata` custom metadata set.
 
 The service is inspired by the existing Purview integration but uses the Atlan Application
 SDK’s workflow tooling plus direct REST calls (wrapped by a lightweight helper) to
@@ -20,8 +21,9 @@ manage metadata in Atlan.
 2. Fetch all classification labels (DXR "labels") and populate the global connection with
    dataset summaries plus Atlan tag definitions that mirror DXR attributes.
 3. Stream file metadata from DXR. For each datasource, ensure the Atlan connection exists
-   (creating it when necessary), build the enriched file asset, and tag it using the
-   canonical definitions from the global connection.
+   (creating it when necessary), build the enriched file asset, keep the DXR label
+   classifications attached, and populate the supporting custom metadata fields that
+   describe DLP labels, annotators, entitlements, and categories.
 4. Aggregate the files under each label to produce dataset summaries and upsert the
    resulting tables into the global connection's database and schema.
 
@@ -36,9 +38,9 @@ Each table created in Atlan uses the following conventions:
 - **Source URL**: Backlink to the DXR search page for that label when available.
 
 Per-datasource `File` assets inherit their connector metadata from the datasource
-connection and are tagged with the canonical Atlan tags created under the global
-connection. This includes the DXR classification(s) assigned to the file along with
-annotator metadata, DLP labels, extracted metadata pairs, entitlements, and categories.
+connection and retain only the DXR classification tags. Ancillary details such as DLP
+labels, annotators, extracted metadata pairs, entitlements, and categories are stored in
+the `DXR File Metadata` custom metadata set for each file.
 
 ## Getting started
 
@@ -79,11 +81,18 @@ annotator metadata, DLP labels, extracted metadata pairs, entitlements, and cate
 
    The workflow becomes available through the Atlan application runtime, including the
    frontend configuration exposed via `app/frontend/workflow.json`. Open
-   <http://localhost:8000> to launch the built-in configuration UI — it mirrors the keys in
-   `.env.example`, persists values in the browser, and starts the ingestion once you click
-   **Run sync**. The submitted settings are also stored in the Temporal state store, so they
-   rehydrate automatically the next time you open the UI. You can trigger workflows directly
-   from Temporal/Dapr endpoints or via Atlan's runtime drawer as well.
+ <http://localhost:8000> to launch the built-in configuration UI — it mirrors the keys in
+  `.env.example`, persists values in the browser, and starts the ingestion once you click
+  **Run sync**. The submitted settings are also stored in the Temporal state store, so they
+  rehydrate automatically the next time you open the UI. You can trigger workflows directly
+  from Temporal/Dapr endpoints or via Atlan's runtime drawer as well.
+
+6. (Optional) When orchestrating the ingestion from automation or CI, you can provision the
+   custom metadata definitions explicitly:
+
+   ```bash
+   uv run python -m atlan_dxr_integration.custom_metadata provision
+   ```
 
 To execute the one-shot sync without the Application SDK (for example in CI), run:
 
@@ -128,8 +137,8 @@ Environment variables (see `.env.example`):
 - `DXR` interactions rely on the documented `/api/vbeta/classifications` and
   `/api/vbeta/files` endpoints.
 - Metadata is written to Atlan via REST calls issued by the embedded helper client.
-  Classification tags are auto-created when missing using the namespace configured via
-  `ATLAN_TAG_NAMESPACE`.
+  DXR labels continue to use Atlan classifications, while supplementary context is stored
+  via the `DXR File Metadata` and `DXR Classification Metadata` custom metadata sets.
 - The module is idempotent: rerunning the service overwrites tables and file assets with
   the same qualified names.
 - On startup the uploader verifies the referenced global connection, database, and schema
@@ -176,6 +185,19 @@ you prefer to keep the tag definitions, simply omit that flag.
 You can invoke the same behaviour from Python via
 `connection_manager.purge_environment(Config.from_env())`, which defaults to a hard
 delete, skips the soft delete, and purges the namespaced classifications.
+
+### Migrating existing deployments
+
+Earlier iterations of this integration stored DLP labels, annotators, entitlements, and
+other enrichments as Atlan classifications. Run the migration helper to populate the new
+custom metadata fields for legacy assets:
+
+```bash
+uv run python -m atlan_dxr_integration.metadata_migration backfill-files
+```
+
+Add `--dry-run` to inspect the changes without writing them back to Atlan. The command
+can be rerun safely; it only updates assets that still reference the legacy tags.
 
 ## Development
 

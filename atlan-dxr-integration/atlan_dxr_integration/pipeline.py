@@ -7,6 +7,7 @@ from typing import Optional
 
 from .atlan_uploader import AtlanUploadError, AtlanUploader
 from .config import Config
+from .custom_metadata import ensure_default_sets
 from .dataset_builder import DatasetBuilder
 from .datasource_ingestor import DatasourceIngestionCoordinator
 from .dxr_client import DXRClient
@@ -30,6 +31,7 @@ def run(config: Optional[Config] = None) -> None:
     LOGGER.info("Starting DXR → Atlan sync")
 
     uploader = AtlanUploader(config)
+    ensure_default_sets(config)
     rest_client = uploader.rest_client
     provisioner = uploader.provisioner
     tag_registry = TagRegistry(rest_client, namespace=config.atlan_tag_namespace)

@@ -56,6 +56,12 @@ class AtlanRESTClient:
             api_key=api_key or ATLAN_API_KEY,
         )
 
+    @property
+    def atlan_client(self) -> AtlanClient:
+        """Expose the underlying PyAtlan client for advanced interactions."""
+
+        return self._client
+
     # --------------------------------------------------------------------- Assets
     def upsert_assets(self, assets: List[Dict[str, Any]]) -> Dict[str, Any]:
         try:

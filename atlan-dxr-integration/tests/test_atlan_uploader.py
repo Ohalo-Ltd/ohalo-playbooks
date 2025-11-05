@@ -11,6 +11,57 @@ from atlan_dxr_integration.atlan_service import AtlanRequestError
 from atlan_dxr_integration.connection_utils import ConnectionHandle
 from atlan_dxr_integration.dataset_builder import DatasetRecord
 from atlan_dxr_integration.dxr_client import Classification
+from atlan_dxr_integration.file_asset_builder import BuiltFileAsset
+
+
+class _StubCustomMetadataCache:
+    def __init__(self):
+        self.map_name_to_id = {
+            "DXR File Metadata": "cm_dxr_file",
+            "DXR Classification Metadata": "cm_dxr_class",
+        }
+        self.map_attr_id_to_name = {
+            "cm_dxr_file": {
+                "attr_dlp": "DLP Labels",
+                "attr_annotators": "Annotators",
+                "attr_domains": "Annotator Domains",
+                "attr_entitlements": "Entitlements",
+                "attr_metadata": "Extracted Metadata",
+                "attr_categories": "Categories",
+            },
+            "cm_dxr_class": {
+                "attr_identifier": "DXR Classification ID",
+                "attr_type": "DXR Classification Type",
+                "attr_subtype": "DXR Classification Subtype",
+                "attr_count": "DXR File Count",
+                "attr_samples": "DXR Sample Files",
+                "attr_detail": "DXR Detail URL",
+                "attr_search": "DXR Search URL",
+            },
+        }
+        self.map_attr_name_to_id = {
+            set_id: {name: attr_id for attr_id, name in attrs.items()}
+            for set_id, attrs in self.map_attr_id_to_name.items()
+        }
+
+    def refresh_cache(self):
+        return None
+
+    def get_id_for_name(self, name: str) -> str:
+        return self.map_name_to_id[name]
+
+    def get_attr_id_for_name(self, set_name: str, attr_name: str) -> str:
+        set_id = self.get_id_for_name(set_name)
+        return self.map_attr_name_to_id[set_id][attr_name]
+
+    def is_attr_archived(self, attr_id: str) -> bool:
+        return False
+
+
+class _StubAtlanClient:
+    def __init__(self):
+        self.custom_metadata_cache = _StubCustomMetadataCache()
+        self.enum_cache = SimpleNamespace(get_by_name=lambda _name: None)
 
 
 class _StubRESTClient:
@@ -21,6 +72,7 @@ class _StubRESTClient:
         self.deleted: list[str] = []
         self.purged: list[str] = []
         self.typedefs = typedefs or {}
+        self.atlan_client = _StubAtlanClient()
 
     def upsert_assets(self, assets):
         self.calls.append(assets)
@@ -169,11 +221,21 @@ def test_upsert_files_delegates_to_rest(uploader):
         "classifications": [{"typeName": "valid"}],
     }
 
-    instance.upsert_files([asset])
+    built = BuiltFileAsset(
+        asset=asset,
+        custom_metadata={"DXR File Metadata": {"DLP Labels": ["PURVIEW :: Confidential"]}},
+    )
+
+    instance.upsert_files([built])
 
     assert rest.calls, "Expected file upsert call"
     entity = rest.calls[-1][0]
     assert entity["typeName"] == "File"
+    business_attributes = entity.get("businessAttributes", {})
+    cache = rest.atlan_client.custom_metadata_cache
+    set_id = cache.get_id_for_name("DXR File Metadata")
+    attr_id = cache.get_attr_id_for_name("DXR File Metadata", "DLP Labels")
+    assert business_attributes[set_id][attr_id] == ["PURVIEW :: Confidential"]
 
 
 def test_upsert_files_strips_deleted_classifications(uploader):
@@ -192,7 +254,9 @@ def test_upsert_files_strips_deleted_classifications(uploader):
         ],
     }
 
-    instance.upsert_files([asset])
+    built = BuiltFileAsset(asset=asset, custom_metadata={})
+
+    instance.upsert_files([built])
 
     payload = rest.calls[-1][0]
     classifications = payload.get("classifications", [])

@@ -6,8 +6,8 @@ import logging
 import math
 import re
 import unicodedata
-from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Set
 from urllib.parse import urljoin
 
 from .atlan_types import TagColor
@@ -18,10 +18,10 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class BuiltFileAsset:
-    """Result of building a file asset along with its tag handles."""
+    """Result of building a file asset along with its custom metadata payload."""
 
     asset: Dict[str, Any]
-    tag_handles: Tuple[TagHandle, ...]
+    custom_metadata: Dict[str, Dict[str, object]]
 
 
 class FileAssetFactory:
@@ -89,39 +89,48 @@ class FileAssetFactory:
         if owner:
             attrs["ownerUsers"] = sorted({owner})
 
-        tags = self._build_tags(payload, classification_tags)
-        handles = tuple(
-            sorted(tags.handles.values(), key=lambda h: h.display_name)
-        )
-        if handles:
-            attrs["assetTags"] = [handle.display_name for handle in handles]
+        handles, metadata = self._collect_metadata(payload, classification_tags)
+        ordered_handles = tuple(sorted(handles.values(), key=lambda h: h.display_name))
+        if ordered_handles:
+            attrs["assetTags"] = [handle.display_name for handle in ordered_handles]
             asset["classifications"] = [
                 {
                     "typeName": handle.hashed_name,
                 }
-                for handle in handles
+                for handle in ordered_handles
                 if handle.hashed_name and handle.hashed_name.upper() != "DELETED"
             ]
+        else:
+            attrs.pop("assetTags", None)
+            asset.pop("classifications", None)
 
         source_url = _derive_source_url(identifier, path, self._dxr_base_url)
         if source_url:
             attrs["sourceURL"] = source_url
 
-        return BuiltFileAsset(asset=asset, tag_handles=handles)
+        return BuiltFileAsset(asset=asset, custom_metadata=metadata)
 
-    def _build_tags(
+    def _collect_metadata(
         self,
         payload: Dict[str, object],
         classification_tags: Mapping[str, TagHandle],
-    ) -> "_TagAssignments":
-        tags = _TagAssignments()
+    ) -> tuple[Dict[str, TagHandle], Dict[str, Dict[str, object]]]:
+        handles: Dict[str, TagHandle] = {}
+        metadata_values: Dict[str, Set[str]] = {
+            "DLP Labels": set(),
+            "Annotators": set(),
+            "Annotator Domains": set(),
+            "Entitlements": set(),
+            "Extracted Metadata": set(),
+            "Categories": set(),
+        }
 
         def add_classification(identifier: Optional[str]) -> bool:
             if not identifier:
                 return False
             handle = classification_tags.get(identifier)
             if handle:
-                tags.register(handle)
+                handles[handle.slug] = handle
                 return True
             return False
 
@@ -137,13 +146,12 @@ class FileAssetFactory:
                         continue
                     name = _coalesce_str(item.get("name"))
                     if name:
-                        tags.register(
-                            self._tag_registry.ensure(
-                                slug_parts=["label", name],
-                                display_name=f"Label :: {name}",
-                                color=TagColor.GRAY,
-                            )
+                        handle = self._tag_registry.ensure(
+                            slug_parts=["label", name],
+                            display_name=f"Label :: {name}",
+                            color=TagColor.GRAY,
                         )
+                        handles[handle.slug] = handle
                 elif isinstance(item, str):
                     add_classification(_coalesce_str(item))
         elif isinstance(raw_labels, dict):
@@ -162,42 +170,20 @@ class FileAssetFactory:
             system = _coalesce_str(dlp.get("dlpSystem"))
             if not name:
                 continue
-            display = f"DLP :: {system or 'Unspecified'} :: {name}"
-            slug_parts = ["dlp", system or "unspecified", name]
-            tags.register(
-                self._tag_registry.ensure(
-                    slug_parts=slug_parts,
-                    display_name=display,
-                    color=TagColor.YELLOW,
-                )
-            )
+            display = f"{system or 'Unspecified'} :: {name}"
+            metadata_values["DLP Labels"].add(display)
 
         # Annotators
         for annotator in _extract_iterable_dict(payload.get("annotators")):
-            has_classification = add_classification(_coalesce_str(annotator.get("id")))
             name = _coalesce_str(annotator.get("name"))
-            if name and not has_classification:
-                tags.register(
-                    self._tag_registry.ensure(
-                        slug_parts=["annotator", name],
-                        display_name=f"Annotator :: {name}",
-                        color=TagColor.GREEN,
-                    )
-                )
+            if name:
+                metadata_values["Annotators"].add(name)
             domain = annotator.get("domain")
-            domain_id = None
             domain_name = None
             if isinstance(domain, dict):
-                domain_id = _coalesce_str(domain.get("id"))
                 domain_name = _coalesce_str(domain.get("name"))
-            if not add_classification(domain_id) and domain_name:
-                tags.register(
-                    self._tag_registry.ensure(
-                        slug_parts=["annotator-domain", domain_name],
-                        display_name=f"Annotator Domain :: {domain_name}",
-                        color=TagColor.GREEN,
-                    )
-                )
+            if domain_name:
+                metadata_values["Annotator Domains"].add(domain_name)
 
         # Entitlements
         entitlements = payload.get("entitlements")
@@ -206,40 +192,14 @@ class FileAssetFactory:
                 account_type = (_coalesce_str(principal.get("accountType")) or "UNKNOWN").upper()
                 identifier = _coalesce_str(principal.get("email"), principal.get("name"))
                 if identifier:
-                    tags.register(
-                        self._tag_registry.ensure(
-                            slug_parts=["entitlement", account_type, identifier],
-                            display_name=f"Entitlement :: {account_type.title()} :: {identifier}",
-                            color=TagColor.RED,
-                        )
-                    )
+                    metadata_values["Entitlements"].add(f"{account_type.title()} :: {identifier}")
 
         # Extracted metadata
         for item in _extract_iterable_dict(payload.get("extractedMetadata")):
-            if add_classification(_coalesce_str(item.get("id"))):
-                # Still capture rich value context when available.
-                name = _coalesce_str(item.get("name"))
-                value = _coalesce_str(item.get("value"))
-                if name and value:
-                    tags.register(
-                        self._tag_registry.ensure(
-                            slug_parts=["metadata", name, value],
-                            display_name=f"Metadata :: {name} = {value}",
-                            color=TagColor.GRAY,
-                        )
-                    )
-                continue
-
             name = _coalesce_str(item.get("name"))
             value = _coalesce_str(item.get("value"))
             if name and value:
-                tags.register(
-                    self._tag_registry.ensure(
-                        slug_parts=["metadata", name, value],
-                        display_name=f"Metadata :: {name} = {value}",
-                        color=TagColor.GRAY,
-                    )
-                )
+                metadata_values["Extracted Metadata"].add(f"{name} = {value}")
 
         # Categories
         raw_categories = payload.get("categories")
@@ -249,23 +209,19 @@ class FileAssetFactory:
             else:
                 name = _coalesce_str(category)
             if name:
-                tags.register(
-                    self._tag_registry.ensure(
-                        slug_parts=["category", name],
-                        display_name=f"Category :: {name}",
-                        color=TagColor.GRAY,
-                    )
-                )
+                metadata_values["Categories"].add(name)
 
-        return tags
+        file_metadata = {
+            attribute: sorted(values)
+            for attribute, values in metadata_values.items()
+            if values
+        }
 
+        metadata_map: Dict[str, Dict[str, object]] = {}
+        if file_metadata:
+            metadata_map["DXR File Metadata"] = file_metadata
 
-@dataclass
-class _TagAssignments:
-    handles: Dict[str, TagHandle] = field(default_factory=dict)
-
-    def register(self, handle: TagHandle) -> None:
-        self.handles[handle.slug] = handle
+        return handles, metadata_map
 
 
 def _extract_iterable_dict(value: object) -> Iterable[Dict[str, object]]:

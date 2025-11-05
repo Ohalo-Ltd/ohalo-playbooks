@@ -100,12 +100,21 @@ def test_factory_builds_enriched_file_asset():
     assert attrs["filePath"].startswith("Documents/Confidential Folder")
     assert attrs["sourceURL"] == "https://dxr.example.com/files/0KQUMpgBVo-c9i0dUnJ8"
 
-    tag_names = set(attrs["assetTags"])
+    tag_names = set(attrs.get("assetTags", []))
     assert "DXR :: Annotator :: Sales Data" in tag_names
-    assert "DXR :: DLP :: PURVIEW :: Confidential" in tag_names
+    assert len(tag_names) == 1
 
     classifications = asset.get("classifications", [])
     assert any(c.get("typeName") == classification_handle.hashed_name for c in classifications)
+
+    metadata = built.custom_metadata.get("DXR File Metadata")
+    assert metadata is not None
+    assert metadata["DLP Labels"] == ["PURVIEW :: Confidential"]
+    assert metadata["Annotators"] == ["Credit card"]
+    assert metadata["Annotator Domains"] == ["Financially Sensitive"]
+    assert metadata["Entitlements"] == ["User :: sarah@example.com"]
+    assert metadata["Extracted Metadata"] == ["Contract Type = Annual Service Agreement"]
+    assert metadata["Categories"] == ["Audit", "Finance"]
 
 
 def test_factory_defaults_to_txt_without_type():

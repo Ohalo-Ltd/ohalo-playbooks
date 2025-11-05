@@ -118,7 +118,7 @@ class DatasourceIngestionCoordinator:
         pending = list(context.assets)
 
         try:
-            self._uploader.upsert_files([item.asset for item in pending])
+            self._uploader.upsert_files(pending)
         except AtlanUploadError:
             raise
         finally:
