@@ -4,7 +4,7 @@ import argparse
 import logging
 import sys
 import json
-from typing import List
+from typing import List, Dict, Any
 
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
@@ -14,6 +14,45 @@ from .dxr_client import DataXRayClient
 
 logger = logging.getLogger(__name__)
 
+_JSON_FIELDS = (
+    "datasource",
+    "labels",
+    "extractedMetadata",
+    "entitlements",
+    "dlpLabels",
+    "annotators",
+    "owner",
+    "createdBy",
+    "modifiedBy",
+)
+
+
+def _stringify_complex(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value)
+        except TypeError:
+            return json.dumps(json.loads(json.dumps(value, default=str)))
+    return value
+
+
+def _project_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    row: Dict[str, Any] = {}
+    row["file_id"] = record.get("fileId")
+    row["file_name"] = record.get("fileName")
+    row["path"] = record.get("path")
+    row["size"] = record.get("size")
+    row["mime_type"] = record.get("mimeType")
+    row["created_at"] = record.get("createdAt")
+    row["last_modified_at"] = record.get("lastModifiedAt")
+    row["content_sha256"] = record.get("contentSha256")
+    row["scan_depth"] = record.get("scanDepth")
+    row["raw_json"] = json.dumps(record, default=str)
+    for field in _JSON_FIELDS:
+        row[f"{field}_json"] = _stringify_complex(record.get(field))
+    return row
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Snapshot Data X-Ray file metadata into Delta Lake")
@@ -133,9 +172,10 @@ def run_job(config: JobConfig) -> None:
         logger.info("/api/v1/files returned no rows; skipping Delta write")
         return
 
+    normalized_rows = [_project_record(rec) for rec in records]
+
     spark = SparkSession.builder.appName("dxr-file-metadata-daily").getOrCreate()
-    json_rdd = spark.sparkContext.parallelize([json.dumps(rec) for rec in records])
-    df = spark.read.json(json_rdd)
+    df = spark.createDataFrame(normalized_rows)
     df = df.withColumn("ingestion_date", F.lit(config.ingestion_date))
     df = df.withColumn("ingested_at", F.current_timestamp())
 
