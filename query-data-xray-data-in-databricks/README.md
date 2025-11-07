@@ -87,4 +87,5 @@ The dry run writes Parquet + Delta artifacts under the provided path. Replace th
 
 - `/api/v1/files` can emit large payloads. If you expect millions of rows, keep the cluster as a multi-node job cluster and consider adjusting `spark.databricks.io.cache.enabled` or writing intermediate JSONL chunks to DBFS before loading into Spark.
 - The Databricks job is idempotent per `ingestion_date`. Re-running for the same date overwrites only that partition thanks to Delta's `replaceWhere` option.
+- Unity Catalog does not allow `CREATE TABLE ... LOCATION 'dbfs:/...'` on serverless compute. If you point `DXR_DELTA_PATH` at a UC Volume, leave `DXR_DELTA_TABLE` unset (or register the table manually via UC external locations) to avoid `UC_FILE_SCHEME_FOR_TABLE_CREATION_NOT_SUPPORTED`.
 - Extend `query_data_xray/dxr_client.py` with other endpoints (e.g., `/api/v1/files/{id}`) if you need enriched metadata.
