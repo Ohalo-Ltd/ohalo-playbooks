@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
 from typing import List
 
 from pyspark.sql import SparkSession
@@ -92,6 +93,21 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _normalize_args(argv: List[str] | None) -> List[str]:
+    """Allow Databricks job parameters like DXR_BASE_URL without leading dashes."""
+    raw_args = list(argv) if argv is not None else sys.argv[1:]
+    normalized: List[str] = []
+    for token in raw_args:
+        if token.startswith("-") or not token:
+            normalized.append(token)
+            continue
+        if token.upper().startswith("DXR_"):
+            normalized.append(f"--{token.upper()}")
+        else:
+            normalized.append(token)
+    return normalized
+
+
 def _init_logging():
     if logging.getLogger().handlers:
         return
@@ -145,7 +161,8 @@ def main(argv: List[str] | None = None) -> None:
     _init_logging()
     parser = _build_parser()
     try:
-        config = load_config(parser.parse_args(argv))
+        normalized_args = _normalize_args(argv)
+        config = load_config(parser.parse_args(normalized_args))
     except ConfigError as exc:
         parser.error(str(exc))
     run_job(config)
