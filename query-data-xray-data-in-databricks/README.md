@@ -75,7 +75,7 @@ The dry run writes Parquet + Delta artifacts under the provided path. Replace th
 2. **Secrets + parameters**  
    Put the bearer token into a secret scope (e.g., `dxr/dxr-bearer-token`). The job will pass `--bearer-token {{secrets/dxr/dxr-bearer-token}}`. All other CLI flags can be specified as Databricks job parameters (see the JSON template below).
 3. **Create the job**  
-   - In the UI: *Workflows → Jobs → Create job → Task type = Python script*. Point `Python script path` at `/Repos/you/query-data-xray-data-in-databricks/scripts/run_daily_snapshot.py`. Add parameter pairs (`--delta-path`, `dbfs:/...`, etc.) and select the desired serverless compute tier.  
+   - In the UI: *Workflows → Jobs → Create job → Task type = Python script*. Point `Python script path` at `/Repos/you/query-data-xray-data-in-databricks/scripts/run_daily_snapshot.py`. Add parameter pairs (`--delta-path` or `DXR_DELTA_PATH`, `dbfs:/...`, etc.) and select the desired serverless compute tier.  
    - Via CLI: update `databricks/jobs/daily_file_metadata.json` by replacing `/Repos/REPLACE_WITH_REPO_OWNER/...` and `REPLACE_WITH_SERVERLESS_COMPUTE_KEY`, then run `databricks jobs create --json @databricks/jobs/daily_file_metadata.json`.
 4. **Run & schedule**  
    Kick off a run (`databricks jobs run-now --job-id <id>`) to validate connectivity, then enable the cron schedule (default 02:00 UTC) once the Delta path populates.

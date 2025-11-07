@@ -15,16 +15,68 @@ logger = logging.getLogger(__name__)
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Snapshot Data X-Ray file metadata into Delta Lake")
-    parser.add_argument("--base-url", help="Override DXR_BASE_URL")
-    parser.add_argument("--bearer-token", help="Override DXR_BEARER_TOKEN")
-    parser.add_argument("--delta-path", help="Override DXR_DELTA_PATH")
-    parser.add_argument("--delta-table", help="Unity Catalog table to refresh")
-    parser.add_argument("--ingestion-date", help="YYYY-MM-DD partition value to use")
-    parser.add_argument("--query", help="KQL filter applied to /api/v1/files")
-    parser.add_argument("--verify-ssl", help="Treat as boolean to control TLS verification")
-    parser.add_argument("--http-timeout", type=int, help="HTTP timeout in seconds")
-    parser.add_argument("--record-cap", type=int, help="Stop after N JSONL rows (testing)")
-    parser.add_argument("--user-agent", help="Custom user-agent header")
+    parser.add_argument(
+        "--base-url",
+        "--DXR_BASE_URL",
+        dest="base_url",
+        help="Override DXR_BASE_URL",
+    )
+    parser.add_argument(
+        "--bearer-token",
+        "--DXR_BEARER_TOKEN",
+        dest="bearer_token",
+        help="Override DXR_BEARER_TOKEN",
+    )
+    parser.add_argument(
+        "--delta-path",
+        "--DXR_DELTA_PATH",
+        dest="delta_path",
+        help="Override DXR_DELTA_PATH",
+    )
+    parser.add_argument(
+        "--delta-table",
+        "--DXR_DELTA_TABLE",
+        dest="delta_table",
+        help="Unity Catalog table to refresh",
+    )
+    parser.add_argument(
+        "--ingestion-date",
+        "--DXR_INGESTION_DATE",
+        dest="ingestion_date",
+        help="YYYY-MM-DD partition value to use",
+    )
+    parser.add_argument(
+        "--query",
+        "--DXR_QUERY",
+        dest="query",
+        help="KQL filter applied to /api/v1/files",
+    )
+    parser.add_argument(
+        "--verify-ssl",
+        "--DXR_VERIFY_SSL",
+        dest="verify_ssl",
+        help="Treat as boolean to control TLS verification",
+    )
+    parser.add_argument(
+        "--http-timeout",
+        "--DXR_HTTP_TIMEOUT",
+        dest="http_timeout",
+        type=int,
+        help="HTTP timeout in seconds",
+    )
+    parser.add_argument(
+        "--record-cap",
+        "--DXR_RECORD_CAP",
+        dest="record_cap",
+        type=int,
+        help="Stop after N JSONL rows (testing)",
+    )
+    parser.add_argument(
+        "--user-agent",
+        "--DXR_USER_AGENT",
+        dest="user_agent",
+        help="Custom user-agent header",
+    )
     return parser
 
 
