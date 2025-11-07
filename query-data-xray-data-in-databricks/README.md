@@ -76,7 +76,12 @@ The dry run writes Parquet + Delta artifacts under the provided path. Replace th
 1. **Sync or upload the repo**  
    In *Repos → Add Repo*, point Databricks at your GitHub fork so that the scripts live under a path such as `/Repos/you/query-data-xray-data-in-databricks`. Serverless compute automatically adds the repo root to `PYTHONPATH`, and `scripts/run_daily_snapshot.py` adds the `src/` folder so imports resolve without installing wheels.
 2. **Secrets + parameters**  
-   Put the bearer token into a secret scope (e.g., `dxr/dxr-bearer-token`). The job will pass `--bearer-token {{secrets/dxr/dxr-bearer-token}}`. All other CLI flags can be specified as Databricks job parameters (see the JSON template below).
+   Store the DXR JWE token in the Databricks Secrets manager and reference it via `DXR_TOKEN_SCOPE` / `DXR_TOKEN_KEY`. For example:
+   ```bash
+   databricks secrets create-scope --scope dxr
+   databricks secrets put --scope dxr --key bearer-token  # paste the JWE token
+   ```
+   Then set job parameters (`DXR_TOKEN_SCOPE = dxr`, `DXR_TOKEN_KEY = bearer-token`). The script will call `dbutils.secrets.get(scope=DXR_TOKEN_SCOPE, key=DXR_TOKEN_KEY)` at runtime. All other CLI flags can be specified as Databricks job parameters (see the JSON template below).
 3. **Create the job**  
    - In the UI: *Workflows → Jobs → Create job → Task type = Python script*. Point `Python script path` at `/Repos/you/query-data-xray-data-in-databricks/scripts/run_daily_snapshot.py`. Add parameter pairs (for example: `DXR_BASE_URL`, `https://...`; `DXR_TOKEN_SCOPE`, `dxr`; `DXR_TOKEN_KEY`, `dxr-bearer-token`; `DXR_DELTA_PATH`, `dbfs:/Volumes/workspace/dxr-data/dxr-data-volume/datasets/file_metadata`) and select the desired serverless compute tier.  
    - Via CLI: update `databricks/jobs/daily_file_metadata.json` by replacing `/Repos/REPLACE_WITH_REPO_OWNER/...` and `REPLACE_WITH_SERVERLESS_COMPUTE_KEY`, then run `databricks jobs create --json @databricks/jobs/daily_file_metadata.json`.
