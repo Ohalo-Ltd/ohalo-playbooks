@@ -36,7 +36,7 @@ query-data-xray-data-in-databricks/
 | `DXR_TOKEN_SCOPE` | ✅ (Databricks) | — | Databricks secret scope that stores the DXR bearer token |
 | `DXR_TOKEN_KEY` | ✅ (Databricks) | — | Databricks secret key within the scope that stores the DXR bearer token |
 | `DXR_QUERY` |  | — | Optional KQL-like filter that `/api/v1/files` accepts |
-| `DXR_DELTA_PATH` | ✅ | — | Delta Lake location such as `dbfs:/mnt/dxr/datasets/file_metadata` |
+| `DXR_DELTA_PATH` | ✅ | — | Delta Lake location such as `dbfs:/Volumes/workspace/dxr-data/dxr-data-volume/datasets/file_metadata` |
 | `DXR_DELTA_TABLE` |  | — | Fully qualified Unity Catalog table name to register/refresh |
 | `DXR_VERIFY_SSL` |  | `true` | Set to `false` while targeting non-public DXR endpoints |
 | `DXR_HTTP_TIMEOUT` |  | `120` | Per-request timeout in seconds |
@@ -78,7 +78,7 @@ The dry run writes Parquet + Delta artifacts under the provided path. Replace th
 2. **Secrets + parameters**  
    Put the bearer token into a secret scope (e.g., `dxr/dxr-bearer-token`). The job will pass `--bearer-token {{secrets/dxr/dxr-bearer-token}}`. All other CLI flags can be specified as Databricks job parameters (see the JSON template below).
 3. **Create the job**  
-   - In the UI: *Workflows → Jobs → Create job → Task type = Python script*. Point `Python script path` at `/Repos/you/query-data-xray-data-in-databricks/scripts/run_daily_snapshot.py`. Add parameter pairs (for example: `DXR_BASE_URL`, `https://...`; `DXR_TOKEN_SCOPE`, `dxr`; `DXR_TOKEN_KEY`, `dxr-bearer-token`; `DXR_DELTA_PATH`, `dbfs:/...`) and select the desired serverless compute tier.  
+   - In the UI: *Workflows → Jobs → Create job → Task type = Python script*. Point `Python script path` at `/Repos/you/query-data-xray-data-in-databricks/scripts/run_daily_snapshot.py`. Add parameter pairs (for example: `DXR_BASE_URL`, `https://...`; `DXR_TOKEN_SCOPE`, `dxr`; `DXR_TOKEN_KEY`, `dxr-bearer-token`; `DXR_DELTA_PATH`, `dbfs:/Volumes/workspace/dxr-data/dxr-data-volume/datasets/file_metadata`) and select the desired serverless compute tier.  
    - Via CLI: update `databricks/jobs/daily_file_metadata.json` by replacing `/Repos/REPLACE_WITH_REPO_OWNER/...` and `REPLACE_WITH_SERVERLESS_COMPUTE_KEY`, then run `databricks jobs create --json @databricks/jobs/daily_file_metadata.json`.
 4. **Run & schedule**  
    Kick off a run (`databricks jobs run-now --job-id <id>`) to validate connectivity, then enable the cron schedule (default 02:00 UTC) once the Delta path populates.

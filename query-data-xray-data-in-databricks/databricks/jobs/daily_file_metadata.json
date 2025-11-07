@@ -19,7 +19,7 @@
           "--DXR_TOKEN_KEY",
           "dxr-bearer-token",
           "--DXR_DELTA_PATH",
-          "dbfs:/mnt/dxr/datasets/file_metadata",
+          "dbfs:/Volumes/workspace/dxr-data/dxr-data-volume/datasets/file_metadata",
           "--DXR_DELTA_TABLE",
           "governance.dxr_file_metadata"
         ],
