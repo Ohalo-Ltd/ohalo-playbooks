@@ -179,21 +179,26 @@ def run_job(config: JobConfig) -> None:
     df = df.withColumn("ingestion_date", F.lit(config.ingestion_date))
     df = df.withColumn("ingested_at", F.current_timestamp())
 
-    logger.info("Writing %s rows to %s", len(records), config.delta_path)
-    (
-        df.write.format("delta")
-        .mode("overwrite")
-        .partitionBy("ingestion_date")
-        .option("replaceWhere", f"ingestion_date = '{config.ingestion_date}'")
-        .save(config.delta_path)
-    )
-
     if config.delta_table:
-        spark.sql(
-            f"CREATE TABLE IF NOT EXISTS `{config.delta_table}` USING DELTA LOCATION '{config.delta_path}'"
+        target_table = f"`{config.delta_table}`"
+        logger.info("Writing %s rows to Unity Catalog table %s", len(records), target_table)
+        (
+            df.write.format("delta")
+            .mode("overwrite")
+            .partitionBy("ingestion_date")
+            .option("replaceWhere", f"ingestion_date = '{config.ingestion_date}'")
+            .saveAsTable(config.delta_table)
         )
-        spark.sql(f"REFRESH TABLE `{config.delta_table}`")
-        logger.info("Table %s refreshed", config.delta_table)
+        logger.info("Table %s refreshed via saveAsTable", config.delta_table)
+    else:
+        logger.info("Writing %s rows to %s", len(records), config.delta_path)
+        (
+            df.write.format("delta")
+            .mode("overwrite")
+            .partitionBy("ingestion_date")
+            .option("replaceWhere", f"ingestion_date = '{config.ingestion_date}'")
+            .save(config.delta_path)
+        )
 
     logger.info("Job completed for %s", config.ingestion_date)
     spark.stop()
