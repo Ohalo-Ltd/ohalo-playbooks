@@ -186,18 +186,18 @@ def run_job(config: JobConfig) -> None:
     df = df.withColumn("ingestion_date", F.lit(config.ingestion_date))
     df = df.withColumn("ingested_at", F.current_timestamp())
 
-    logger.info("Writing %s rows to %s", len(records), config.delta_path)
+    logger.info("Writing %s rows to %s", len(records), config.delta_location)
     (
         df.write.format("delta")
         .mode("overwrite")
         .partitionBy("ingestion_date")
         .option("replaceWhere", f"ingestion_date = '{config.ingestion_date}'")
-        .save(config.delta_path)
+        .save(config.delta_location)
     )
 
     if config.delta_table:
         quoted_table = _quote_table_identifier(config.delta_table)
-        logger.info("Registering Delta path %s as table %s", config.delta_path, quoted_table)
+        logger.info("Registering Delta path %s as table %s", config.delta_location, quoted_table)
         spark.sql(
             f"CREATE TABLE IF NOT EXISTS {quoted_table} USING DELTA LOCATION '{config.delta_location}'"
         )
