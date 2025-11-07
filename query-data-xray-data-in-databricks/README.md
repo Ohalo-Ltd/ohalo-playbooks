@@ -37,7 +37,7 @@ query-data-xray-data-in-databricks/
 | `DXR_TOKEN_KEY` | ✅ (Databricks) | — | Databricks secret key within the scope that stores the DXR bearer token |
 | `DXR_QUERY` |  | — | Optional KQL-like filter that `/api/v1/files` accepts |
 | `DXR_DELTA_PATH` | ✅ | — | Delta Lake location such as `dbfs:/Volumes/workspace/dxr-data/dxr-data-volume/datasets/file_metadata` |
-| `DXR_DELTA_TABLE` |  | — | Fully qualified Unity Catalog table name to register/refresh |
+| `DXR_DELTA_TABLE` |  | — | Fully qualified Unity Catalog table name (e.g., `workspace.dxr_data.file_metadata`) to register/refresh |
 | `DXR_VERIFY_SSL` |  | `true` | Set to `false` while targeting non-public DXR endpoints |
 | `DXR_HTTP_TIMEOUT` |  | `120` | Per-request timeout in seconds |
 | `DXR_RECORD_CAP` |  | — | If set, stops streaming after *N* JSONL rows (handy for tests) |
