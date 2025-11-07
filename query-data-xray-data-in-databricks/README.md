@@ -32,7 +32,9 @@ query-data-xray-data-in-databricks/
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
 | `DXR_BASE_URL` | ✅ | — | Base URL for the Data X-Ray tenant, e.g. `https://app.dataxray.com` |
-| `DXR_BEARER_TOKEN` | ✅ | — | JWE bearer token (store in a Databricks secret scope and map to this env var) |
+| `DXR_BEARER_TOKEN` | ✅\* | — | JWE bearer token for local runs. Skip this when `DXR_TOKEN_SCOPE` + `DXR_TOKEN_KEY` are provided. |
+| `DXR_TOKEN_SCOPE` | ✅ (Databricks) | — | Databricks secret scope that stores the DXR bearer token |
+| `DXR_TOKEN_KEY` | ✅ (Databricks) | — | Databricks secret key within the scope that stores the DXR bearer token |
 | `DXR_QUERY` |  | — | Optional KQL-like filter that `/api/v1/files` accepts |
 | `DXR_DELTA_PATH` | ✅ | — | Delta Lake location such as `dbfs:/mnt/dxr/datasets/file_metadata` |
 | `DXR_DELTA_TABLE` |  | — | Fully qualified Unity Catalog table name to register/refresh |
@@ -42,8 +44,9 @@ query-data-xray-data-in-databricks/
 | `DXR_USER_AGENT` |  | `query-data-xray-data-in-databricks/<version>` | Custom user-agent header |
 
 CLI flags (see `python -m query_data_xray.job --help`) can override the same values at runtime.
+`*` Provide `DXR_BEARER_TOKEN` for local/dev runs. In Databricks, prefer `DXR_TOKEN_SCOPE` + `DXR_TOKEN_KEY` so the job fetches the secret from the workspace.
 
-Copy `.env.example` to `.env` and fill in your tenant-specific values before running locally. The CLI automatically loads `.env` via `python-dotenv`, so placing the file at the project root is enough. The files API path is fixed at `/api/v1/files` per the DXR spec, so there is no environment knob for it.
+Copy `.env.example` to `.env` and fill in your tenant-specific values before running locally. The CLI automatically loads `.env` via `python-dotenv`, so placing the file at the project root is enough. On Databricks set `DXR_TOKEN_SCOPE` and `DXR_TOKEN_KEY` so the script can fetch the bearer token from `dbutils.secrets`; the files API path is fixed at `/api/v1/files`.
 
 Install dependencies with your preferred tool; for example using `uv`:
 
@@ -75,7 +78,7 @@ The dry run writes Parquet + Delta artifacts under the provided path. Replace th
 2. **Secrets + parameters**  
    Put the bearer token into a secret scope (e.g., `dxr/dxr-bearer-token`). The job will pass `--bearer-token {{secrets/dxr/dxr-bearer-token}}`. All other CLI flags can be specified as Databricks job parameters (see the JSON template below).
 3. **Create the job**  
-   - In the UI: *Workflows → Jobs → Create job → Task type = Python script*. Point `Python script path` at `/Repos/you/query-data-xray-data-in-databricks/scripts/run_daily_snapshot.py`. Add parameter pairs (`--delta-path` or `DXR_DELTA_PATH`, `dbfs:/...`, etc.) and select the desired serverless compute tier.  
+   - In the UI: *Workflows → Jobs → Create job → Task type = Python script*. Point `Python script path` at `/Repos/you/query-data-xray-data-in-databricks/scripts/run_daily_snapshot.py`. Add parameter pairs (for example: `DXR_BASE_URL`, `https://...`; `DXR_TOKEN_SCOPE`, `dxr`; `DXR_TOKEN_KEY`, `dxr-bearer-token`; `DXR_DELTA_PATH`, `dbfs:/...`) and select the desired serverless compute tier.  
    - Via CLI: update `databricks/jobs/daily_file_metadata.json` by replacing `/Repos/REPLACE_WITH_REPO_OWNER/...` and `REPLACE_WITH_SERVERLESS_COMPUTE_KEY`, then run `databricks jobs create --json @databricks/jobs/daily_file_metadata.json`.
 4. **Run & schedule**  
    Kick off a run (`databricks jobs run-now --job-id <id>`) to validate connectivity, then enable the cron schedule (default 02:00 UTC) once the Delta path populates.

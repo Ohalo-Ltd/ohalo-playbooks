@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from datetime import date
 from typing import Optional
@@ -47,6 +48,35 @@ class ConfigError(ValueError):
     """Raised when required configuration is missing."""
 
 
+def _get_dbutils():
+    """Best-effort access to Databricks dbutils."""
+    for namespace in (globals(), vars(sys.modules.get("__main__")) if "__main__" in sys.modules else {}):
+        dbutils = namespace.get("dbutils") if isinstance(namespace, dict) else None
+        if dbutils:
+            return dbutils
+    try:  # pragma: no cover - requires Databricks runtime
+        from pyspark.dbutils import DBUtils  # type: ignore
+        from pyspark.sql import SparkSession  # type: ignore
+
+        spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
+        return DBUtils(spark)
+    except Exception:
+        return None
+
+
+def _get_token_from_secrets(scope: str, key: str) -> str:
+    dbutils = _get_dbutils()
+    if not dbutils:
+        raise ConfigError(
+            "DXR_TOKEN_SCOPE/KEY provided but Databricks dbutils is unavailable; "
+            "ensure this job runs inside Databricks or provide DXR_BEARER_TOKEN directly."
+        )
+    try:
+        return dbutils.secrets.get(scope=scope, key=key)
+    except Exception as exc:  # pragma: no cover - Databricks-specific
+        raise ConfigError(f"Failed to fetch DXR bearer token from scope='{scope}', key='{key}': {exc}") from exc
+
+
 def load_config(args) -> JobConfig:
     load_dotenv()
     env = os.environ
@@ -54,9 +84,18 @@ def load_config(args) -> JobConfig:
     if not base_url:
         raise ConfigError("DXR_BASE_URL (or --base-url) is required")
 
+    token_scope = (args.token_scope or env.get("DXR_TOKEN_SCOPE") or "").strip()
+    token_key = (args.token_key or env.get("DXR_TOKEN_KEY") or "").strip()
     bearer_token = (args.bearer_token or env.get("DXR_BEARER_TOKEN") or env.get("DXR_JWE_TOKEN") or "").strip()
+    if not bearer_token and token_scope and token_key:
+        bearer_token = _get_token_from_secrets(token_scope, token_key).strip()
+
     if not bearer_token:
-        raise ConfigError("DXR_BEARER_TOKEN (or --bearer-token) is required")
+        raise ConfigError(
+            "DXR_BEARER_TOKEN (or --bearer-token) is required; alternatively provide DXR_TOKEN_SCOPE and DXR_TOKEN_KEY."
+        )
+    if (token_scope and not token_key) or (token_key and not token_scope):
+        raise ConfigError("DXR_TOKEN_SCOPE and DXR_TOKEN_KEY must be provided together.")
 
     delta_path = (args.delta_path or env.get("DXR_DELTA_PATH") or "").strip()
     if not delta_path:

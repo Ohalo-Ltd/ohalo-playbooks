@@ -28,6 +28,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override DXR_BEARER_TOKEN",
     )
     parser.add_argument(
+        "--token-scope",
+        "--DXR_TOKEN_SCOPE",
+        dest="token_scope",
+        help="Databricks secret scope to fetch DXR bearer token from",
+    )
+    parser.add_argument(
+        "--token-key",
+        "--DXR_TOKEN_KEY",
+        dest="token_key",
+        help="Databricks secret key to fetch DXR bearer token from",
+    )
+    parser.add_argument(
         "--delta-path",
         "--DXR_DELTA_PATH",
         dest="delta_path",
