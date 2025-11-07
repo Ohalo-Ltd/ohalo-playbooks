@@ -35,7 +35,8 @@ def _env_int(value: Optional[str], default: Optional[int] = None) -> Optional[in
 class JobConfig:
     base_url: str
     bearer_token: str
-    delta_path: str
+    delta_path: str  # original path (may include scheme)
+    delta_location: str  # UC-friendly path used in CREATE TABLE ... LOCATION
     ingestion_date: str
     query: Optional[str]
     verify_ssl: bool
@@ -77,7 +78,7 @@ def _get_token_from_secrets(scope: str, key: str) -> str:
         raise ConfigError(f"Failed to fetch DXR bearer token from scope='{scope}', key='{key}': {exc}") from exc
 
 
-def _normalize_delta_path(path: str) -> str:
+def _normalize_delta_location(path: str) -> str:
     if path.startswith("dbfs:/"):
         stripped = path[len("dbfs:") :]
         if not stripped.startswith("/"):
@@ -106,10 +107,10 @@ def load_config(args) -> JobConfig:
     if (token_scope and not token_key) or (token_key and not token_scope):
         raise ConfigError("DXR_TOKEN_SCOPE and DXR_TOKEN_KEY must be provided together.")
 
-    delta_path_raw = (args.delta_path or env.get("DXR_DELTA_PATH") or "").strip()
-    delta_path = _normalize_delta_path(delta_path_raw)
+    delta_path = (args.delta_path or env.get("DXR_DELTA_PATH") or "").strip()
     if not delta_path:
         raise ConfigError("DXR_DELTA_PATH (or --delta-path) is required")
+    delta_location = _normalize_delta_location(delta_path)
 
     ingestion_date = (args.ingestion_date or env.get("DXR_INGESTION_DATE") or date.today().isoformat()).strip()
     query = args.query or env.get("DXR_QUERY") or None
@@ -123,6 +124,7 @@ def load_config(args) -> JobConfig:
         base_url=base_url,
         bearer_token=bearer_token,
         delta_path=delta_path,
+        delta_location=delta_location,
         ingestion_date=ingestion_date,
         query=query,
         verify_ssl=verify_ssl,

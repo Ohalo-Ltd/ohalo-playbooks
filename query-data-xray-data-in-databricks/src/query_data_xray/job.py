@@ -199,7 +199,7 @@ def run_job(config: JobConfig) -> None:
         quoted_table = _quote_table_identifier(config.delta_table)
         logger.info("Registering Delta path %s as table %s", config.delta_path, quoted_table)
         spark.sql(
-            f"CREATE TABLE IF NOT EXISTS {quoted_table} USING DELTA LOCATION '{config.delta_path}'"
+            f"CREATE TABLE IF NOT EXISTS {quoted_table} USING DELTA LOCATION '{config.delta_location}'"
         )
         spark.sql(f"REFRESH TABLE {quoted_table}")
         logger.info("Table %s refreshed", quoted_table)
