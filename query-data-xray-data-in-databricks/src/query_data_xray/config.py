@@ -77,6 +77,15 @@ def _get_token_from_secrets(scope: str, key: str) -> str:
         raise ConfigError(f"Failed to fetch DXR bearer token from scope='{scope}', key='{key}': {exc}") from exc
 
 
+def _normalize_delta_path(path: str) -> str:
+    if path.startswith("dbfs:/"):
+        stripped = path[len("dbfs:") :]
+        if not stripped.startswith("/"):
+            stripped = "/" + stripped
+        return stripped
+    return path
+
+
 def load_config(args) -> JobConfig:
     load_dotenv()
     env = os.environ
@@ -97,7 +106,8 @@ def load_config(args) -> JobConfig:
     if (token_scope and not token_key) or (token_key and not token_scope):
         raise ConfigError("DXR_TOKEN_SCOPE and DXR_TOKEN_KEY must be provided together.")
 
-    delta_path = (args.delta_path or env.get("DXR_DELTA_PATH") or "").strip()
+    delta_path_raw = (args.delta_path or env.get("DXR_DELTA_PATH") or "").strip()
+    delta_path = _normalize_delta_path(delta_path_raw)
     if not delta_path:
         raise ConfigError("DXR_DELTA_PATH (or --delta-path) is required")
 
