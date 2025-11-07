@@ -12,15 +12,15 @@
       "spark_python_task": {
         "python_file": "/Repos/REPLACE_WITH_REPO_OWNER/query-data-xray-data-in-databricks/scripts/run_daily_snapshot.py",
         "parameters": [
-          "DXR_BASE_URL",
+          "--DXR_BASE_URL",
           "https://demo.dataxray.io",
-          "DXR_TOKEN_SCOPE",
+          "--DXR_TOKEN_SCOPE",
           "dxr",
-          "DXR_TOKEN_KEY",
+          "--DXR_TOKEN_KEY",
           "dxr-bearer-token",
-          "DXR_DELTA_PATH",
+          "--DXR_DELTA_PATH",
           "dbfs:/mnt/dxr/datasets/file_metadata",
-          "DXR_DELTA_TABLE",
+          "--DXR_DELTA_TABLE",
           "governance.dxr_file_metadata"
         ],
         "source": "WORKSPACE"
