@@ -24,6 +24,9 @@ This repository currently includes the following playbooks:
 - **[`s3-etl-quarantine`](./s3-etl-quarantine/)**  
   Pulumi-managed guardrail that watches S3 staging zones, classifies files with Data X-Ray, and automatically quarantines risky payloads feeding unstructured ETL pipelines. The [README](./s3-etl-quarantine/README.md) covers prerequisites, deployment, and cleanup steps.
 
+- **[`query-data-xray-data-in-databricks`](./query-data-xray-data-in-databricks/)**  
+  Databricks workflow that streams Data X-Ray `/api/v1/files` JSONL payloads into a Delta Lake table, delivering a daily snapshot of every scanned file for downstream governance analytics.
+
 ## Getting Started
 
 Each playbook is self-contained in its own directory and includes a dedicated `README.md` with all the information you need to configure and run it.
