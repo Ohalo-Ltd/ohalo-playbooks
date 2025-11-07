@@ -9,7 +9,7 @@
   "tasks": [
     {
       "task_key": "dxr_file_metadata_snapshot",
-      "python_task": {
+      "spark_python_task": {
         "python_file": "/Repos/REPLACE_WITH_REPO_OWNER/query-data-xray-data-in-databricks/scripts/run_daily_snapshot.py",
         "parameters": [
           "--base-url",
