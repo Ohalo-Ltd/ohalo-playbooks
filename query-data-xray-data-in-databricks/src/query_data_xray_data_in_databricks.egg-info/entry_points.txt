@@ -1,0 +1,2 @@
+[console_scripts]
+dxr-file-metadata-job = query_data_xray.job:main

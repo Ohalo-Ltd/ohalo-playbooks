@@ -1,0 +1,34 @@
+{
+  "name": "dxr-file-metadata-daily",
+  "schedule": {
+    "quartz_cron_expression": "0 0 2 * * ?",
+    "timezone_id": "UTC",
+    "pause_status": "UNPAUSED"
+  },
+  "max_concurrent_runs": 1,
+  "tasks": [
+    {
+      "task_key": "dxr_file_metadata_snapshot",
+      "python_wheel_task": {
+        "package_name": "query-data-xray-data-in-databricks",
+        "entry_point": "dxr-file-metadata-job",
+        "named_parameters": {
+          "--base-url": "https://demo.dataxray.io",
+          "--bearer-token": "{{secrets/dxr/bearer-token}}",
+          "--delta-path": "dbfs:/mnt/dxr/datasets/file_metadata",
+          "--delta-table": "governance.dxr_file_metadata"
+        },
+        "library_references": [
+          {
+            "whl": "dbfs:/Volumes/workspace/dxr-data/dxr-data-volume/query_data_xray_data_in_databricks-0.1.0-py3-none-any.whl"
+          }
+        ]
+      },
+      "compute_key": "378778894328346",
+      "timeout_seconds": 7200,
+      "max_retries": 1,
+      "min_retry_interval_millis": 300000,
+      "retry_on_timeout": true
+    }
+  ]
+}

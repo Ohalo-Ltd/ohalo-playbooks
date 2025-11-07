@@ -1,0 +1,106 @@
+Metadata-Version: 2.4
+Name: query-data-xray-data-in-databricks
+Version: 0.1.0
+Summary: Databricks job that snapshots Data X-Ray file metadata into Delta Lake
+Author: Ohalo
+License: Proprietary
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: requests<3,>=2.31.0
+Requires-Dist: pyspark<4,>=3.5.0
+Requires-Dist: python-dotenv<2,>=1.0.0
+Provides-Extra: dev
+Requires-Dist: pytest<8,>=7.4; extra == "dev"
+Requires-Dist: build>=1.2.1; extra == "dev"
+Requires-Dist: pyproject-hooks>=1.0.0; extra == "dev"
+Requires-Dist: packaging>=23.0; extra == "dev"
+
+# query-data-xray-data-in-databricks
+
+Daily Databricks workflow that calls Data X-Ray's public API, streams `/api/v1/files` JSONL payloads, and snapshots the metadata into a Delta table so downstream governance jobs can query the state of every scanned file per day.
+
+## How it works
+
+1. A lightweight Python job (`query_data_xray.job:main`) authenticates with a JWE bearer token and calls `GET /api/v1/files`.
+2. Responses are read as newline-delimited JSON to avoid buffering entire payloads in memory.
+3. The driver converts the batch to a Spark DataFrame, tags it with an `ingestion_date`, and writes the result to an append-only Delta table partitioned by day.
+4. (Optional) The job can auto-create or update a Unity‑managed table pointing at the Delta path for easy discovery in catalogs.
+
+## Repository layout
+
+```
+query-data-xray-data-in-databricks/
+├── databricks/
+│   └── jobs/
+│       └── daily_file_metadata.json   # Sample Databricks Workflow definition
+├── pyproject.toml                     # Build + dependency metadata
+├── README.md                          # You are here
+└── src/query_data_xray/
+    ├── __init__.py
+    ├── config.py                      # Env/CLI driven configuration loader
+    ├── dxr_client.py                  # Thin HTTP client around Data X-Ray
+    └── job.py                         # Spark entrypoint that writes to Delta
+```
+
+## Configuration
+
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `DXR_BASE_URL` | ✅ | — | Base URL for the Data X-Ray tenant, e.g. `https://app.dataxray.com` |
+| `DXR_BEARER_TOKEN` | ✅ | — | JWE bearer token (store in a Databricks secret scope and map to this env var) |
+| `DXR_QUERY` |  | — | Optional KQL-like filter that `/api/v1/files` accepts |
+| `DXR_DELTA_PATH` | ✅ | — | Delta Lake location such as `dbfs:/mnt/dxr/datasets/file_metadata` |
+| `DXR_DELTA_TABLE` |  | — | Fully qualified Unity Catalog table name to register/refresh |
+| `DXR_VERIFY_SSL` |  | `true` | Set to `false` while targeting non-public DXR endpoints |
+| `DXR_HTTP_TIMEOUT` |  | `120` | Per-request timeout in seconds |
+| `DXR_RECORD_CAP` |  | — | If set, stops streaming after *N* JSONL rows (handy for tests) |
+| `DXR_USER_AGENT` |  | `query-data-xray-data-in-databricks/<version>` | Custom user-agent header |
+
+CLI flags (see `python -m query_data_xray.job --help`) can override the same values at runtime.
+
+Copy `.env.example` to `.env` and fill in your tenant-specific values before running locally. The CLI automatically loads `.env` via `python-dotenv`, so placing the file at the project root is enough. The files API path is fixed at `/api/v1/files` per the DXR spec, so there is no environment knob for it.
+
+Install dependencies with your preferred tool; for example using `uv`:
+
+```bash
+uv pip sync requirements.txt             # runtime deps
+uv pip sync requirements-dev.txt        # optional dev deps (build/pytest)
+```
+
+## Local dry run
+
+You can run the job from your laptop using a local Spark install or Databricks Connect:
+
+```bash
+cd query-data-xray-data-in-databricks
+python -m venv .venv && source .venv/bin/activate
+pip install -e .
+export DXR_BASE_URL="https://app.dataxray.com"
+export DXR_BEARER_TOKEN="$(databricks secrets get --scope dxr --key bearer-token)"
+export DXR_DELTA_PATH="/tmp/dxr_file_metadata"
+python -m query_data_xray.job --ingestion-date 2024-01-01 --record-cap 100
+```
+
+The dry run writes Parquet + Delta artifacts under the provided path. Replace the token export with your own secret management process.
+
+## Databricks job deployment
+
+1. **Build & publish the wheel**
+   ```bash
+   cd query-data-xray-data-in-databricks
+   python -m build  # creates dist/*.whl
+   databricks fs cp dist/query_data_xray_data_in_databricks-0.1.0-py3-none-any.whl \
+     dbfs:/FileStore/wheels/query_data_xray_data_in_databricks-0.1.0.whl
+   ```
+2. **Update `databricks/jobs/daily_file_metadata.json`** with your workspace URL, cluster definition (or job cluster), Delta path, and secret scope reference for `DXR_BEARER_TOKEN`.
+3. **Create the workflow**
+   ```bash
+   databricks jobs create --json-file databricks/jobs/daily_file_metadata.json
+   ```
+4. **Schedule** the job in the Databricks UI (e.g., daily at 02:00 UTC). The workflow uses the `python_wheel_task` entry point `dxr-file-metadata-job` which maps to `query_data_xray.job:main`.
+
+## Notes
+
+- `/api/v1/files` can emit large payloads. If you expect millions of rows, keep the cluster as a multi-node job cluster and consider adjusting `spark.databricks.io.cache.enabled` or writing intermediate JSONL chunks to DBFS before loading into Spark.
+- The Databricks job is idempotent per `ingestion_date`. Re-running for the same date overwrites only that partition thanks to Delta's `replaceWhere` option.
+- Extend `query_data_xray/dxr_client.py` with other endpoints (e.g., `/api/v1/files/{id}`) if you need enriched metadata.
