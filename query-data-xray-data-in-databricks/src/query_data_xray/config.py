@@ -5,7 +5,11 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Optional
 
-from dotenv import load_dotenv
+try:  # pragma: no cover - optional dependency on Databricks
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover
+    def load_dotenv(*args, **kwargs):
+        return False
 
 DEFAULT_USER_AGENT = "query-data-xray-data-in-databricks/0.1.0"
 DEFAULT_TIMEOUT = 120

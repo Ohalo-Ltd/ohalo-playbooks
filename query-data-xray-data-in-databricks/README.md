@@ -18,6 +18,8 @@ query-data-xray-data-in-databricks/
 │       └── daily_file_metadata.json   # Sample Databricks Workflow definition
 ├── pyproject.toml                     # Build + dependency metadata
 ├── README.md                          # You are here
+├── scripts/
+│   └── run_daily_snapshot.py          # Entry script used by Databricks Jobs
 └── src/query_data_xray/
     ├── __init__.py
     ├── config.py                      # Env/CLI driven configuration loader
@@ -66,21 +68,17 @@ python -m query_data_xray.job --ingestion-date 2024-01-01 --record-cap 100
 
 The dry run writes Parquet + Delta artifacts under the provided path. Replace the token export with your own secret management process.
 
-## Databricks job deployment
+## Databricks job deployment (Python script workflow)
 
-1. **Build & publish the wheel**
-   ```bash
-   cd query-data-xray-data-in-databricks
-   python -m build  # creates dist/*.whl
-   databricks fs cp dist/query_data_xray_data_in_databricks-0.1.0-py3-none-any.whl \
-     dbfs:/FileStore/wheels/query_data_xray_data_in_databricks-0.1.0.whl
-   ```
-2. **Update `databricks/jobs/daily_file_metadata.json`** with your workspace URL, cluster definition (or job cluster), Delta path, and secret scope reference for `DXR_BEARER_TOKEN`.
-3. **Create the workflow**
-   ```bash
-   databricks jobs create --json-file databricks/jobs/daily_file_metadata.json
-   ```
-4. **Schedule** the job in the Databricks UI (e.g., daily at 02:00 UTC). The workflow uses the `python_wheel_task` entry point `dxr-file-metadata-job` which maps to `query_data_xray.job:main`.
+1. **Sync or upload the repo**  
+   In *Repos → Add Repo*, point Databricks at your GitHub fork so that the scripts live under a path such as `/Repos/you/query-data-xray-data-in-databricks`. Serverless compute automatically adds the repo root to `PYTHONPATH`, and `scripts/run_daily_snapshot.py` adds the `src/` folder so imports resolve without installing wheels.
+2. **Secrets + parameters**  
+   Put the bearer token into a secret scope (e.g., `dxr/dxr-bearer-token`). The job will pass `--bearer-token {{secrets/dxr/dxr-bearer-token}}`. All other CLI flags can be specified as Databricks job parameters (see the JSON template below).
+3. **Create the job**  
+   - In the UI: *Workflows → Jobs → Create job → Task type = Python script*. Point `Python script path` at `/Repos/you/query-data-xray-data-in-databricks/scripts/run_daily_snapshot.py`. Add parameter pairs (`--delta-path`, `dbfs:/...`, etc.) and select the desired serverless compute tier.  
+   - Via CLI: update `databricks/jobs/daily_file_metadata.json` by replacing `/Repos/REPLACE_WITH_REPO_OWNER/...` and `REPLACE_WITH_SERVERLESS_COMPUTE_KEY`, then run `databricks jobs create --json @databricks/jobs/daily_file_metadata.json`.
+4. **Run & schedule**  
+   Kick off a run (`databricks jobs run-now --job-id <id>`) to validate connectivity, then enable the cron schedule (default 02:00 UTC) once the Delta path populates.
 
 ## Notes
 
