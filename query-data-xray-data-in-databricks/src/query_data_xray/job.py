@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import json
 from typing import List
 
 from pyspark.sql import SparkSession
@@ -133,7 +134,8 @@ def run_job(config: JobConfig) -> None:
         return
 
     spark = SparkSession.builder.appName("dxr-file-metadata-daily").getOrCreate()
-    df = spark.createDataFrame(records)
+    json_rdd = spark.sparkContext.parallelize([json.dumps(rec) for rec in records])
+    df = spark.read.json(json_rdd)
     df = df.withColumn("ingestion_date", F.lit(config.ingestion_date))
     df = df.withColumn("ingested_at", F.current_timestamp())
 
