@@ -190,9 +190,9 @@ def run_job(config: JobConfig) -> None:
 
     if config.delta_table:
         spark.sql(
-            f"CREATE TABLE IF NOT EXISTS {config.delta_table} USING DELTA LOCATION '{config.delta_path}'"
+            f"CREATE TABLE IF NOT EXISTS `{config.delta_table}` USING DELTA LOCATION '{config.delta_path}'"
         )
-        spark.sql(f"REFRESH TABLE {config.delta_table}")
+        spark.sql(f"REFRESH TABLE `{config.delta_table}`")
         logger.info("Table %s refreshed", config.delta_table)
 
     logger.info("Job completed for %s", config.ingestion_date)
