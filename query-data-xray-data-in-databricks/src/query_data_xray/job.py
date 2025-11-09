@@ -271,7 +271,7 @@ class DatabricksSQLClient:
         return query, name
 
 
-def _write_csv_artifact(spark_df, artifact_dir: str, dbutils, csv_name: str) -> str:
+def _write_csv_artifact(spark_df, artifact_dir: str, dbutils, csv_name: str = "results") -> str:
     dbfs_dir = _ensure_dbfs_uri(artifact_dir)
     tmp_dir = _build_child_path(dbfs_dir, f"_tmp_csv_{uuid4().hex}")
     logger.info("Writing CSV artifact to %s (temporary: %s)", dbfs_dir, tmp_dir)
@@ -372,7 +372,8 @@ def _materialize_saved_queries(spark: SparkSession, config: JobConfig):
         logger.info("Executing saved query %s (%s)", label, query_cfg.query_id)
         df = spark.sql(sql_text.rstrip(";\n "))
         artifact_dir = _build_child_path(artifact_root, slug)
-        csv_dbfs = _write_csv_artifact(df, artifact_dir, "results", dbutils)
+        logger.info("Materializing artifacts for %s under %s", label, artifact_dir)
+        csv_dbfs = _write_csv_artifact(df, artifact_dir, dbutils, "results")
         script_text = _render_powershell_script(csv_dbfs, label)
         script_dbfs = _write_powershell_artifact(script_text, artifact_dir, "remediate_duplicates.ps1")
         logger.info("Saved query artifacts written: CSV=%s PowerShell=%s", csv_dbfs, script_dbfs)
