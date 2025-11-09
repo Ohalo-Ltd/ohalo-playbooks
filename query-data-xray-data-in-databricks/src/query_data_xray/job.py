@@ -423,7 +423,10 @@ def run_job(config: JobConfig) -> None:
         logger.info("Table %s refreshed", quoted_table)
 
     if config.sql_queries:
+        logger.info("Materializing %s saved SQL quer%s", len(config.sql_queries), "y" if len(config.sql_queries) == 1 else "ies")
         _materialize_saved_queries(spark, config)
+    else:
+        logger.info("No saved SQL queries configured; skipping artifact generation")
 
     logger.info("Job completed for %s", config.ingestion_date)
     spark.stop()
