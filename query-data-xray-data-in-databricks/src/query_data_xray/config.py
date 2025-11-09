@@ -79,12 +79,14 @@ def _get_token_from_secrets(scope: str, key: str) -> str:
 
 
 def _normalize_delta_location(path: str) -> str:
-    # Unity Catalog volumes typically live under /Volumes. Ensure the LOCATION clause
-    # includes a cloud filesystem scheme (dbfs:/) even if the user omits it.
-    if path.startswith("dbfs:/"):
+    """Return the path used in the Delta LOCATION clause.
+
+    Users may pass UC Volume paths (``/Volumes/...``). Keep those untouched so serverless
+    clusters can register the location without tripping the ``dbfs:/`` restriction. For
+    any other relative path, fall back to the value provided.
+    """
+    if path.startswith("dbfs:/") or path.startswith("/Volumes/"):
         return path
-    if path.startswith("/Volumes/"):
-        return f"dbfs:{path}"
     return path
 
 
