@@ -32,12 +32,6 @@ def _env_int(value: Optional[str], default: Optional[int] = None) -> Optional[in
 
 
 @dataclass(slots=True)
-class SavedSQLQuery:
-    query_id: str
-    label: Optional[str] = None
-
-
-@dataclass(slots=True)
 class JobConfig:
     base_url: str
     bearer_token: str
@@ -50,7 +44,6 @@ class JobConfig:
     record_cap: Optional[int]
     delta_table: Optional[str]
     user_agent: str
-    sql_queries: tuple[SavedSQLQuery, ...]
 
 class ConfigError(ValueError):
     """Raised when required configuration is missing."""
@@ -97,26 +90,6 @@ def _normalize_delta_location(path: str) -> str:
     return path
 
 
-def _parse_sql_queries(cli_values, env_value: Optional[str]) -> tuple[SavedSQLQuery, ...]:
-    tokens: list[str] = []
-    if cli_values:
-        tokens.extend(cli_values)
-    if env_value:
-        tokens.extend([chunk.strip() for chunk in env_value.split(",") if chunk.strip()])
-    queries: list[SavedSQLQuery] = []
-    for token in tokens:
-        label: Optional[str] = None
-        query_id = token
-        if ":" in token:
-            label, query_id = token.split(":", 1)
-            label = label.strip() or None
-        query_id = query_id.strip()
-        if not query_id:
-            continue
-        queries.append(SavedSQLQuery(query_id=query_id, label=label))
-    return tuple(queries)
-
-
 def load_config(args) -> JobConfig:
     load_dotenv()
     env = os.environ
@@ -149,8 +122,6 @@ def load_config(args) -> JobConfig:
     record_cap = args.record_cap or _env_int(env.get("DXR_RECORD_CAP"))
     delta_table = args.delta_table or env.get("DXR_DELTA_TABLE") or None
     user_agent = (args.user_agent or env.get("DXR_USER_AGENT") or DEFAULT_USER_AGENT).strip()
-    sql_queries = _parse_sql_queries(args.sql_queries, env.get("DXR_SQL_QUERIES"))
-
     return JobConfig(
         base_url=base_url,
         bearer_token=bearer_token,
@@ -163,5 +134,4 @@ def load_config(args) -> JobConfig:
         record_cap=record_cap,
         delta_table=delta_table,
         user_agent=user_agent,
-        sql_queries=sql_queries,
     )

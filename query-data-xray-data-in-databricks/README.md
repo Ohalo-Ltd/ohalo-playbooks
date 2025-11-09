@@ -38,7 +38,6 @@ query-data-xray-data-in-databricks/
 | `DXR_QUERY` |  | — | Optional KQL-like filter that `/api/v1/files` accepts |
 | `DXR_DELTA_PATH` | ✅ | — | Delta Lake location such as `dbfs:/Volumes/dxr/dxr-data/dxr-data-volume/datasets/file_metadata` |
 | `DXR_DELTA_TABLE` |  | — | Fully qualified Unity Catalog table name (e.g., `dxr.dxr_data.file_metadata`) to register/refresh |
-| `DXR_SQL_QUERIES` |  | — | Optional comma-separated list of saved Databricks SQL queries to export as CSV artifacts (format `label:query_id` or just `query_id`). |
 | `DXR_VERIFY_SSL` |  | `true` | Set to `false` while targeting non-public DXR endpoints |
 | `DXR_HTTP_TIMEOUT` |  | `120` | Per-request timeout in seconds |
 | `DXR_RECORD_CAP` |  | — | If set, stops streaming after *N* JSONL rows (handy for tests) |
@@ -73,14 +72,18 @@ python -m query_data_xray.job --ingestion-date 2024-01-01 --record-cap 100
 
 The dry run writes Parquet + Delta artifacts under the provided path. Replace the token export with your own secret management process.
 
-### Exporting saved SQL queries to CSV
+### Handling duplicates outside Databricks
 
-Set `DXR_SQL_QUERIES` (or repeat `--sql-query label:query_id`) to point at saved SQL Editor queries you want to materialize per ingestion run. For each query ID, the job fetches the SQL text via the Databricks REST API, executes it with Spark, and stores two artifacts under the ingestion partition (for example `.../ingestion_date=2025-11-09/artifacts/detect-duplicates/`):
+After exporting a CSV from a Databricks dashboard (for example, the duplicate detection query that returns `path` and `content_sha256`), download the file and run `scripts/remediate_duplicates.ps1` on a Windows host that has access to the original shares:
 
-- `results.csv`: the query output, coalesced to a single CSV with headers so admins can download and review.
-- `remediate_duplicates.ps1`: a PowerShell script template that consumes the CSV, moves each `path` to an archive folder grouped by `content_sha256`, and leaves a stub text file behind.
+```powershell
+cd query-data-xray-data-in-databricks
+.\scripts\remediate_duplicates.ps1 `
+    -CsvPath C:\temp\dxr_duplicates.csv `
+    -ArchiveRoot \\fileserver\retention\dxr
+```
 
-Query IDs appear in the SQL Editor URL (`sql/datasets/<query-id>`). This feature must run inside Databricks so the job can access `apiUrl`/`apiToken`; it won’t work from local Spark.
+Each row moves the original file into `$ArchiveRoot/<hash>/filename` and leaves a stub text file in its place.
 
 ## Databricks job deployment (Python script workflow)
 
