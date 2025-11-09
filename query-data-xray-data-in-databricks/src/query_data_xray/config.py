@@ -32,7 +32,6 @@ def _env_int(value: Optional[str], default: Optional[int] = None) -> Optional[in
 
 
 @dataclass(slots=True)
-@dataclass(slots=True)
 class SavedSQLQuery:
     query_id: str
     label: Optional[str] = None
