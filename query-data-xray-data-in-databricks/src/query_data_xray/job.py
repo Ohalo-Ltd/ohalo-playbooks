@@ -56,12 +56,11 @@ def _project_record(record: Dict[str, Any]) -> Dict[str, Any]:
     return row
 
 
-def _normalize_table_identifier(name: str) -> tuple[str, str, str, str]:
+def _quote_table_identifier(name: str) -> str:
     parts = [part.strip().strip("`") for part in name.split(".") if part.strip().strip("`")]
     if len(parts) != 3:
         raise ConfigError("DXR_DELTA_TABLE is invalid; expected catalog.schema.table")
-    quoted = ".".join(f"`{part}`" for part in parts)
-    return parts[0], parts[1], parts[2], quoted
+    return ".".join(f"`{part}`" for part in parts)
 
 
 def _create_spark_session() -> SparkSession:
@@ -222,12 +221,7 @@ def run_job(config: JobConfig) -> None:
     )
 
     if config.delta_table:
-        catalog, schema, table, quoted_table = _normalize_table_identifier(config.delta_table)
-        quoted_catalog = f"`{catalog}`"
-        quoted_schema = f"`{schema}`"
-        logger.info("Ensuring schema %s.%s exists", quoted_catalog, quoted_schema)
-        spark.sql(f"CREATE SCHEMA IF NOT EXISTS {quoted_catalog}.{quoted_schema}")
-
+        quoted_table = _quote_table_identifier(config.delta_table)
         logger.info("Registering Delta path %s as table %s", config.delta_location, quoted_table)
         spark.sql(
             f"CREATE TABLE IF NOT EXISTS {quoted_table} USING DELTA LOCATION '{config.delta_location}'"

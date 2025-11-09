@@ -44,7 +44,7 @@ query-data-xray-data-in-databricks/
 | `DXR_USER_AGENT` |  | `query-data-xray-data-in-databricks/<version>` | Custom user-agent header |
 
 CLI flags (see `python -m query_data_xray.job --help`) can override the same values at runtime.  
-When the table parameter is set, the job automatically issues `CREATE SCHEMA IF NOT EXISTS <catalog>.<schema>` before registering the table, so brand-new schemas are provisioned on the fly. If a catalog or schema contains characters like hyphens, wrap that component in backticks when setting `DXR_DELTA_TABLE` (for example `dxr.\`dxr-data\`.files`).
+Provision Unity Catalog assets (catalog, schema, volume/external location) yourself before running the job; it only writes to the provided Delta path and registers the existing table. If a catalog or schema contains characters like hyphens, wrap that component in backticks when setting `DXR_DELTA_TABLE` (for example `dxr.\`dxr-data\`.files`).
 `*` Provide `DXR_BEARER_TOKEN` for local/dev runs. In Databricks, prefer `DXR_TOKEN_SCOPE` + `DXR_TOKEN_KEY` so the job fetches the secret from the workspace.
 
 Copy `.env.example` to `.env` and fill in your tenant-specific values before running locally. The CLI automatically loads `.env` via `python-dotenv`, so placing the file at the project root is enough. On Databricks set `DXR_TOKEN_SCOPE` and `DXR_TOKEN_KEY` so the script can fetch the bearer token from `dbutils.secrets`; the files API path is fixed at `/api/v1/files`.
