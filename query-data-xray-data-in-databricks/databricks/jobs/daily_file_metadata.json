@@ -47,11 +47,11 @@
     },
     {
       "name": "DXR_DELTA_PATH",
-      "default": "dbfs:/Volumes/dxr/dxr-data/dxr-data-volume/datasets/file_metadata"
+      "default": "/Volumes/dxr/dxr-data/dxr-data-volume/datasets/file_metadata"
     },
     {
       "name": "DXR_DELTA_TABLE",
-      "default": "dxr.dxr_data.file_metadata"
+      "default": ""
     },
     {
       "name": "DXR_HTTP_TIMEOUT",
