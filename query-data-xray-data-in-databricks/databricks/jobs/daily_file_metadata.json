@@ -8,28 +8,75 @@
   "max_concurrent_runs": 1,
   "tasks": [
     {
-      "task_key": "dxr_file_metadata_snapshot",
+      "task_key": "dxr-file-metadata-daily",
+      "run_if": "ALL_SUCCESS",
       "spark_python_task": {
-        "python_file": "/Repos/REPLACE_WITH_REPO_OWNER/query-data-xray-data-in-databricks/scripts/run_daily_snapshot.py",
+        "python_file": "query-data-xray-data-in-databricks/scripts/run_daily_snapshot.py",
         "parameters": [
-          "--DXR_BASE_URL",
-          "https://demo.dataxray.io",
-          "--DXR_TOKEN_SCOPE",
-          "dxr",
-          "--DXR_TOKEN_KEY",
-          "dxr-bearer-token",
-          "--DXR_DELTA_PATH",
-          "dbfs:/Volumes/workspace/dxr-data/dxr-data-volume/datasets/file_metadata",
-          "--DXR_DELTA_TABLE",
-          "workspace.dxr_data.file_metadata"
+          "DXR_BASE_URL",
+          "{{job.parameters.DXR_BASE_URL}}",
+          "DXR_DELTA_PATH",
+          "{{job.parameters.DXR_DELTA_PATH}}",
+          "DXR_DELTA_TABLE",
+          "{{job.parameters.DXR_DELTA_TABLE}}",
+          "DXR_TOKEN_KEY",
+          "{{job.parameters.DXR_TOKEN_KEY}}",
+          "DXR_TOKEN_SCOPE",
+          "{{job.parameters.DXR_TOKEN_SCOPE}}"
         ],
-        "source": "WORKSPACE"
+        "source": "GIT"
       },
-      "compute_key": "378778894328346",
-      "timeout_seconds": 7200,
-      "max_retries": 1,
-      "min_retry_interval_millis": 300000,
-      "retry_on_timeout": true
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "webhook_notifications": {},
+      "environment_key": "Default"
     }
-  ]
+  ],
+  "git_source": {
+    "git_url": "https://github.com/Ohalo-Ltd/ohalo-playbooks.git",
+    "git_provider": "gitHub",
+    "git_branch": "0000-db-retention-job"
+  },
+  "queue": {
+    "enabled": true
+  },
+  "parameters": [
+    {
+      "name": "DXR_BASE_URL",
+      "default": "https://demo.dataxray.io"
+    },
+    {
+      "name": "DXR_DELTA_PATH",
+      "default": "dbfs:/Volumes/dxr/dxr-data/dxr-data-volume/datasets/file_metadata"
+    },
+    {
+      "name": "DXR_DELTA_TABLE",
+      "default": "dxr.dxr_data.file_metadata"
+    },
+    {
+      "name": "DXR_HTTP_TIMEOUT",
+      "default": "120"
+    },
+    {
+      "name": "DXR_TOKEN_KEY",
+      "default": "bearer-token"
+    },
+    {
+      "name": "DXR_TOKEN_SCOPE",
+      "default": "dxr"
+    },
+    {
+      "name": "DXR_VERIFY_SSL",
+      "default": "true"
+    }
+  ],
+  "environments": [
+    {
+      "environment_key": "Default",
+      "spec": {
+        "environment_version": "4"
+      }
+    }
+  ],
+  "performance_target": "PERFORMANCE_OPTIMIZED"
 }

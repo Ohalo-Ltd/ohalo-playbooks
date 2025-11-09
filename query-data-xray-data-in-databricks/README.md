@@ -36,14 +36,15 @@ query-data-xray-data-in-databricks/
 | `DXR_TOKEN_SCOPE` | ✅ (Databricks) | — | Databricks secret scope that stores the DXR bearer token |
 | `DXR_TOKEN_KEY` | ✅ (Databricks) | — | Databricks secret key within the scope that stores the DXR bearer token |
 | `DXR_QUERY` |  | — | Optional KQL-like filter that `/api/v1/files` accepts |
-| `DXR_DELTA_PATH` | ✅ | — | Delta Lake location such as `dbfs:/Volumes/workspace/dxr-data/dxr-data-volume/datasets/file_metadata` |
-| `DXR_DELTA_TABLE` |  | — | Fully qualified Unity Catalog table name (e.g., `workspace.dxr_data.file_metadata`) to register/refresh |
+| `DXR_DELTA_PATH` | ✅ | — | Delta Lake location such as `dbfs:/Volumes/dxr/dxr-data/dxr-data-volume/datasets/file_metadata` |
+| `DXR_DELTA_TABLE` |  | — | Fully qualified Unity Catalog table name (e.g., `dxr.dxr_data.file_metadata`) to register/refresh |
 | `DXR_VERIFY_SSL` |  | `true` | Set to `false` while targeting non-public DXR endpoints |
 | `DXR_HTTP_TIMEOUT` |  | `120` | Per-request timeout in seconds |
 | `DXR_RECORD_CAP` |  | — | If set, stops streaming after *N* JSONL rows (handy for tests) |
 | `DXR_USER_AGENT` |  | `query-data-xray-data-in-databricks/<version>` | Custom user-agent header |
 
-CLI flags (see `python -m query_data_xray.job --help`) can override the same values at runtime.
+CLI flags (see `python -m query_data_xray.job --help`) can override the same values at runtime.  
+When the table parameter is set, the job automatically issues `CREATE SCHEMA IF NOT EXISTS <catalog>.<schema>` before registering the table, so brand-new schemas are provisioned on the fly. If a catalog or schema contains characters like hyphens, wrap that component in backticks when setting `DXR_DELTA_TABLE` (for example `dxr.\`dxr-data\`.files`).
 `*` Provide `DXR_BEARER_TOKEN` for local/dev runs. In Databricks, prefer `DXR_TOKEN_SCOPE` + `DXR_TOKEN_KEY` so the job fetches the secret from the workspace.
 
 Copy `.env.example` to `.env` and fill in your tenant-specific values before running locally. The CLI automatically loads `.env` via `python-dotenv`, so placing the file at the project root is enough. On Databricks set `DXR_TOKEN_SCOPE` and `DXR_TOKEN_KEY` so the script can fetch the bearer token from `dbutils.secrets`; the files API path is fixed at `/api/v1/files`.

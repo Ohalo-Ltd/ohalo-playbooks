@@ -4,6 +4,7 @@ import argparse
 import logging
 import sys
 import json
+import os
 from typing import List, Dict, Any
 
 from pyspark.sql import SparkSession
@@ -61,6 +62,30 @@ def _normalize_table_identifier(name: str) -> tuple[str, str, str, str]:
         raise ConfigError("DXR_DELTA_TABLE is invalid; expected catalog.schema.table")
     quoted = ".".join(f"`{part}`" for part in parts)
     return parts[0], parts[1], parts[2], quoted
+
+
+def _create_spark_session() -> SparkSession:
+    """Build a Spark session that supports local Delta runs when outside Databricks."""
+    builder = SparkSession.builder.appName("dxr-file-metadata-daily")
+    on_databricks = bool(os.getenv("DATABRICKS_RUNTIME_VERSION"))
+    if not on_databricks:
+        builder = builder.master(os.getenv("DXR_SPARK_MASTER", "local[*]"))
+
+        delta_pref = os.getenv("DXR_USE_DELTA_PIP", "auto").strip().lower()
+        enable_delta = delta_pref in {"1", "true", "yes", "on", "auto"}
+        if enable_delta:
+            try:
+                from delta import configure_spark_with_delta_pip  # type: ignore
+            except ImportError:
+                if delta_pref != "auto":
+                    logger.warning(
+                        "DXR_USE_DELTA_PIP is set but delta-spark is not installed. "
+                        "Install delta-spark or unset DXR_USE_DELTA_PIP to skip Delta configuration."
+                    )
+            else:
+                builder = configure_spark_with_delta_pip(builder)
+
+    return builder.getOrCreate()
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Snapshot Data X-Ray file metadata into Delta Lake")
@@ -182,7 +207,7 @@ def run_job(config: JobConfig) -> None:
 
     normalized_rows = [_project_record(rec) for rec in records]
 
-    spark = SparkSession.builder.appName("dxr-file-metadata-daily").getOrCreate()
+    spark = _create_spark_session()
     df = spark.createDataFrame(normalized_rows)
     df = df.withColumn("ingestion_date", F.lit(config.ingestion_date))
     df = df.withColumn("ingested_at", F.current_timestamp())
