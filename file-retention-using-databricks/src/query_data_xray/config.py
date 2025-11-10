@@ -61,8 +61,11 @@ def _get_dbutils():
 
         spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
         return DBUtils(spark)
-    except Exception:
-        return None
+    except Exception as exc:
+        raise ConfigError(
+            "Unable to initialize Databricks dbutils; run inside a Databricks runtime or provide DXR_BEARER_TOKEN "
+            "instead of DXR_TOKEN_SCOPE/DXR_TOKEN_KEY."
+        ) from exc
 
 
 def _get_token_from_secrets(scope: str, key: str) -> str:
@@ -90,31 +93,40 @@ def _normalize_delta_location(path: str) -> str:
     return path
 
 
-def load_config(args) -> JobConfig:
-    load_dotenv()
-    env = os.environ
+def _resolve_base_url(args, env) -> str:
+    """Resolve and validate the DXR base URL."""
     base_url = (args.base_url or env.get("DXR_BASE_URL") or "").strip().rstrip("/")
     if not base_url:
         raise ConfigError("DXR_BASE_URL (or --base-url) is required")
+    return base_url
 
+
+def _resolve_bearer_token(args, env) -> str:
+    """Resolve bearer token from args/env or Databricks secrets."""
     token_scope = (args.token_scope or env.get("DXR_TOKEN_SCOPE") or "").strip()
     token_key = (args.token_key or env.get("DXR_TOKEN_KEY") or "").strip()
     bearer_token = (args.bearer_token or env.get("DXR_BEARER_TOKEN") or env.get("DXR_JWE_TOKEN") or "").strip()
     if not bearer_token and token_scope and token_key:
         bearer_token = _get_token_from_secrets(token_scope, token_key).strip()
-
     if not bearer_token:
         raise ConfigError(
             "DXR_BEARER_TOKEN (or --bearer-token) is required; alternatively provide DXR_TOKEN_SCOPE and DXR_TOKEN_KEY."
         )
     if (token_scope and not token_key) or (token_key and not token_scope):
         raise ConfigError("DXR_TOKEN_SCOPE and DXR_TOKEN_KEY must be provided together.")
+    return bearer_token
 
+
+def _resolve_delta_paths(args, env) -> tuple[str, str]:
+    """Validate delta path inputs and derive LOCATION-friendly path."""
     delta_path = (args.delta_path or env.get("DXR_DELTA_PATH") or "").strip()
     if not delta_path:
         raise ConfigError("DXR_DELTA_PATH (or --delta-path) is required")
-    delta_location = _normalize_delta_location(delta_path)
+    return delta_path, _normalize_delta_location(delta_path)
 
+
+def _resolve_runtime_options(args, env):
+    """Gather optional runtime parameters."""
     ingestion_date = (args.ingestion_date or env.get("DXR_INGESTION_DATE") or date.today().isoformat()).strip()
     query = args.query or env.get("DXR_QUERY") or None
     verify_ssl = _env_bool(args.verify_ssl if args.verify_ssl is not None else env.get("DXR_VERIFY_SSL"), True)
@@ -122,6 +134,18 @@ def load_config(args) -> JobConfig:
     record_cap = args.record_cap or _env_int(env.get("DXR_RECORD_CAP"))
     delta_table = args.delta_table or env.get("DXR_DELTA_TABLE") or None
     user_agent = (args.user_agent or env.get("DXR_USER_AGENT") or DEFAULT_USER_AGENT).strip()
+    return ingestion_date, query, verify_ssl, http_timeout, record_cap, delta_table, user_agent
+
+
+def load_config(args) -> JobConfig:
+    load_dotenv()
+    env = os.environ
+    base_url = _resolve_base_url(args, env)
+    bearer_token = _resolve_bearer_token(args, env)
+    delta_path, delta_location = _resolve_delta_paths(args, env)
+    ingestion_date, query, verify_ssl, http_timeout, record_cap, delta_table, user_agent = _resolve_runtime_options(
+        args, env
+    )
     return JobConfig(
         base_url=base_url,
         bearer_token=bearer_token,

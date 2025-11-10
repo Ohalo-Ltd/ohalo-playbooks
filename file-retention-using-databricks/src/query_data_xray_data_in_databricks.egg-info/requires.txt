@@ -1,9 +1,0 @@
-requests<3,>=2.31.0
-pyspark<4,>=3.5.0
-python-dotenv<2,>=1.0.0
-
-[dev]
-pytest<8,>=7.4
-build>=1.2.1
-pyproject-hooks>=1.0.0
-packaging>=23.0

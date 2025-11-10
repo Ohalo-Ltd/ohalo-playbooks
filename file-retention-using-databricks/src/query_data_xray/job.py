@@ -5,7 +5,7 @@ import logging
 import sys
 import json
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
@@ -27,7 +27,7 @@ _JSON_FIELDS = (
 )
 
 
-def _stringify_complex(value: Any) -> Any:
+def _stringify_complex(value: Any) -> Optional[Any]:
     if value is None:
         return None
     if isinstance(value, (dict, list)):
@@ -39,17 +39,18 @@ def _stringify_complex(value: Any) -> Any:
 
 
 def _project_record(record: Dict[str, Any]) -> Dict[str, Any]:
-    row: Dict[str, Any] = {}
-    row["file_id"] = record.get("fileId")
-    row["file_name"] = record.get("fileName")
-    row["path"] = record.get("path")
-    row["size"] = record.get("size")
-    row["mime_type"] = record.get("mimeType")
-    row["created_at"] = record.get("createdAt")
-    row["last_modified_at"] = record.get("lastModifiedAt")
-    row["content_sha256"] = record.get("contentSha256")
-    row["scan_depth"] = record.get("scanDepth")
-    row["raw_json"] = json.dumps(record, default=str)
+    row: Dict[str, Any] = {
+        "file_id": record.get("fileId"),
+        "file_name": record.get("fileName"),
+        "path": record.get("path"),
+        "size": record.get("size"),
+        "mime_type": record.get("mimeType"),
+        "created_at": record.get("createdAt"),
+        "last_modified_at": record.get("lastModifiedAt"),
+        "content_sha256": record.get("contentSha256"),
+        "scan_depth": record.get("scanDepth"),
+        "raw_json": json.dumps(record, default=str),
+    }
     for field in _JSON_FIELDS:
         row[f"{field}_json"] = _stringify_complex(record.get(field))
     return row

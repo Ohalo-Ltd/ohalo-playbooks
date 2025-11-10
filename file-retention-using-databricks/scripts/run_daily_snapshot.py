@@ -3,9 +3,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from pathlib import Path
-import sys
-
 
 def _resolve_repo_root() -> Path:
     """Best-effort detection of repo root for Databricks Jobs."""
