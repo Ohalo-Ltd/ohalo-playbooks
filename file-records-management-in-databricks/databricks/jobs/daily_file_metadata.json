@@ -11,7 +11,7 @@
       "task_key": "dxr-file-metadata-daily",
       "run_if": "ALL_SUCCESS",
       "spark_python_task": {
-        "python_file": "file-retention-using-databricks/scripts/run_daily_snapshot.py",
+        "python_file": "file-records-management-in-databricks/scripts/run_daily_snapshot.py",
         "parameters": [
           "DXR_BASE_URL",
           "{{job.parameters.DXR_BASE_URL}}",

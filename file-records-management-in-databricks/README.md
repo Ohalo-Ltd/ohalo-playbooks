@@ -1,6 +1,22 @@
-# query-data-xray-data-in-databricks
+# file-records-management-in-databricks
 
-Daily Databricks workflow that calls Data X-Ray's public API, streams `/api/v1/files` JSONL payloads, and snapshots the metadata into a Delta table so downstream governance jobs can query the state of every scanned file per day.
+Daily Databricks workflow that calls Data X-Ray's public API, streams `/api/v1/files` JSONL payloads, and snapshots the metadata into a Delta table so downstream governance jobs can enforce records-management policies (duplicate detection, retention, ROT clean-up, etc.) on every scanned file per day.
+
+## Why records management?
+
+- **Shared source of truth**: Landing the Data X-Ray feed in Delta means every team runs the same policy queries over time-partitioned metadata.
+- **Policy flexibility**: Duplicate detection is only one example—once the Delta table exists you can layer other policies (keep-forever, legal hold, stale data, etc.) without redeploying compute.
+- **Actionable automation**: Spark + Python is used to export result sets (CSV, JSON) or trigger downstream workflows that archive, quarantine, or delete the flagged files.
+
+### Example policies
+
+| Policy | Sample logic | Outcome |
+| --- | --- | --- |
+| Duplicate files | `content_sha256` grouping, `count(*) > 1` | Identify redundant files and archive all but one copy |
+| Retention gaps | `classification = 'Records' AND last_modified < now() - 7y` | Flag records that have aged past policy windows |
+| ROT cleanup | `labels CONTAINS 'ROT'` | Move redundant/obsolete/trivial files to deep storage |
+
+The duplicate-remediation PowerShell script bundled in `scripts/` is a concrete example of how to act on one of these policies, but you can plug in any downstream process that consumes the Delta outputs.
 
 ## How it works
 
@@ -12,7 +28,7 @@ Daily Databricks workflow that calls Data X-Ray's public API, streams `/api/v1/f
 ## Repository layout
 
 ```
-query-data-xray-data-in-databricks/
+file-records-management-in-databricks/
 ├── databricks/
 │   └── jobs/
 │       └── daily_file_metadata.json   # Sample Databricks Workflow definition
@@ -52,7 +68,7 @@ Copy `.env.example` to `.env` and fill in your tenant-specific values before run
 Install dependencies with your preferred tool; for example using `uv`:
 
 ```bash
-uv pip sync requirements.txt             # runtime deps
+uv pip sync requirements.txt            # runtime deps
 uv pip sync requirements-dev.txt        # optional dev deps (build/pytest)
 ```
 
@@ -61,7 +77,7 @@ uv pip sync requirements-dev.txt        # optional dev deps (build/pytest)
 You can run the job from your laptop using a local Spark install or Databricks Connect:
 
 ```bash
-cd query-data-xray-data-in-databricks
+cd file-records-management-in-databricks
 python -m venv .venv && source .venv/bin/activate
 pip install -e .
 export DXR_BASE_URL="https://app.dataxray.com"
@@ -72,35 +88,51 @@ python -m query_data_xray.job --ingestion-date 2024-01-01 --record-cap 100
 
 The dry run writes Parquet + Delta artifacts under the provided path. Replace the token export with your own secret management process.
 
-### Handling duplicates outside Databricks
+### Example: handling duplicates off-cluster
 
 After exporting a CSV from a Databricks dashboard (for example, the duplicate detection query that returns `path` and `content_sha256`), download the file and run `scripts/remediate_duplicates.ps1` on a Windows host that has access to the original shares:
 
 ```powershell
-cd query-data-xray-data-in-databricks
+cd file-records-management-in-databricks
 .\scripts\remediate_duplicates.ps1 `
     -CsvPath C:\temp\dxr_duplicates.csv `
     -ArchiveRoot \\fileserver\retention\dxr
 ```
 
-Each row moves the original file into `$ArchiveRoot/<hash>/filename` and leaves a stub text file in its place.
+Each row moves the original file into `$ArchiveRoot/<hash>/filename` and leaves a stub text file in its place. Swap in your own script for other policies (for example, a legal-hold tracker) by consuming the Delta exports.
 
 ## Databricks job deployment (Python script workflow)
 
-1. **Sync or upload the repo**  
-   In *Repos → Add Repo*, point Databricks at your GitHub fork so that the scripts live under a path such as `/Repos/you/query-data-xray-data-in-databricks`. Serverless compute automatically adds the repo root to `PYTHONPATH`, and `scripts/run_daily_snapshot.py` adds the `src/` folder so imports resolve without installing wheels.
-2. **Secrets + parameters**  
-   Store the DXR JWE token in the Databricks Secrets manager and reference it via `DXR_TOKEN_SCOPE` / `DXR_TOKEN_KEY`. For example:
+Follow these steps end-to-end to run the playbook inside Databricks:
+
+1. **Sync the repo**  
+   - Navigate to *Repos → Add Repo* and point Databricks at your fork so the code lives at `/Repos/<you>/file-records-management-in-databricks`.  
+   - Serverless compute automatically adds the repo root to `PYTHONPATH`, and `scripts/run_daily_snapshot.py` adjusts `sys.path` so `src/` imports resolve—no wheel build required.
+2. **Create the secrets**  
    ```bash
    databricks secrets create-scope --scope dxr
-   databricks secrets put --scope dxr --key bearer-token  # paste the JWE token
+   databricks secrets put --scope dxr --key bearer-token   # paste the DXR JWE token
    ```
-   Then set job parameters (`DXR_TOKEN_SCOPE = dxr`, `DXR_TOKEN_KEY = bearer-token`). The script will call `dbutils.secrets.get(scope=DXR_TOKEN_SCOPE, key=DXR_TOKEN_KEY)` at runtime. All other CLI flags can be specified as Databricks job parameters (see the JSON template below).
-3. **Create the job**  
-   - In the UI: *Workflows → Jobs → Create job → Task type = Python script*. Point `Python script path` at `/Repos/you/query-data-xray-data-in-databricks/scripts/run_daily_snapshot.py`. Add parameter pairs (for example: `DXR_BASE_URL`, `https://...`; `DXR_TOKEN_SCOPE`, `dxr`; `DXR_TOKEN_KEY`, `dxr-bearer-token`; `DXR_DELTA_PATH`, `dbfs:/Volumes/workspace/dxr-data/dxr-data-volume/datasets/file_metadata`) and select the desired serverless compute tier.  
-   - Via CLI: update `databricks/jobs/daily_file_metadata.json` by replacing `/Repos/REPLACE_WITH_REPO_OWNER/...` and `REPLACE_WITH_SERVERLESS_COMPUTE_KEY`, then run `databricks jobs create --json @databricks/jobs/daily_file_metadata.json`.
-4. **Run & schedule**  
-   Kick off a run (`databricks jobs run-now --job-id <id>`) to validate connectivity, then enable the cron schedule (default 02:00 UTC) once the Delta path populates.
+   - Set two job parameters so the script can read the secret: `DXR_TOKEN_SCOPE = dxr`, `DXR_TOKEN_KEY = bearer-token`.
+3. **Define the job parameters**  
+   - Required: `DXR_BASE_URL`, `DXR_DELTA_PATH`, `DXR_TOKEN_SCOPE`, `DXR_TOKEN_KEY`, plus either `DXR_DELTA_TABLE` (if you want the Unity Catalog table registered automatically) or handle catalog registration yourself.  
+   - Optional overrides: `DXR_QUERY`, `DXR_HTTP_TIMEOUT`, `DXR_RECORD_CAP`, `DXR_INGESTION_DATE`, etc. Every CLI flag accepted by `python -m query_data_xray.job --help` can be expressed as a key/value pair in the Databricks job UI or JSON payload.
+4. **Create the job**
+   - **UI**: *Workflows → Jobs → Create job* → choose **Python script**.  
+     - `Python script path`: `/Repos/<you>/file-records-management-in-databricks/scripts/run_daily_snapshot.py`  
+     - Add the parameter table from step 3.  
+     - Select a serverless or job compute with access to Unity Catalog/Volumes that back your Delta path.  
+   - **CLI**: Update `databricks/jobs/daily_file_metadata.json` with your repo path (`/Repos/<you>/file-records-management-in-databricks/...`) and compute key (`REPLACE_WITH_SERVERLESS_COMPUTE_KEY`), then run:
+     ```bash
+     databricks jobs create --json @databricks/jobs/daily_file_metadata.json
+     ```
+5. **Run, validate, schedule**  
+   - Trigger a manual run to ensure the job can fetch secrets and write to the Delta location:  
+     ```bash
+     databricks jobs run-now --job-id <id>
+     ```  
+   - Inspect the Delta table/volume for the new `ingestion_date` partition.  
+   - Enable the default 02:00 UTC schedule (or your own cron) once the validation run succeeds.
 
 ## Notes
 
