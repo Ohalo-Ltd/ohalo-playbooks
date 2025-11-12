@@ -1,0 +1,82 @@
+{
+  "name": "dxr-file-metadata-daily",
+  "schedule": {
+    "quartz_cron_expression": "0 0 2 * * ?",
+    "timezone_id": "UTC",
+    "pause_status": "UNPAUSED"
+  },
+  "max_concurrent_runs": 1,
+  "tasks": [
+    {
+      "task_key": "dxr-file-metadata-daily",
+      "run_if": "ALL_SUCCESS",
+      "spark_python_task": {
+        "python_file": "file-records-management-in-databricks/scripts/run_daily_snapshot.py",
+        "parameters": [
+          "DXR_BASE_URL",
+          "{{job.parameters.DXR_BASE_URL}}",
+          "DXR_DELTA_PATH",
+          "{{job.parameters.DXR_DELTA_PATH}}",
+          "DXR_DELTA_TABLE",
+          "{{job.parameters.DXR_DELTA_TABLE}}",
+          "DXR_TOKEN_KEY",
+          "{{job.parameters.DXR_TOKEN_KEY}}",
+          "DXR_TOKEN_SCOPE",
+          "{{job.parameters.DXR_TOKEN_SCOPE}}"
+        ],
+        "source": "GIT"
+      },
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "webhook_notifications": {},
+      "environment_key": "Default"
+    }
+  ],
+  "git_source": {
+    "git_url": "https://github.com/Ohalo-Ltd/ohalo-playbooks.git",
+    "git_provider": "gitHub",
+    "git_branch": "0000-db-retention-job"
+  },
+  "queue": {
+    "enabled": true
+  },
+  "parameters": [
+    {
+      "name": "DXR_BASE_URL",
+      "default": "https://demo.dataxray.io"
+    },
+    {
+      "name": "DXR_DELTA_PATH",
+      "default": "/Volumes/dxr/dxr-data/dxr-data-volume/datasets/file_metadata"
+    },
+    {
+      "name": "DXR_DELTA_TABLE",
+      "default": ""
+    },
+    {
+      "name": "DXR_HTTP_TIMEOUT",
+      "default": "120"
+    },
+    {
+      "name": "DXR_TOKEN_KEY",
+      "default": "bearer-token"
+    },
+    {
+      "name": "DXR_TOKEN_SCOPE",
+      "default": "dxr"
+    },
+    {
+      "name": "DXR_VERIFY_SSL",
+      "default": "true"
+    }
+  ],
+  "environments": [
+    {
+      "environment_key": "Default",
+      "spec": {
+        "environment_version": "4"
+      }
+    }
+  ],
+  "performance_target": "PERFORMANCE_OPTIMIZED"
+}
