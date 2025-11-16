@@ -1,32 +1,32 @@
-from databricks_unity_dxr_integration.config import load_config
+from databricks_unity_dxr_integration.config import JobConfig, load_config
 
 
 def test_load_config_from_environment(monkeypatch):
-    monkeypatch.setenv("DATABRICKS_HOST", "https://dbc-example.cloud.databricks.com")
-    monkeypatch.setenv("DATABRICKS_TOKEN", "dapi123")
-    monkeypatch.setenv("DATABRICKS_CATALOG", "governance")
-    monkeypatch.setenv("DATABRICKS_SCHEMA", "dxr")
-    monkeypatch.setenv("DATABRICKS_SOURCE_VOLUME", "raw")
-    monkeypatch.setenv("DATABRICKS_LABEL_VOLUME_PREFIX", "label_")
-    monkeypatch.setenv("DATABRICKS_WAREHOUSE_ID", "warehouse-123")
-    monkeypatch.setenv("DATABRICKS_CHECKPOINT_TABLE", "dxr_metadata.file_checkpoints")
-    monkeypatch.setenv("DATABRICKS_JOB_LEDGER_TABLE", "dxr_metadata.job_ledger")
-    monkeypatch.setenv("DATABRICKS_METADATA_TABLE", "dxr_metadata.file_metadata")
+    monkeypatch.setenv("VOLUME_CATALOG", "governance")
+    monkeypatch.setenv("VOLUME_SCHEMA", "dxr")
+    monkeypatch.setenv("VOLUME_NAME", "raw")
+    monkeypatch.setenv("VOLUME_BASE_PATH", "/tmp/volumes")
+    monkeypatch.setenv("VOLUME_PREFIX", "incoming")
 
-    monkeypatch.setenv("DXR_BASE_URL", "https://dxr.example.com/api")
-    monkeypatch.setenv("DXR_API_KEY", "token")
+    monkeypatch.setenv("METADATA_CATALOG", "governance")
+    monkeypatch.setenv("METADATA_SCHEMA", "dxr")
+    monkeypatch.setenv("METADATA_TABLE", "file_metadata")
+
+    monkeypatch.setenv("DXR_BASE_URL", "https://dxr.example.com")
     monkeypatch.setenv("DXR_DATASOURCE_ID", "42")
     monkeypatch.setenv("DXR_POLL_INTERVAL_SECONDS", "5")
     monkeypatch.setenv("DXR_MAX_BYTES_PER_JOB", "1024")
 
-    config = load_config(env_file=None)
+    monkeypatch.setenv("DXR_SECRET_SCOPE", "dxr")
+    monkeypatch.setenv("DXR_SECRET_KEY", "api-token")
 
-    assert config.databricks.host == "https://dbc-example.cloud.databricks.com"
-    assert config.databricks.label_volume_prefix == "label_"
-    assert config.databricks.warehouse_id == "warehouse-123"
-    assert config.databricks.checkpoint_table == "dxr_metadata.file_checkpoints"
-    assert config.databricks.job_ledger_table == "dxr_metadata.job_ledger"
-    assert config.databricks.metadata_table == "dxr_metadata.file_metadata"
-    assert config.data_xray.base_url == "https://dxr.example.com/api"
-    assert config.data_xray.poll_interval_seconds == 5
-    assert config.data_xray.max_bytes_per_job == 1024
+    config = load_config(env_file=None)
+    assert isinstance(config, JobConfig)
+    assert config.volume.catalog == "governance"
+    assert config.volume.base_path == "/tmp/volumes"
+    assert config.volume.prefix == "incoming"
+    assert config.metadata_table.table == "file_metadata"
+    assert config.secret.scope == "dxr"
+    assert config.dxr.base_url == "https://dxr.example.com"
+    assert config.dxr.poll_interval_seconds == 5
+    assert config.dxr.max_bytes_per_job == 1024

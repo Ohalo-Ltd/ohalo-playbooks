@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import BinaryIO, Dict, Iterable, List, Tuple
 
@@ -25,20 +26,20 @@ class FileUpload:
     """Payload describing a file to be uploaded to Data X-Ray."""
 
     filename: str
-    data: bytes | BinaryIO
+    file_handle: BinaryIO
     mime_type: str = "application/octet-stream"
 
-    def to_form_tuple(self) -> Tuple[str, Tuple[str, bytes | BinaryIO, str]]:
-        return ("files", (self.filename, self.data, self.mime_type))
+    def to_form_tuple(self) -> Tuple[str, Tuple[str, BinaryIO, str]]:
+        return ("files", (self.filename, self.file_handle, self.mime_type))
 
 
 class DataXRayClient:
     """Client for interacting with Data X-Ray On-Demand Classifier APIs."""
 
-    def __init__(self, config: DataXRayConfig):
+    def __init__(self, config: DataXRayConfig, api_key: str):
         self._config = config
         self._session = requests.Session()
-        self._session.headers.update({"Authorization": f"Bearer {config.api_key}"})
+        self._session.headers.update({"Authorization": f"Bearer {api_key}"})
 
     def submit_job(self, uploads: Iterable[FileUpload]) -> SubmittedJob:
         """Submit an ODC job for the provided files."""
@@ -47,7 +48,7 @@ class DataXRayClient:
             raise ValueError("At least one file must be supplied to submit a job.")
 
         response = self._session.post(
-            f"{self._config.base_url}/on-demand-classifiers/{self._config.datasource_id}/jobs",
+            f"{self._config.base_url}/api/on-demand-classifiers/{self._config.datasource_id}/jobs",
             files=file_entries,
             timeout=300,
         )
@@ -62,10 +63,19 @@ class DataXRayClient:
     def get_job(self, job_id: str) -> dict:
         """Fetch the status of an On-Demand Classifier job."""
         response = self._session.get(
-            f"{self._config.base_url}/on-demand-classifiers/{self._config.datasource_id}/jobs/{job_id}"
+            f"{self._config.base_url}/api/on-demand-classifiers/{self._config.datasource_id}/jobs/{job_id}"
         )
         _raise_for_status(response)
         return response.json()
+
+    def wait_for_completion(self, job_id: str, poll_interval_seconds: int) -> dict:
+        """Poll until the job reaches a terminal state."""
+        while True:
+            job = self.get_job(job_id)
+            state = job.get("state")
+            if state in {"FINISHED", "FAILED"}:
+                return job
+            time.sleep(max(poll_interval_seconds, 1))
 
     @retry(
         retry=retry_if_exception_type(DataXRayError),
