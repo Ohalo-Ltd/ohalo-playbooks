@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS <catalog>.<schema>.<table> (
 ```
 
 Rows are merged on `file_path`, so reclassifying a file simply updates its metadata.
+⚠️ **Important:** The job expects to own a table with the schema above. If you point `METADATA_*` at an existing table with a different layout, the run will fail with a descriptive schema mismatch error; either supply a fresh table name or align the schema manually. A ready-to-import CSV definition (`metadata_schema.csv`) is included if you prefer to create the table via Databricks UI or `COPY INTO`.
 
 ## Deploying the Job
 

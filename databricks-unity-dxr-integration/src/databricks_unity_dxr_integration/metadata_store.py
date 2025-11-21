@@ -53,6 +53,7 @@ class MetadataStore:
             USING DELTA
             """
         )
+        _validate_table_schema(self._spark, table)
 
     def upsert_records(self, records: Iterable[MetadataRecord]) -> None:
         rows = [record.as_row() for record in records]
@@ -116,3 +117,38 @@ def _build_schema():
             StructField("collected_at", TimestampType(), nullable=False),
         ]
     )
+
+
+def _validate_table_schema(spark: SparkSession, table: str) -> None:
+    schema = _build_schema()
+    if schema is None:
+        return
+
+    try:
+        actual_schema = spark.table(table).schema
+    except Exception as exc:  # pragma: no cover - requires Spark runtime
+        raise RuntimeError(f"Unable to read schema for {table}: {exc}") from exc
+
+    actual_map = {field.name: field for field in actual_schema}
+    missing = [field.name for field in schema if field.name not in actual_map]
+    mismatched = []
+    for expected in schema:
+        actual = actual_map.get(expected.name)
+        if not actual:
+            continue
+        if actual.dataType.simpleString() != expected.dataType.simpleString():
+            mismatched.append(
+                f"{expected.name} (expected {expected.dataType.simpleString()}, found {actual.dataType.simpleString()})"
+            )
+
+    if missing or mismatched:
+        problems = []
+        if missing:
+            problems.append(f"Missing columns: {', '.join(missing)}")
+        if mismatched:
+            problems.append(f"Type mismatches: {', '.join(mismatched)}")
+        message = "; ".join(problems)
+        raise ValueError(
+            f"Metadata table {table} schema does not match expected DXR schema. {message}. "
+            "Point METADATA_* variables at an empty table or drop/recreate the existing table."
+        )
