@@ -39,7 +39,11 @@ class UnityDXRJob:
             print("No files discovered in the configured volume.")
             return
 
-        batches = plan_batches(files, self._config.dxr.max_bytes_per_job)
+        batches = plan_batches(
+            files,
+            max_bytes=self._config.dxr.max_bytes_per_job,
+            max_files=self._config.dxr.max_files_per_job,
+        )
         submissions: List[tuple[SubmittedJob, List[VolumeFile]]] = []
         for batch in batches:
             job = self._submit_batch(batch)
@@ -83,8 +87,13 @@ class UnityDXRJob:
             stack.close()
 
 
-def plan_batches(files: Iterable[VolumeFile], max_bytes: int) -> List[List[VolumeFile]]:
-    """Plan file batches while respecting max bytes per job."""
+def plan_batches(files: Iterable[VolumeFile], max_bytes: int, max_files: int) -> List[List[VolumeFile]]:
+    """Plan file batches while respecting byte and file-count limits per job."""
+    if max_bytes <= 0:
+        raise ValueError("max_bytes must be positive.")
+    if max_files <= 0:
+        raise ValueError("max_files must be positive.")
+
     batches: List[List[VolumeFile]] = []
     current: List[VolumeFile] = []
     current_size = 0
@@ -92,7 +101,7 @@ def plan_batches(files: Iterable[VolumeFile], max_bytes: int) -> List[List[Volum
     for file in files:
         if file.size_bytes > max_bytes:
             raise ValueError(f"File {file.absolute_path} exceeds max_bytes_per_job limit.")
-        if current_size + file.size_bytes > max_bytes and current:
+        if (current_size + file.size_bytes > max_bytes or len(current) >= max_files) and current:
             batches.append(current)
             current = []
             current_size = 0

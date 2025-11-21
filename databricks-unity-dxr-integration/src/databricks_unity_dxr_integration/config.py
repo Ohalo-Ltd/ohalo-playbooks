@@ -52,6 +52,7 @@ class DataXRayConfig:
     datasource_id: str
     poll_interval_seconds: int = 10
     max_bytes_per_job: int = 30 * 1024 * 1024
+    max_files_per_job: int = 10
     verify_ssl: bool = True
     ca_bundle_path: Optional[str] = None
     api_prefix: str = "/api"
@@ -91,6 +92,7 @@ def load_config(env_file: Optional[str] = ".env") -> JobConfig:
         datasource_id=_require_env("DXR_DATASOURCE_ID"),
         poll_interval_seconds=int(os.environ.get("DXR_POLL_INTERVAL_SECONDS", "10")),
         max_bytes_per_job=int(os.environ.get("DXR_MAX_BYTES_PER_JOB", str(30 * 1024 * 1024))),
+        max_files_per_job=max(1, int(os.environ.get("DXR_MAX_FILES_PER_JOB", "25"))),
         verify_ssl=_env_bool("DXR_VERIFY_SSL", default=True),
         ca_bundle_path=os.environ.get("DXR_CA_BUNDLE_PATH"),
         api_prefix=_normalize_api_prefix(os.environ.get("DXR_API_PREFIX", "/api")),

@@ -35,6 +35,7 @@ Inject the following environment variables into the Databricks job task:
 | `DXR_DATASOURCE_ID` | Datasource ID for the On-Demand Classifier. |
 | `DXR_POLL_INTERVAL_SECONDS` | Poll frequency in seconds (default `10`). |
 | `DXR_MAX_BYTES_PER_JOB` | Byte budget per DXR submission (default `30MB`). |
+| `DXR_MAX_FILES_PER_JOB` | Cap files per DXR submission (default `10`). Set to `1` if your DXR deployment only supports single-file uploads. |
 | `DXR_VERIFY_SSL` | Set to `false` to allow self-signed certificates in dev/test (default `true`). |
 | `DXR_CA_BUNDLE_PATH` | Optional absolute path to a custom CA bundle for DXR TLS verification. |
 | `DXR_API_PREFIX` | Override API prefix (default `/api`). Set to empty when targeting deployments that expose endpoints at the root. |
