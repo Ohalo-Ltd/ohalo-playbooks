@@ -18,9 +18,15 @@ def test_build_metadata_records_matches_files_by_relative_path():
             "_id": "abc",
             "_source": {
                 "dxr#datasource_scan_id": 99,
-                "dxr#labels": ["Finance"],
                 "dxr#tags": ["Confidential"],
+                "dxr#manually_removed_tags": ["Public"],
+                "ds#parent_folder_paths": ["folder"],
+                "dxr#is_processed": True,
+                "dxr#ocr_used": False,
+                "metadata#MODIFIED_DATE": "2024-01-01T00:00:00Z",
                 "ds#file_name": "file1.txt",
+                "folder_id": "folder",
+                "annotations": "[]",
             },
         }
     ]
@@ -37,8 +43,12 @@ def test_build_metadata_records_matches_files_by_relative_path():
     record = records[0]
     assert isinstance(record, MetadataRecord)
     assert record.catalog_name == "cat"
-    assert record.labels == ["Finance"]
-    assert record.tags == ["Confidential"]
+    assert record.dxr_tags == ["Confidential"]
+    assert record.removed_tags == ["Public"]
+    assert record.parent_paths == ["folder"]
+    assert record.is_processed is True
+    assert record.ocr_used is False
+    assert record.annotations == "[]"
     assert record.datasource_scan_id == 99
 
 

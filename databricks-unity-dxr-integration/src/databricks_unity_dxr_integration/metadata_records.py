@@ -21,9 +21,28 @@ class MetadataRecord:
     datasource_id: str
     datasource_scan_id: Optional[int]
     job_id: str
-    labels: List[str]
-    tags: List[str]
+    file_name: Optional[str]
+    object_id: Optional[str]
+    parent_paths: List[str]
+    mime_type: Optional[str]
+    indexed_at: Optional[str]
+    sha256: Optional[str]
+    sha256_file_meta: Optional[str]
+    doc_language: Optional[str]
+    composite_type: Optional[str]
+    is_processed: Optional[bool]
+    document_status: Optional[str]
+    text_extraction_status: Optional[str]
+    metadata_extraction_status: Optional[str]
+    dxr_tags: List[str]
+    removed_tags: List[str]
+    ocr_used: Optional[bool]
     categories: List[str]
+    annotations: Optional[str]
+    folder_id: Optional[str]
+    modified_at: Optional[str]
+    binary_hash: Optional[str]
+    annotation_stats_json: Optional[str]
     raw_metadata: Dict[str, Any]
     collected_at: datetime
 
@@ -39,9 +58,28 @@ class MetadataRecord:
             "datasource_id": self.datasource_id,
             "datasource_scan_id": self.datasource_scan_id,
             "job_id": self.job_id,
-            "labels": self.labels,
-            "tags": self.tags,
+            "file_name": self.file_name,
+            "object_id": self.object_id,
+            "parent_paths": self.parent_paths,
+            "mime_type": self.mime_type,
+            "indexed_at": self.indexed_at,
+            "sha256": self.sha256,
+            "sha256_file_meta": self.sha256_file_meta,
+            "doc_language": self.doc_language,
+            "composite_type": self.composite_type,
+            "is_processed": self.is_processed,
+            "document_status": self.document_status,
+            "text_extraction_status": self.text_extraction_status,
+            "metadata_extraction_status": self.metadata_extraction_status,
+            "dxr_tags": self.dxr_tags,
+            "removed_tags": self.removed_tags,
+            "ocr_used": self.ocr_used,
             "categories": self.categories,
+            "annotations": self.annotations,
+            "folder_id": self.folder_id,
+            "modified_at": self.modified_at,
+            "binary_hash": self.binary_hash,
+            "annotation_stats_json": self.annotation_stats_json,
             "raw_metadata": json.dumps(self.raw_metadata, separators=(",", ":")),
             "collected_at": self.collected_at,
         }
@@ -77,6 +115,8 @@ def build_metadata_records(
         if file is None:
             continue
 
+        annotation_stats_json = _extract_annotation_stats(source)
+
         records.append(
             MetadataRecord(
                 file_path=file.absolute_path,
@@ -89,9 +129,28 @@ def build_metadata_records(
                 datasource_id=datasource_id,
                 datasource_scan_id=_maybe_int(source.get("dxr#datasource_scan_id")),
                 job_id=job_id,
-                labels=_coerce_str_list(source.get("dxr#labels")),
-                tags=_coerce_str_list(source.get("dxr#tags")),
+                file_name=_maybe_str(source.get("ds#file_name")),
+                object_id=_maybe_str(source.get("object_id") or source.get("dxr#file_id")),
+                parent_paths=_coerce_str_list(source.get("ds#parent_folder_paths")),
+                mime_type=_maybe_str(source.get("dxr#mime_type")),
+                indexed_at=_maybe_str(source.get("dxr#indexed_date")),
+                sha256=_maybe_str(source.get("dxr#sha_256_hash")),
+                sha256_file_meta=_maybe_str(source.get("dxr#sha_256_hash_file_meta")),
+                doc_language=_maybe_str(source.get("dxr#doc_lang")),
+                composite_type=_maybe_str(source.get("dxr#composite_type")),
+                is_processed=_maybe_bool(source.get("dxr#is_processed")),
+                document_status=_maybe_str(source.get("dxr#document_status")),
+                text_extraction_status=_maybe_str(source.get("dxr#text_extraction_status")),
+                metadata_extraction_status=_maybe_str(source.get("dxr#metadata_extraction_status")),
+                dxr_tags=_coerce_str_list(source.get("dxr#tags")),
+                removed_tags=_coerce_str_list(source.get("dxr#manually_removed_tags")),
+                ocr_used=_maybe_bool(source.get("dxr#ocr_used")),
                 categories=_coerce_str_list(source.get("ai#category")),
+                annotations=_maybe_str(source.get("annotations")),
+                folder_id=_maybe_str(source.get("folder_id")),
+                modified_at=_maybe_str(source.get("metadata#MODIFIED_DATE")),
+                binary_hash=_maybe_str(source.get("metadata#binary_hash")),
+                annotation_stats_json=annotation_stats_json,
                 raw_metadata=source,
                 collected_at=datetime.now(timezone.utc),
             )
@@ -132,3 +191,35 @@ def _coerce_str_list(value: Any) -> List[str]:
     if isinstance(value, str):
         return [value]
     return []
+
+
+def _maybe_str(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    return str(value)
+
+
+def _maybe_bool(value: Any) -> Optional[bool]:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes"}:
+            return True
+        if normalized in {"false", "0", "no"}:
+            return False
+    return None
+
+
+def _extract_annotation_stats(source: Dict[str, Any]) -> Optional[str]:
+    payload = {
+        key: value
+        for key, value in source.items()
+        if isinstance(key, str) and (key.startswith("annotation_stats#") or key.startswith("annotation."))
+    }
+    if not payload:
+        return None
+    return json.dumps(payload, separators=(",", ":"))

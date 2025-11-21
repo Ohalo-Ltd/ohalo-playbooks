@@ -9,8 +9,27 @@ modification_time,BIGINT,false,Unix epoch seconds for last modification
 datasource_id,STRING,false,Data X-Ray datasource id
 datasource_scan_id,BIGINT,true,Data X-Ray datasource scan id
 job_id,STRING,false,DXR job identifier
-labels,"ARRAY<STRING>",false,Labels returned by DXR
-tags,"ARRAY<STRING>",false,Tags returned by DXR
+file_name,STRING,true,Original filename reported by DXR
+object_id,STRING,true,Datasource object identifier
+parent_paths,"ARRAY<STRING>",false,Parent folders reported by DXR
+mime_type,STRING,true,MIME type recorded by DXR
+indexed_at,STRING,true,ISO timestamp when DXR indexed the file
+sha256,STRING,true,DXR SHA-256 hash
+sha256_file_meta,STRING,true,DXR metadata SHA-256 hash
+doc_language,STRING,true,Language detected by DXR
+composite_type,STRING,true,DXR composite type
+is_processed,BOOLEAN,true,Whether DXR completed processing
+document_status,STRING,true,DXR document status
+text_extraction_status,STRING,true,DXR text extraction status
+metadata_extraction_status,STRING,true,DXR metadata extraction status
+dxr_tags,"ARRAY<STRING>",false,Tags returned by DXR
+removed_tags,"ARRAY<STRING>",false,Tags removed manually in DXR
+ocr_used,BOOLEAN,true,Whether OCR was used
 categories,"ARRAY<STRING>",false,Categories returned by DXR
+annotations,STRING,true,Annotation summary string
+folder_id,STRING,true,Folder ID reported by DXR
+modified_at,STRING,true,Source modified timestamp
+binary_hash,STRING,true,Binary hash from metadata
+annotation_stats_json,STRING,true,JSON blob of annotation stats/details
 raw_metadata,STRING,false,Raw JSON metadata payload
 collected_at,TIMESTAMP,false,Timestamp when metadata was collected

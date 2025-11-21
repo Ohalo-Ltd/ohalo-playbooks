@@ -56,16 +56,35 @@ CREATE TABLE IF NOT EXISTS <catalog>.<schema>.<table> (
   datasource_id STRING,
   datasource_scan_id BIGINT,
   job_id STRING,
-  labels ARRAY<STRING>,
-  tags ARRAY<STRING>,
+  file_name STRING,
+  object_id STRING,
+  parent_paths ARRAY<STRING>,
+  mime_type STRING,
+  indexed_at STRING,
+  sha256 STRING,
+  sha256_file_meta STRING,
+  doc_language STRING,
+  composite_type STRING,
+  is_processed BOOLEAN,
+  document_status STRING,
+  text_extraction_status STRING,
+  metadata_extraction_status STRING,
+  dxr_tags ARRAY<STRING>,
+  removed_tags ARRAY<STRING>,
+  ocr_used BOOLEAN,
   categories ARRAY<STRING>,
+  annotations STRING,
+  folder_id STRING,
+  modified_at STRING,
+  binary_hash STRING,
+  annotation_stats_json STRING,
   raw_metadata STRING,
   collected_at TIMESTAMP
 ) USING DELTA;
 ```
 
 Rows are merged on `file_path`, so reclassifying a file simply updates its metadata.
-⚠️ **Important:** The job expects to own a table with the schema above. If you point `METADATA_*` at an existing table with a different layout, the run will fail with a descriptive schema mismatch error; either supply a fresh table name or align the schema manually. A ready-to-import CSV definition (`metadata_schema.csv`) is included if you prefer to create the table via Databricks UI or `COPY INTO`.
+⚠️ **Important:** The job expects to own a table with the schema above. If you point `METADATA_*` at an existing table with a different layout, the run will fail with a descriptive schema mismatch error; either supply a fresh table name or align the schema manually. A ready-to-import CSV definition (`metadata_schema.csv`) is included if you prefer to create the table via Databricks UI or `COPY INTO`, and it enumerates every DXR-specific column.
 
 ## Deploying the Job
 
