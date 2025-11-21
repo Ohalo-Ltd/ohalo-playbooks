@@ -1,7 +1,8 @@
 import inspect
+import os
 import sys
 from pathlib import Path
-from typing import Iterable
+from typing import Dict, Iterable
 
 PACKAGE_NAME = "databricks_unity_dxr_integration"
 
@@ -50,6 +51,52 @@ def _ensure_package_importable() -> None:
 
 
 _ensure_package_importable()
+
+
+def _parse_job_parameters(argv: list[str]) -> Dict[str, str]:
+    """Read Databricks job parameter conventions into env overrides."""
+    overrides: Dict[str, str] = {}
+    pending_key: str | None = None
+
+    for token in argv:
+        if pending_key is None:
+            if token.startswith("--"):
+                pending_key = token[2:]
+            elif "=" in token:
+                key, value = token.split("=", 1)
+                overrides[key.strip()] = value
+            else:
+                pending_key = token
+        else:
+            overrides[pending_key.strip()] = token
+            pending_key = None
+
+    if pending_key is not None:
+        raise ValueError(f"Missing value for parameter '{pending_key}'.")
+
+    normalized = {key.strip("- ").upper(): value for key, value in overrides.items() if key}
+    return normalized
+
+
+def _apply_job_parameters() -> None:
+    """Translate job parameters (CLI args) into environment variables."""
+    argv = sys.argv[1:]
+    if not argv:
+        return
+
+    overrides = _parse_job_parameters(argv)
+    if not overrides:
+        return
+
+    for key, value in overrides.items():
+        if key:
+            os.environ[key] = value
+
+    # Remove consumed parameters so downstream code doesn't see them.
+    sys.argv = sys.argv[:1]
+
+
+_apply_job_parameters()
 
 from databricks_unity_dxr_integration.job import run_job  # noqa: E402
 
