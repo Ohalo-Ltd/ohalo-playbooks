@@ -1,0 +1,6 @@
+-r requirements.txt
+
+pytest>=7.4,<8
+build>=1.2.1
+pyproject-hooks>=1.0.0
+packaging>=23.0
