@@ -40,6 +40,12 @@ class DataXRayClient:
         self._config = config
         self._session = requests.Session()
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
+        verify_setting: bool | str
+        if config.ca_bundle_path:
+            verify_setting = config.ca_bundle_path
+        else:
+            verify_setting = config.verify_ssl
+        self._session.verify = verify_setting
 
     def submit_job(self, uploads: Iterable[FileUpload]) -> SubmittedJob:
         """Submit an ODC job for the provided files."""

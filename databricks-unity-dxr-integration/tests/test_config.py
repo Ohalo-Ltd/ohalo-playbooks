@@ -1,7 +1,7 @@
 from databricks_unity_dxr_integration.config import JobConfig, load_config
 
 
-def test_load_config_from_environment(monkeypatch):
+def _seed_required_env(monkeypatch):
     monkeypatch.setenv("VOLUME_CATALOG", "governance")
     monkeypatch.setenv("VOLUME_SCHEMA", "dxr")
     monkeypatch.setenv("VOLUME_NAME", "raw")
@@ -20,6 +20,10 @@ def test_load_config_from_environment(monkeypatch):
     monkeypatch.setenv("DXR_SECRET_SCOPE", "dxr")
     monkeypatch.setenv("DXR_SECRET_KEY", "api-token")
 
+
+def test_load_config_from_environment(monkeypatch):
+    _seed_required_env(monkeypatch)
+
     config = load_config(env_file=None)
     assert isinstance(config, JobConfig)
     assert config.volume.catalog == "governance"
@@ -30,3 +34,16 @@ def test_load_config_from_environment(monkeypatch):
     assert config.dxr.base_url == "https://dxr.example.com"
     assert config.dxr.poll_interval_seconds == 5
     assert config.dxr.max_bytes_per_job == 1024
+    assert config.dxr.verify_ssl is True
+    assert config.dxr.ca_bundle_path is None
+
+
+def test_load_config_disables_ssl_verification(monkeypatch):
+    _seed_required_env(monkeypatch)
+    monkeypatch.setenv("DXR_VERIFY_SSL", "false")
+    monkeypatch.setenv("DXR_CA_BUNDLE_PATH", "/dbfs/FileStore/custom-ca.pem")
+
+    config = load_config(env_file=None)
+
+    assert config.dxr.verify_ssl is False
+    assert config.dxr.ca_bundle_path == "/dbfs/FileStore/custom-ca.pem"

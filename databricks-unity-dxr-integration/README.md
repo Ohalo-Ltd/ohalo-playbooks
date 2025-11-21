@@ -35,6 +35,8 @@ Inject the following environment variables into the Databricks job task:
 | `DXR_DATASOURCE_ID` | Datasource ID for the On-Demand Classifier. |
 | `DXR_POLL_INTERVAL_SECONDS` | Poll frequency in seconds (default `10`). |
 | `DXR_MAX_BYTES_PER_JOB` | Byte budget per DXR submission (default `30MB`). |
+| `DXR_VERIFY_SSL` | Set to `false` to allow self-signed certificates in dev/test (default `true`). |
+| `DXR_CA_BUNDLE_PATH` | Optional absolute path to a custom CA bundle for DXR TLS verification. |
 | `DXR_SECRET_SCOPE` / `DXR_SECRET_KEY` | Databricks secret scope + key that store the DXR API token. |
 | `METADATA_CATALOG`, `METADATA_SCHEMA`, `METADATA_TABLE` | Target Unity Catalog location for the managed metadata table. |
 

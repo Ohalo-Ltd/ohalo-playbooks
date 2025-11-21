@@ -52,6 +52,8 @@ class DataXRayConfig:
     datasource_id: str
     poll_interval_seconds: int = 10
     max_bytes_per_job: int = 30 * 1024 * 1024
+    verify_ssl: bool = True
+    ca_bundle_path: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +90,8 @@ def load_config(env_file: Optional[str] = ".env") -> JobConfig:
         datasource_id=_require_env("DXR_DATASOURCE_ID"),
         poll_interval_seconds=int(os.environ.get("DXR_POLL_INTERVAL_SECONDS", "10")),
         max_bytes_per_job=int(os.environ.get("DXR_MAX_BYTES_PER_JOB", str(30 * 1024 * 1024))),
+        verify_ssl=_env_bool("DXR_VERIFY_SSL", default=True),
+        ca_bundle_path=os.environ.get("DXR_CA_BUNDLE_PATH"),
     )
     return JobConfig(volume=volume, metadata_table=metadata_table, dxr=dxr, secret=secret)
 
@@ -97,3 +101,15 @@ def _require_env(key: str) -> str:
     if not value:
         raise ValueError(f"Missing required environment variable: {key}")
     return value
+
+
+def _env_bool(key: str, default: bool = True) -> bool:
+    value = os.environ.get(key)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"0", "false", "no", "off", ""}:
+        return False
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    return default
