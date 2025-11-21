@@ -5,9 +5,18 @@ from typing import Iterable, List
 
 try:  # pragma: no cover - imported at runtime on Databricks
     from pyspark.sql import DataFrame, SparkSession
+    from pyspark.sql.types import (
+        ArrayType,
+        LongType,
+        StringType,
+        StructField,
+        StructType,
+        TimestampType,
+    )
 except ImportError:  # pragma: no cover
     DataFrame = object  # type: ignore
     SparkSession = object  # type: ignore
+    ArrayType = LongType = StringType = StructField = StructType = TimestampType = None  # type: ignore
 
 from .config import MetadataTableConfig
 from .metadata_records import MetadataRecord
@@ -50,7 +59,11 @@ class MetadataStore:
         if not rows:
             return
 
-        df = self._spark.createDataFrame(rows)
+        schema = _build_schema()
+        if schema is not None:
+            df = self._spark.createDataFrame(rows, schema=schema)
+        else:  # pragma: no cover - fallback for local unit tests without PySpark
+            df = self._spark.createDataFrame(rows)
         temp_view = f"dxr_metadata_{uuid.uuid4().hex}"
         df.createOrReplaceTempView(temp_view)
 
@@ -79,3 +92,27 @@ class MetadataStore:
             """
         )
         self._spark.catalog.dropTempView(temp_view)
+
+
+def _build_schema():
+    if StructType is None:
+        return None
+    return StructType(
+        [
+            StructField("file_path", StringType(), nullable=False),
+            StructField("relative_path", StringType(), nullable=False),
+            StructField("catalog_name", StringType(), nullable=False),
+            StructField("schema_name", StringType(), nullable=False),
+            StructField("volume_name", StringType(), nullable=False),
+            StructField("file_size", LongType(), nullable=False),
+            StructField("modification_time", LongType(), nullable=False),
+            StructField("datasource_id", StringType(), nullable=False),
+            StructField("datasource_scan_id", LongType(), nullable=True),
+            StructField("job_id", StringType(), nullable=False),
+            StructField("labels", ArrayType(StringType(), containsNull=False), nullable=False),
+            StructField("tags", ArrayType(StringType(), containsNull=False), nullable=False),
+            StructField("categories", ArrayType(StringType(), containsNull=False), nullable=False),
+            StructField("raw_metadata", StringType(), nullable=False),
+            StructField("collected_at", TimestampType(), nullable=False),
+        ]
+    )

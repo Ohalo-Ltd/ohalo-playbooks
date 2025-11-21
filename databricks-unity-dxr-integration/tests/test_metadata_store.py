@@ -13,7 +13,7 @@ class StubSpark:
     def sql(self, statement: str):
         self.sql_calls.append(statement)
 
-    def createDataFrame(self, rows):
+    def createDataFrame(self, rows, schema=None):
         return StubDataFrame(rows, self)
 
     @property
