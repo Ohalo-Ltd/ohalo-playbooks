@@ -1,0 +1,16 @@
+column_name,data_type,nullable,description
+file_path,STRING,false,Absolute path to the Unity Catalog volume file
+relative_path,STRING,false,Path relative to the configured volume root
+catalog_name,STRING,false,Volume catalog name
+schema_name,STRING,false,Volume schema name
+volume_name,STRING,false,Volume name
+file_size,BIGINT,false,File size in bytes
+modification_time,BIGINT,false,Unix epoch seconds for last modification
+datasource_id,STRING,false,Data X-Ray datasource id
+datasource_scan_id,BIGINT,true,Data X-Ray datasource scan id
+job_id,STRING,false,DXR job identifier
+labels,"ARRAY<STRING>",false,Labels returned by DXR
+tags,"ARRAY<STRING>",false,Tags returned by DXR
+categories,"ARRAY<STRING>",false,Categories returned by DXR
+raw_metadata,STRING,false,Raw JSON metadata payload
+collected_at,TIMESTAMP,false,Timestamp when metadata was collected
