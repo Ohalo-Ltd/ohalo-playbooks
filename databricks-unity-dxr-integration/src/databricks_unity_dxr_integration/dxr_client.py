@@ -7,6 +7,8 @@ from typing import BinaryIO, Dict, Iterable, List, Tuple
 import requests
 from requests import Response
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+import urllib3
+from urllib3.exceptions import InsecureRequestWarning
 
 from .config import DataXRayConfig
 
@@ -46,6 +48,8 @@ class DataXRayClient:
         else:
             verify_setting = config.verify_ssl
         self._session.verify = verify_setting
+        if verify_setting is False:
+            urllib3.disable_warnings(InsecureRequestWarning)
 
     def submit_job(self, uploads: Iterable[FileUpload]) -> SubmittedJob:
         """Submit an ODC job for the provided files."""
@@ -54,7 +58,7 @@ class DataXRayClient:
             raise ValueError("At least one file must be supplied to submit a job.")
 
         response = self._session.post(
-            f"{self._config.base_url}/api/on-demand-classifiers/{self._config.datasource_id}/jobs",
+            self._build_url(f"on-demand-classifiers/{self._config.datasource_id}/jobs"),
             files=file_entries,
             timeout=300,
         )
@@ -69,7 +73,7 @@ class DataXRayClient:
     def get_job(self, job_id: str) -> dict:
         """Fetch the status of an On-Demand Classifier job."""
         response = self._session.get(
-            f"{self._config.base_url}/api/on-demand-classifiers/{self._config.datasource_id}/jobs/{job_id}"
+            self._build_url(f"on-demand-classifiers/{self._config.datasource_id}/jobs/{job_id}")
         )
         _raise_for_status(response)
         return response.json()
@@ -112,7 +116,7 @@ class DataXRayClient:
             "sort": [{"property": "_score", "order": "DESCENDING"}],
         }
         response = self._session.post(
-            f"{self._config.base_url}/api/indexed-files/search",
+            self._build_url("indexed-files/search"),
             json=payload,
             headers={"Content-Type": "application/json"},
             timeout=60,
@@ -125,4 +129,17 @@ def _raise_for_status(response: Response) -> None:
     try:
         response.raise_for_status()
     except requests.HTTPError as exc:
-        raise DataXRayError(str(exc)) from exc
+        body = (response.text or "").strip()
+        message = f"{exc}"
+        if body:
+            snippet = body if len(body) < 512 else f"{body[:512]}..."
+            message = f"{message}; response body: {snippet}"
+        raise DataXRayError(message) from exc
+    def _build_url(self, path: str) -> str:
+        base = self._config.base_url.rstrip("/")
+        prefix = self._config.api_prefix
+        segments = [base]
+        if prefix:
+            segments.append(prefix.lstrip("/"))
+        segments.append(path.lstrip("/"))
+        return "/".join(segment for segment in segments if segment)

@@ -54,6 +54,7 @@ class DataXRayConfig:
     max_bytes_per_job: int = 30 * 1024 * 1024
     verify_ssl: bool = True
     ca_bundle_path: Optional[str] = None
+    api_prefix: str = "/api"
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,7 @@ def load_config(env_file: Optional[str] = ".env") -> JobConfig:
         max_bytes_per_job=int(os.environ.get("DXR_MAX_BYTES_PER_JOB", str(30 * 1024 * 1024))),
         verify_ssl=_env_bool("DXR_VERIFY_SSL", default=True),
         ca_bundle_path=os.environ.get("DXR_CA_BUNDLE_PATH"),
+        api_prefix=_normalize_api_prefix(os.environ.get("DXR_API_PREFIX", "/api")),
     )
     return JobConfig(volume=volume, metadata_table=metadata_table, dxr=dxr, secret=secret)
 
@@ -113,3 +115,14 @@ def _env_bool(key: str, default: bool = True) -> bool:
     if normalized in {"1", "true", "yes", "on"}:
         return True
     return default
+
+
+def _normalize_api_prefix(raw: Optional[str]) -> str:
+    if not raw:
+        return ""
+    prefix = raw.strip()
+    if not prefix or prefix == "/":
+        return ""
+    if not prefix.startswith("/"):
+        prefix = f"/{prefix}"
+    return prefix.rstrip("/")

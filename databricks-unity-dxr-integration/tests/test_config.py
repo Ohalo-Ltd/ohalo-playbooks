@@ -36,6 +36,7 @@ def test_load_config_from_environment(monkeypatch):
     assert config.dxr.max_bytes_per_job == 1024
     assert config.dxr.verify_ssl is True
     assert config.dxr.ca_bundle_path is None
+    assert config.dxr.api_prefix == "/api"
 
 
 def test_load_config_disables_ssl_verification(monkeypatch):
@@ -47,3 +48,12 @@ def test_load_config_disables_ssl_verification(monkeypatch):
 
     assert config.dxr.verify_ssl is False
     assert config.dxr.ca_bundle_path == "/dbfs/FileStore/custom-ca.pem"
+
+
+def test_load_config_normalizes_api_prefix(monkeypatch):
+    _seed_required_env(monkeypatch)
+    monkeypatch.setenv("DXR_API_PREFIX", "v1 ")
+
+    config = load_config(env_file=None)
+
+    assert config.dxr.api_prefix == "/v1"
