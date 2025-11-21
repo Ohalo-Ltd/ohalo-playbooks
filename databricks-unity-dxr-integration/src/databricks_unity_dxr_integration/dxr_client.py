@@ -124,6 +124,15 @@ class DataXRayClient:
         _raise_for_status(response)
         return response.json().get("hits", {}).get("hits", [])
 
+    def _build_url(self, path: str) -> str:
+        base = self._config.base_url.rstrip("/")
+        prefix = self._config.api_prefix
+        segments = [base]
+        if prefix:
+            segments.append(prefix.lstrip("/"))
+        segments.append(path.lstrip("/"))
+        return "/".join(segment for segment in segments if segment)
+
 
 def _raise_for_status(response: Response) -> None:
     try:
