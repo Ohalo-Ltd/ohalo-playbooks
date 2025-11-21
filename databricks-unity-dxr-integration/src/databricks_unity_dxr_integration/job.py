@@ -31,7 +31,7 @@ class UnityDXRJob:
         self._dxr = dxr_client
         self._scanner = UnityVolumeScanner(config.volume)
         self._metadata_store = MetadataStore(spark, config.metadata_table)
-        self._metadata_store.ensure_table()
+        self._metadata_store.ensure_table(drop_existing=config.drop_metadata_table)
 
     def run(self) -> None:
         files = self._scanner.list_files()

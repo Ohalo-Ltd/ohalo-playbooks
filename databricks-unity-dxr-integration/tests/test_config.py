@@ -45,12 +45,14 @@ def test_load_config_disables_ssl_verification(monkeypatch):
     monkeypatch.setenv("DXR_VERIFY_SSL", "false")
     monkeypatch.setenv("DXR_CA_BUNDLE_PATH", "/dbfs/FileStore/custom-ca.pem")
     monkeypatch.setenv("DXR_MAX_FILES_PER_JOB", "1")
+    monkeypatch.setenv("DXR_DROP_METADATA_TABLE", "true")
 
     config = load_config(env_file=None)
 
     assert config.dxr.verify_ssl is False
     assert config.dxr.ca_bundle_path == "/dbfs/FileStore/custom-ca.pem"
     assert config.dxr.max_files_per_job == 1
+    assert config.drop_metadata_table is True
 
 
 def test_load_config_normalizes_api_prefix(monkeypatch):

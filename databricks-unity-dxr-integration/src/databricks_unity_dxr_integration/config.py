@@ -64,6 +64,7 @@ class JobConfig:
     metadata_table: MetadataTableConfig
     dxr: DataXRayConfig
     secret: SecretConfig
+    drop_metadata_table: bool = False
 
 
 def load_config(env_file: Optional[str] = ".env") -> JobConfig:
@@ -93,7 +94,14 @@ def load_config(env_file: Optional[str] = ".env") -> JobConfig:
         ca_bundle_path=os.environ.get("DXR_CA_BUNDLE_PATH"),
         api_prefix=_normalize_api_prefix(os.environ.get("DXR_API_PREFIX", "/api")),
     )
-    return JobConfig(volume=volume, metadata_table=metadata_table, dxr=dxr, secret=secret)
+    drop_table = _env_bool("DXR_DROP_METADATA_TABLE", default=False)
+    return JobConfig(
+        volume=volume,
+        metadata_table=metadata_table,
+        dxr=dxr,
+        secret=secret,
+        drop_metadata_table=drop_table,
+    )
 
 
 def _require_env(key: str) -> str:

@@ -35,10 +35,11 @@ Inject the following environment variables into the Databricks job task:
 | `DXR_DATASOURCE_ID` | Datasource ID for the On-Demand Classifier. |
 | `DXR_POLL_INTERVAL_SECONDS` | Poll frequency in seconds (default `10`). |
 | `DXR_MAX_BYTES_PER_JOB` | Byte budget per DXR submission (default `30MB`). |
-| `DXR_MAX_FILES_PER_JOB` | Cap files per DXR submission (default `10`). Set to `1` if your DXR deployment only supports single-file uploads. |
+| `DXR_MAX_FILES_PER_JOB` | Cap files per DXR submission (default `25`). Set to `1` if your DXR deployment only supports single-file uploads. |
 | `DXR_VERIFY_SSL` | Set to `false` to allow self-signed certificates in dev/test (default `true`). |
 | `DXR_CA_BUNDLE_PATH` | Optional absolute path to a custom CA bundle for DXR TLS verification. |
 | `DXR_API_PREFIX` | Override API prefix (default `/api`). Set to empty when targeting deployments that expose endpoints at the root. |
+| `DXR_DROP_METADATA_TABLE` | Set to `true` to drop and recreate the metadata table on each run (useful when updating the schema). Defaults to `false`. |
 | `DXR_SECRET_SCOPE` / `DXR_SECRET_KEY` | Databricks secret scope + key that store the DXR API token. |
 | `METADATA_CATALOG`, `METADATA_SCHEMA`, `METADATA_TABLE` | Target Unity Catalog location for the managed metadata table. When omitted, catalog/schema default to the volume’s catalog/schema and the table name defaults to `<VOLUME_NAME>_metadata`. |
 
