@@ -1,16 +1,16 @@
 from databricks_unity_dxr_integration.config import JobConfig, load_config
 
 
-def _seed_required_env(monkeypatch):
+def _seed_required_env(monkeypatch, include_metadata: bool = True):
     monkeypatch.setenv("VOLUME_CATALOG", "governance")
     monkeypatch.setenv("VOLUME_SCHEMA", "dxr")
     monkeypatch.setenv("VOLUME_NAME", "raw")
     monkeypatch.setenv("VOLUME_BASE_PATH", "/tmp/volumes")
     monkeypatch.setenv("VOLUME_PREFIX", "incoming")
-
-    monkeypatch.setenv("METADATA_CATALOG", "governance")
-    monkeypatch.setenv("METADATA_SCHEMA", "dxr")
-    monkeypatch.setenv("METADATA_TABLE", "file_metadata")
+    if include_metadata:
+        monkeypatch.setenv("METADATA_CATALOG", "governance")
+        monkeypatch.setenv("METADATA_SCHEMA", "dxr")
+        monkeypatch.setenv("METADATA_TABLE", "file_metadata")
 
     monkeypatch.setenv("DXR_BASE_URL", "https://dxr.example.com")
     monkeypatch.setenv("DXR_DATASOURCE_ID", "42")
@@ -60,3 +60,11 @@ def test_load_config_normalizes_api_prefix(monkeypatch):
     config = load_config(env_file=None)
 
     assert config.dxr.api_prefix == "/v1"
+
+
+def test_metadata_table_defaults_to_volume(monkeypatch):
+    _seed_required_env(monkeypatch, include_metadata=False)
+    config = load_config(env_file=None)
+    assert config.metadata_table.catalog == config.volume.catalog
+    assert config.metadata_table.schema == config.volume.schema
+    assert config.metadata_table.table == f"{config.volume.volume}_metadata"

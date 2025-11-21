@@ -78,11 +78,7 @@ def load_config(env_file: Optional[str] = ".env") -> JobConfig:
         base_path=os.environ.get("VOLUME_BASE_PATH", "/Volumes"),
         prefix=os.environ.get("VOLUME_PREFIX"),
     )
-    metadata_table = MetadataTableConfig(
-        catalog=_require_env("METADATA_CATALOG"),
-        schema=_require_env("METADATA_SCHEMA"),
-        table=_require_env("METADATA_TABLE"),
-    )
+    metadata_table = _resolve_metadata_table(volume)
     secret = SecretConfig(
         scope=_require_env("DXR_SECRET_SCOPE"),
         key=_require_env("DXR_SECRET_KEY"),
@@ -128,3 +124,19 @@ def _normalize_api_prefix(raw: Optional[str]) -> str:
     if not prefix.startswith("/"):
         prefix = f"/{prefix}"
     return prefix.rstrip("/")
+
+
+def _resolve_metadata_table(volume: VolumeConfig) -> MetadataTableConfig:
+    catalog = _env_with_default("METADATA_CATALOG", volume.catalog)
+    schema = _env_with_default("METADATA_SCHEMA", volume.schema)
+    default_table = f"{volume.volume}_metadata"
+    table = _env_with_default("METADATA_TABLE", default_table)
+    return MetadataTableConfig(catalog=catalog, schema=schema, table=table)
+
+
+def _env_with_default(key: str, default: str) -> str:
+    value = os.environ.get(key)
+    if value is None:
+        return default
+    stripped = value.strip()
+    return stripped or default
