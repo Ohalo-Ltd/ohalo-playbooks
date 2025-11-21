@@ -1,3 +1,4 @@
+import inspect
 import sys
 from pathlib import Path
 from typing import Iterable
@@ -12,8 +13,26 @@ def _possible_package_roots(script_path: Path) -> Iterable[Path]:
         yield parent
 
 
+def _discover_script_path() -> Path:
+    """Best effort path detection for Databricks notebook exec contexts."""
+    if "__file__" in globals():
+        return Path(__file__).resolve()  # type: ignore[name-defined]
+
+    frame = inspect.currentframe()
+    while frame:
+        filename = frame.f_code.co_filename
+        if filename and filename not in ("<stdin>", "<string>"):
+            return Path(filename).resolve()
+        frame = frame.f_back
+
+    if sys.argv and sys.argv[0]:
+        return Path(sys.argv[0]).resolve()
+
+    return Path.cwd()
+
+
 def _ensure_package_importable() -> None:
-    script_path = Path(__file__).resolve()
+    script_path = _discover_script_path()
     for candidate in _possible_package_roots(script_path):
         package_dir = candidate / PACKAGE_NAME
         if package_dir.exists():
