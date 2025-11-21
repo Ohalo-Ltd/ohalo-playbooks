@@ -1,6 +1,6 @@
 # Data X-Ray ↔ Databricks Unity Catalog Integration Playbook
 
-This playbook ships a Databricks **Python script job** that scans a Unity Catalog Volume, submits files to the Data X-Ray On-Demand Classifier (ODC), and persists the returned metadata into a managed Unity Catalog table. The previous wheel-based flow has been replaced with a standalone script (`scripts/run_pipeline.py`) so jobs can run directly on Databricks without packaging.
+This playbook ships a Databricks **Python script job** that scans a Unity Catalog Volume, submits files to the Data X-Ray On-Demand Classifier (ODC), and persists the returned metadata into a managed Unity Catalog table. Jobs can run directly on Databricks without packaging.
 
 ## How It Works
 
