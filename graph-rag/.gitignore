@@ -1,0 +1,15 @@
+.env
+*.log
+*.pyc
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+node_modules/
+.next/
+dist/
+build/
+*.egg-info/
+.DS_Store
