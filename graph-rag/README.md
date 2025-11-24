@@ -16,13 +16,21 @@ A full-stack Graph-based Retrieval Augmented Generation (RAG) system that combin
 - ✅ PostgreSQL-based job tracking
 
 **Phase 2: Graph-Augmented Retrieval** ✅
-- ✅ Multi-tool agent (4 tools: vector search, entity lookup, graph neighbors, Cypher queries)
-- ✅ Hybrid search combining vector similarity + graph expansion
-- ✅ Dynamic schema discovery and analysis
+- ✅ Multi-tool agent (5 tools: schema discovery, vector search, entity lookup, graph neighbors, Cypher queries)
+- ✅ Agent-orchestrated hybrid search (removes pre-packaged hybrid service)
+- ✅ Dynamic schema discovery as agent tool
 - ✅ Graph traversal methods (neighbors, relationships, paths)
 - ✅ Safe Cypher query execution (read-only)
+- ✅ Customizable system prompts per project
+- ✅ Project management UI with sidebar
+- ✅ System prompt editor with tabs
 - ✅ Enhanced UI with entity and relationship display
-- ✅ Schema API endpoints for graph introspection
+
+**Phase 2 Architecture Improvements** 🔄
+- Removed hybrid search service (agent orchestrates instead)
+- Schema discovery is now an agent tool (agent introspects graph)
+- Customizable system prompts stored in PostgreSQL
+- Cleaner, more flexible agent-centric architecture
 
 ### Coming Next
 - **Phase 3**: Interactive graph visualization and advanced reasoning
