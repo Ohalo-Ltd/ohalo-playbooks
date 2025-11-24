@@ -6,6 +6,9 @@ Welcome to the **ohalo-playbooks** repository! This repo aggregates automation p
 
 This repository currently includes the following playbooks:
 
+- **[`graph-rag`](./graph-rag/)**  
+  Knowledge graph-powered RAG system that combines vector search with graph reasoning for intelligent document retrieval. Uses Neo4j for entity relationships, OpenAI for embeddings, and Pydantic AI for agentic Q&A. See the [README](./graph-rag/README.md) for setup and Phase 1 capabilities.
+
 - **[`rag-app`](./rag-app/)**  
   Full-stack Retrieval Augmented Generation demo that helps teams surface institutional knowledge in seconds, pairing a FastAPI + Postgres backend with a Next.js frontend for rapid iteration. Check the [README](./rag-app/README.md) in the folder for environment setup and developer workflow details.
 
