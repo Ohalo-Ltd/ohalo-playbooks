@@ -1,11 +1,14 @@
 """API endpoints for chat/query functionality."""
 
+import asyncio
+import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from agent.query_agent import query
+from agent.query_agent import query, query_with_steps
 from database.neo4j_client import Neo4jClient
 from database.postgres_client import PostgresClient
 from ingestion.embedder import EmbeddingService
@@ -143,3 +146,81 @@ async def query_endpoint(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/query/stream")
+async def stream_query_endpoint(
+    request: QueryRequest,
+    neo4j_client: Neo4jClient = Depends(get_neo4j_client),
+    embedding_service: EmbeddingService = Depends(get_embedding_service),
+    pg_client: PostgresClient = Depends(get_postgres_client),
+) -> StreamingResponse:
+    """Stream agent reasoning steps via Server-Sent Events.
+
+    This endpoint provides real-time visibility into the agent's decision-making:
+    - thinking events: Agent reasoning
+    - tool_call_start: Tool invocation with parameters
+    - tool_call_result: Tool execution results
+    - answer: Final response
+
+    Args:
+        request: Query request
+        neo4j_client: Neo4j client
+        embedding_service: Embedding service
+        pg_client: Postgres client
+
+    Returns:
+        StreamingResponse with SSE events
+    """
+
+    async def event_generator():
+        """Generate SSE events for agent steps."""
+        try:
+            # Fetch custom system prompt if available
+            system_prompt = None
+            if request.project_id != "default":
+                try:
+                    project_row = await pg_client.fetchrow(
+                        "SELECT system_prompt FROM projects WHERE id = $1",
+                        UUID(request.project_id),
+                    )
+                    if project_row and project_row["system_prompt"]:
+                        system_prompt = project_row["system_prompt"]
+                except (ValueError, Exception):
+                    pass
+
+            # Emit initial thinking event
+            yield f"data: {json.dumps({'type': 'thinking', 'content': 'Analyzing your question...'})}\n\n"
+            await asyncio.sleep(0.1)  # Small delay for visual feedback
+
+            # Run agent with step instrumentation
+            async for step in query_with_steps(
+                question=request.question,
+                neo4j_client=neo4j_client,
+                embedding_service=embedding_service,
+                project_id=request.project_id,
+                system_prompt=system_prompt,
+            ):
+                # Emit step as SSE event
+                yield f"data: {json.dumps(step)}\n\n"
+                await asyncio.sleep(0.05)  # Throttle for better UX
+
+            # Signal completion
+            yield "data: [DONE]\n\n"
+
+        except Exception as e:
+            error_event = {
+                "type": "error",
+                "message": str(e),
+            }
+            yield f"data: {json.dumps(error_event)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        },
+    )

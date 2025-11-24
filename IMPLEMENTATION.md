@@ -253,49 +253,209 @@ graph-rag/
 
 ---
 
-## Phase 3: The Visual Graph (3 weeks)
+## Phase 3: Intelligent Visual Reasoning (3 weeks)
+
+### Vision
+
+Transform the chat interface into a transparent reasoning workspace where users can see exactly how the RAG agent thinks and explores the knowledge graph. Each agent action becomes an interactive, expandable component that visualizes graph operations in real-time.
+
+**Key Principle**: Show the agent's reasoning process, not just the final answer.
 
 ### Goals
-- Provide visual exploration of the graph
-- Enable visual schema management
-- Add observability and metrics
+- Surface agent reasoning steps in the chat UI
+- Visualize graph operations interactively
+- Enable users to explore agent discoveries
+- Demonstrate DXR → Graph → RAG value chain
 
-### Sprint 3.1: Graph Visualization (Week 7)
+### Sprint 3.1: Agent Reasoning UI (Week 7)
 
-#### 3.1.1 Interactive Graph Browser
-**Owner**: Frontend Dev
-**Duration**: 5 days
-- [ ] Implement force-directed graph view (react-force-graph)
-- [ ] Add node expansion (click to load neighbors)
-- [ ] Add filtering by node type/relationship
-
-### Sprint 3.2: Schema Designer (Week 8)
-
-#### 3.2.1 Visual Schema Editor
-**Owner**: Frontend Dev
-**Duration**: 5 days
-- [ ] Drag-and-drop schema builder
-- [ ] Visual relationship mapping
-- [ ] Export/Import schema JSON
-
-### Sprint 3.3: Observability (Week 9)
-
-#### 3.3.1 Logfire Integration
-**Owner**: Backend Dev 1
+#### 3.1.1 Streaming Agent Steps
+**Owner**: Backend Dev + Frontend Dev  
 **Duration**: 3 days
-- [ ] Instrument Agent and Tools with Logfire
-- [ ] Create traces for query execution
 
-#### 3.3.2 Dashboards
-**Owner**: Frontend Dev
+**Backend:**
+- [ ] Modify agent to emit reasoning steps via Server-Sent Events (SSE)
+- [ ] Create `/api/chat/query/stream` endpoint
+- [ ] Emit step events: `tool_call_start`, `tool_call_result`, `thinking`, `answer`
+- [ ] Include tool name, parameters, and results in events
+
+**Frontend:**
+- [ ] Create `ReasoningStep` component (expandable/collapsible)
+- [ ] Implement SSE client for streaming responses
+- [ ] Show "Learning about the graph structure..." with loading state
+- [ ] Display tool calls as expandable cards
+
+**Acceptance Criteria**:
+- User sees real-time updates as agent thinks
+- Each tool call appears as an expandable step
+- Steps can be collapsed/expanded independently
+- Final answer appears after all reasoning steps
+
+#### 3.1.2 Minimal Chat UI Redesign
+**Owner**: Frontend Dev  
 **Duration**: 2 days
-- [ ] Create project overview dashboard
-- [ ] Show ingestion stats and query history
+
+- [ ] Simplify chat interface (remove heavy cards)
+- [ ] Focus on reasoning step timeline
+- [ ] Add step-by-step visual indicators (icons per tool)
+- [ ] Implement smooth animations for step expansion
+
+**Acceptance Criteria**:
+- Clean, minimal chat interface
+- Clear visual hierarchy for reasoning steps
+- Smooth expand/collapse animations
+
+### Sprint 3.2: Interactive Graph Visualization (Week 8)
+
+#### 3.2.1 Inline Graph Preview Component
+**Owner**: Frontend Dev  
+**Duration**: 4 days
+
+- [ ] Install react-force-graph-2d or similar library
+- [ ] Create `GraphPreview` component (embedded in reasoning step)
+- [ ] Show nodes as bubbles with labels
+- [ ] Show relationships as directed edges
+- [ ] Color-code nodes by entity type
+- [ ] Add hover tooltips for node properties
+
+**Tech Choice**: 
+- Consider: react-force-graph-2d, vis-network, or cytoscape.js
+- Must support: click events, property inspection, responsive sizing
+
+**Acceptance Criteria**:
+- Graph renders within reasoning step card (300px height)
+- Nodes are clickable to view properties
+- Relationships show type labels
+- Responsive to container size
+
+#### 3.2.2 Full-Screen Graph Explorer
+**Owner**: Frontend Dev  
+**Duration**: 3 days
+
+- [ ] Create modal/dialog for expanded graph view
+- [ ] Add "Expand" button to inline graph preview
+- [ ] Implement full-screen graph with controls:
+  - Zoom in/out
+  - Pan
+  - Search for nodes
+  - Filter by node type
+  - Export as PNG/SVG
+- [ ] Show property panel on node click
+- [ ] Add relationship inspector
+
+**Acceptance Criteria**:
+- Click "Expand" opens full-screen modal
+- All graph interactions work at full size
+- Property panel shows node/relationship metadata
+- Can export graph visualization
+
+#### 3.2.3 Tool-Specific Visualizations
+**Owner**: Frontend Dev  
+**Duration**: 3 days
+
+- [ ] `discover_schema` → Show schema diagram (entity types + relationships)
+- [ ] `entity_lookup` → Show matched entities as cards
+- [ ] `graph_neighbors` → Show ego network (central node + neighbors)
+- [ ] `graph_query` → Show Cypher results as interactive graph
+- [ ] `vector_search` → Show document chunks with relevance scores
+
+**Acceptance Criteria**:
+- Each tool type has custom visualization
+- Visualizations are consistent with tool semantics
+- User can understand what the agent discovered
+
+### Sprint 3.3: Interactive Exploration Features (Week 9)
+
+#### 3.3.1 Click-to-Expand Node Neighbors
+**Owner**: Frontend Dev  
+**Duration**: 2 days
+
+- [ ] Add double-click handler on graph nodes
+- [ ] Fetch neighbors on demand via API
+- [ ] Animate new nodes appearing in graph
+- [ ] Maintain graph layout with force simulation
+
+**API Endpoint**:
+```
+GET /api/graph/nodes/{node_id}/neighbors?depth=1
+```
+
+**Acceptance Criteria**:
+- Double-click node fetches and displays neighbors
+- Graph layout adjusts smoothly
+- Loading state shown while fetching
+- Max depth limit enforced (3 hops)
+
+#### 3.3.2 Property Inspector Panel
+**Owner**: Frontend Dev  
+**Duration**: 2 days
+
+- [ ] Create side panel for selected node/relationship
+- [ ] Show all properties in tabular format
+- [ ] Display metadata (type, id, source document)
+- [ ] Add "View in Neo4j Browser" link (if available)
+- [ ] Show connected relationships list
+
+**Acceptance Criteria**:
+- Click node opens property panel
+- All properties visible and formatted
+- Can navigate to related nodes
+- Panel closes on deselect
+
+#### 3.3.3 Reasoning Step Export
+**Owner**: Frontend Dev  
+**Duration**: 1 day
+
+- [ ] Add "Export Reasoning" button to chat
+- [ ] Export as JSON with all steps and results
+- [ ] Export as PDF report (optional)
+- [ ] Copy reasoning steps to clipboard
+
+**Acceptance Criteria**:
+- Can export full reasoning trace
+- JSON includes all tool calls and results
+- Shareable for debugging/documentation
+
+### Sprint 3.4: DXR → Graph Value Chain (Week 9)
+
+#### 3.4.1 Source Traceability
+**Owner**: Backend Dev  
+**Duration**: 2 days
+
+- [ ] Track which DXR file each entity came from
+- [ ] Store `source_file_id` on Entity nodes
+- [ ] Add endpoint to get DXR file details
+- [ ] Show source attribution in property panel
+
+**Acceptance Criteria**:
+- Each entity links back to source DXR file
+- User can see original file that contributed entity
+- Property panel shows "Source: file-123.pdf"
+
+#### 3.4.2 Metadata Lineage Visualization
+**Owner**: Frontend Dev  
+**Duration**: 2 days
+
+- [ ] Create "How did we get this?" feature
+- [ ] Show lineage: DXR File → Extractor → Entity → Graph → RAG Answer
+- [ ] Visualize as flow diagram
+- [ ] Accessible from property panel
+
+**Acceptance Criteria**:
+- User can trace any entity back to DXR source
+- Flow diagram shows extraction → storage → retrieval
+- Clear demonstration of value chain
 
 **Phase 3 Deliverables**:
-- ✅ Interactive Graph Explorer
-- ✅ Visual Schema Designer
-- ✅ Full Observability
+- ✅ Streaming agent reasoning UI with expandable steps
+- ✅ Interactive graph visualization (inline + full-screen)
+- ✅ Tool-specific visualizations (schema, neighbors, Cypher results)
+- ✅ Node property inspector and click-to-expand
+- ✅ DXR → Graph → RAG value chain visualization
+- ✅ Reasoning step export functionality
+
+**Value Proposition**:
+Users can literally see how DXR metadata flows into the knowledge graph and how the RAG agent formulates answers by exploring that graph structure. This transparency builds trust and demonstrates the power of graph-based RAG.
 
 ---
 

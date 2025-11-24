@@ -1,5 +1,6 @@
 """Query agent with vector search tool."""
 
+from collections.abc import AsyncIterator
 from typing import Any
 
 from pydantic import BaseModel
@@ -9,6 +10,16 @@ from database.neo4j_client import Neo4jClient
 from ingestion.embedder import EmbeddingService
 
 
+class AgentStep(BaseModel):
+    """Agent execution step for streaming."""
+
+    type: str  # 'thinking', 'tool_call_start', 'tool_call_result', 'answer'
+    content: str | None = None
+    tool: str | None = None
+    args: dict[str, Any] | None = None
+    result: Any = None
+
+
 class AgentDependencies(BaseModel):
     """Dependencies for the query agent."""
 
@@ -16,6 +27,7 @@ class AgentDependencies(BaseModel):
     embedding_service: EmbeddingService
     project_id: str
     system_prompt: str | None = None
+    step_callback: Any | None = None  # Async callback for streaming steps
 
     class Config:
         arbitrary_types_allowed = True
@@ -88,6 +100,16 @@ async def discover_schema(
     Returns:
         Formatted markdown description of the graph schema
     """
+    # Emit tool start event if callback is available
+    if ctx.deps.step_callback:
+        await ctx.deps.step_callback(
+            AgentStep(
+                type="tool_call_start",
+                tool="discover_schema",
+                args={},
+            )
+        )
+
     # Get entity types and counts
     entity_query = """
     MATCH (e:Entity)
@@ -147,6 +169,21 @@ async def discover_schema(
 
     schema_md += f"\n**Total Relationships**: {total_relationships}\n"
 
+    # Emit tool result event
+    if ctx.deps.step_callback:
+        await ctx.deps.step_callback(
+            AgentStep(
+                type="tool_call_result",
+                tool="discover_schema",
+                result={
+                    "schema": schema_md,
+                    "entity_count": total_entities,
+                    "relationship_count": total_relationships,
+                    "entity_types": [r.get("entity_type") for r in entity_results],
+                },
+            )
+        )
+
     return schema_md
 
 
@@ -166,6 +203,16 @@ async def vector_search(
     Returns:
         List of relevant search results
     """
+    # Emit tool start event
+    if ctx.deps.step_callback:
+        await ctx.deps.step_callback(
+            AgentStep(
+                type="tool_call_start",
+                tool="vector_search",
+                args={"query": query, "top_k": top_k},
+            )
+        )
+
     # Generate embedding for query
     embedding = await ctx.deps.embedding_service.generate_embedding(query)
 
@@ -195,6 +242,19 @@ async def vector_search(
             )
         )
 
+    # Emit tool result event
+    if ctx.deps.step_callback:
+        await ctx.deps.step_callback(
+            AgentStep(
+                type="tool_call_result",
+                tool="vector_search",
+                result={
+                    "results": [r.model_dump() for r in search_results],
+                    "count": len(search_results),
+                },
+            )
+        )
+
     return search_results
 
 
@@ -214,6 +274,16 @@ async def entity_lookup(
     Returns:
         List of matching entities with their properties
     """
+    # Emit tool start event
+    if ctx.deps.step_callback:
+        await ctx.deps.step_callback(
+            AgentStep(
+                type="tool_call_start",
+                tool="entity_lookup",
+                args={"entity_name": entity_name, "fuzzy": fuzzy},
+            )
+        )
+
     results = await ctx.deps.neo4j_client.entity_lookup(
         entity_name=entity_name,
         fuzzy=fuzzy,
@@ -229,6 +299,16 @@ async def entity_lookup(
                 "type": entity_node.get("type", ""),
                 "properties": entity_node,
             }
+        )
+
+    # Emit tool result event
+    if ctx.deps.step_callback:
+        await ctx.deps.step_callback(
+            AgentStep(
+                type="tool_call_result",
+                tool="entity_lookup",
+                result={"entities": entities, "count": len(entities)},
+            )
         )
 
     return entities
@@ -252,6 +332,20 @@ async def graph_neighbors(
     Returns:
         Dictionary with neighboring entities and their relationships
     """
+    # Emit tool start event
+    if ctx.deps.step_callback:
+        await ctx.deps.step_callback(
+            AgentStep(
+                type="tool_call_start",
+                tool="graph_neighbors",
+                args={
+                    "entity_id": entity_id,
+                    "relationship_types": relationship_types,
+                    "max_depth": max_depth,
+                },
+            )
+        )
+
     results = await ctx.deps.neo4j_client.get_neighbors(
         node_id=entity_id,
         relationship_types=relationship_types,
@@ -275,6 +369,20 @@ async def graph_neighbors(
                 "relationships": relationships,
                 "depth": depth,
             }
+        )
+
+    # Emit tool result event
+    if ctx.deps.step_callback:
+        await ctx.deps.step_callback(
+            AgentStep(
+                type="tool_call_result",
+                tool="graph_neighbors",
+                result={
+                    "source_entity_id": entity_id,
+                    "neighbors": neighbors,
+                    "total_found": len(neighbors),
+                },
+            )
         )
 
     return {
@@ -309,14 +417,47 @@ async def graph_query(
       MATCH path = shortestPath((a:Entity {name: $name1})-[*]-(b:Entity {name: $name2}))
       RETURN path
     """
+    # Emit tool start event
+    if ctx.deps.step_callback:
+        await ctx.deps.step_callback(
+            AgentStep(
+                type="tool_call_start",
+                tool="graph_query",
+                args={"cypher_query": cypher_query, "parameters": parameters},
+            )
+        )
+
     try:
         results = await ctx.deps.neo4j_client.execute_safe_cypher(
             cypher_query=cypher_query,
             parameters=parameters or {},
         )
+
+        # Emit tool result event
+        if ctx.deps.step_callback:
+            await ctx.deps.step_callback(
+                AgentStep(
+                    type="tool_call_result",
+                    tool="graph_query",
+                    result={"results": results, "count": len(results)},
+                )
+            )
+
         return results
     except ValueError as e:
-        return [{"error": str(e)}]
+        error_result = [{"error": str(e)}]
+
+        # Emit error result
+        if ctx.deps.step_callback:
+            await ctx.deps.step_callback(
+                AgentStep(
+                    type="tool_call_result",
+                    tool="graph_query",
+                    result={"error": str(e)},
+                )
+            )
+
+        return error_result
 
 
 async def query(
@@ -360,3 +501,62 @@ async def query(
     result = await agent.run(question, deps=deps)
 
     return result.data
+
+
+async def query_with_steps(
+    question: str,
+    neo4j_client: Neo4jClient,
+    embedding_service: EmbeddingService,
+    project_id: str,
+    system_prompt: str | None = None,
+) -> AsyncIterator[dict[str, Any]]:
+    """Query the knowledge graph with step-by-step streaming.
+
+    Args:
+        question: User question
+        neo4j_client: Neo4j client instance
+        embedding_service: Embedding service instance
+        project_id: Project ID
+        system_prompt: Optional custom system prompt
+
+    Yields:
+        Agent step events (tool calls, results, final answer)
+    """
+    steps: list[AgentStep] = []
+
+    async def step_callback(step: AgentStep):
+        """Collect steps for yielding."""
+        steps.append(step)
+
+    deps = AgentDependencies(
+        neo4j_client=neo4j_client,
+        embedding_service=embedding_service,
+        project_id=project_id,
+        system_prompt=system_prompt,
+        step_callback=step_callback,
+    )
+
+    # Create agent with custom prompt if provided
+    agent = query_agent
+    if system_prompt:
+        agent = Agent(
+            "openai:gpt-4o",
+            deps_type=AgentDependencies,
+            system_prompt=system_prompt,
+        )
+        # Register all tools on the new agent
+        for tool in query_agent._function_tools.values():
+            agent._function_tools[tool.name] = tool
+
+    # Run agent (steps will be collected via callback)
+    result = await agent.run(question, deps=deps)
+
+    # Yield all collected steps
+    for step in steps:
+        yield step.model_dump()
+
+    # Yield final answer
+    yield {
+        "type": "answer",
+        "content": result.data,
+    }
