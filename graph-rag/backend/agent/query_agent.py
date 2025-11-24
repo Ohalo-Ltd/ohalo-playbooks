@@ -15,6 +15,7 @@ class AgentDependencies(BaseModel):
     neo4j_client: Neo4jClient
     embedding_service: EmbeddingService
     project_id: str
+    system_prompt: str | None = None
 
     class Config:
         arbitrary_types_allowed = True
@@ -29,17 +30,124 @@ class SearchResult(BaseModel):
     metadata: dict[str, Any] = {}
 
 
+# Default system prompt - can be overridden per project
+DEFAULT_SYSTEM_PROMPT = """You are an intelligent assistant that answers questions using a knowledge graph.
+
+You have access to multiple tools to explore the knowledge base:
+1. **discover_schema**: Understand the structure of the knowledge graph (entities, relationships, patterns)
+2. **vector_search**: Find relevant document chunks using semantic similarity
+3. **entity_lookup**: Find specific entities by name
+4. **graph_neighbors**: Explore relationships between entities
+5. **graph_query**: Execute Cypher queries for complex graph traversal
+
+**Recommended Strategy:**
+1. **First interaction**: Call discover_schema to understand what entities and relationships exist
+2. **For questions**: Start with vector_search to find relevant context
+3. **For entity questions**: Use entity_lookup, then graph_neighbors to expand context
+4. **For complex queries**: Use graph_query for multi-hop reasoning
+
+**Hybrid Search Approach:**
+- Use vector_search to get initial relevant chunks
+- Extract entity names from chunks or question
+- Use entity_lookup to find those entities in the graph
+- Use graph_neighbors to expand context around entities
+- Combine all information for a comprehensive answer
+
+Always:
+- Cite your sources by mentioning documents and entities
+- Explain relationships you discovered in the graph
+- If you find related entities, mention them to provide context
+- Be clear about what information comes from direct search vs graph traversal"""
+
+
 # Define the query agent
 query_agent = Agent(
     "openai:gpt-4o",
     deps_type=AgentDependencies,
-    system_prompt="""You are a helpful assistant that answers questions based on a knowledge graph.
-    
-You have access to a vector search tool that can find relevant information.
-Use the search tool to find relevant context, then provide a clear answer based on what you find.
-
-Always cite your sources by mentioning which documents or entities you used.""",
+    system_prompt=DEFAULT_SYSTEM_PROMPT,
 )
+
+
+@query_agent.tool
+async def discover_schema(
+    ctx: RunContext[AgentDependencies],
+) -> str:
+    """Discover the structure of the knowledge graph.
+
+    This tool provides a formatted overview of:
+    - Entity types and their counts
+    - Relationship patterns between entities
+    - Key properties available on entities
+
+    Call this tool at the start of a conversation to understand what's available
+    in the knowledge graph, then use that knowledge to plan your search strategy.
+
+    Args:
+        ctx: Runtime context with dependencies
+
+    Returns:
+        Formatted markdown description of the graph schema
+    """
+    # Get entity types and counts
+    entity_query = """
+    MATCH (e:Entity)
+    WITH e.type as entity_type, count(e) as count, collect(e)[0..3] as samples
+    RETURN entity_type, count, 
+           [sample IN samples | keys(sample)] as property_sets
+    ORDER BY count DESC
+    """
+
+    entity_results = await ctx.deps.neo4j_client.execute_query(entity_query)
+
+    # Get relationship patterns
+    rel_query = """
+    MATCH (a:Entity)-[r]->(b:Entity)
+    WITH type(r) as rel_type, a.type as from_type, b.type as to_type, count(r) as count
+    RETURN rel_type, from_type, to_type, count
+    ORDER BY count DESC
+    LIMIT 50
+    """
+
+    rel_results = await ctx.deps.neo4j_client.execute_query(rel_query)
+
+    # Format as markdown
+    schema_md = "# Knowledge Graph Schema\n\n"
+
+    # Entity types section
+    schema_md += "## Entity Types\n\n"
+    total_entities = 0
+    for result in entity_results:
+        entity_type = result.get("entity_type", "Unknown")
+        count = result.get("count", 0)
+        total_entities += count
+
+        # Get common properties across samples
+        property_sets = result.get("property_sets", [])
+        common_props = set(property_sets[0]) if property_sets else set()
+        for prop_set in property_sets[1:]:
+            common_props &= set(prop_set)
+
+        schema_md += f"- **{entity_type}**: {count} entities\n"
+        if common_props:
+            schema_md += f"  - Properties: {', '.join(sorted(common_props))}\n"
+
+    schema_md += f"\n**Total Entities**: {total_entities}\n\n"
+
+    # Relationship patterns section
+    schema_md += "## Relationship Patterns\n\n"
+    total_relationships = 0
+    for result in rel_results:
+        rel_type = result.get("rel_type", "Unknown")
+        from_type = result.get("from_type", "Unknown")
+        to_type = result.get("to_type", "Unknown")
+        count = result.get("count", 0)
+        total_relationships += count
+
+        schema_md += f"- **{from_type}** --[{rel_type}]--> **{to_type}**: {count} relationships\n"
+
+    schema_md += f"\n**Total Relationships**: {total_relationships}\n"
+
+    return schema_md
 
 
 @query_agent.tool
@@ -90,11 +198,133 @@ async def vector_search(
     return search_results
 
 
+@query_agent.tool
+async def entity_lookup(
+    ctx: RunContext[AgentDependencies],
+    entity_name: str,
+    fuzzy: bool = True,
+) -> list[dict[str, Any]]:
+    """Look up entities in the knowledge graph by name.
+
+    Args:
+        ctx: Runtime context with dependencies
+        entity_name: Name of the entity to find
+        fuzzy: If True, use fuzzy matching (contains), else exact match
+
+    Returns:
+        List of matching entities with their properties
+    """
+    results = await ctx.deps.neo4j_client.entity_lookup(
+        entity_name=entity_name,
+        fuzzy=fuzzy,
+    )
+
+    entities = []
+    for result in results:
+        entity_node = result.get("e", {})
+        entities.append(
+            {
+                "id": entity_node.get("id", ""),
+                "name": entity_node.get("name", ""),
+                "type": entity_node.get("type", ""),
+                "properties": entity_node,
+            }
+        )
+
+    return entities
+
+
+@query_agent.tool
+async def graph_neighbors(
+    ctx: RunContext[AgentDependencies],
+    entity_id: str,
+    relationship_types: list[str] | None = None,
+    max_depth: int = 1,
+) -> dict[str, Any]:
+    """Explore relationships and neighboring entities in the knowledge graph.
+
+    Args:
+        ctx: Runtime context with dependencies
+        entity_id: ID of the entity to start from
+        relationship_types: Optional list of relationship types to follow (e.g., ["LOCATED_IN", "PART_OF"])
+        max_depth: How many hops to traverse (1-2 recommended)
+
+    Returns:
+        Dictionary with neighboring entities and their relationships
+    """
+    results = await ctx.deps.neo4j_client.get_neighbors(
+        node_id=entity_id,
+        relationship_types=relationship_types,
+        direction="both",
+        max_depth=max_depth,
+    )
+
+    neighbors = []
+    for result in results:
+        neighbor_node = result.get("neighbor", {})
+        relationships = result.get("relationships", [])
+        depth = result.get("depth", 0)
+
+        neighbors.append(
+            {
+                "entity": {
+                    "id": neighbor_node.get("id", ""),
+                    "name": neighbor_node.get("name", ""),
+                    "type": neighbor_node.get("type", ""),
+                },
+                "relationships": relationships,
+                "depth": depth,
+            }
+        )
+
+    return {
+        "source_entity_id": entity_id,
+        "neighbors": neighbors,
+        "total_found": len(neighbors),
+    }
+
+
+@query_agent.tool
+async def graph_query(
+    ctx: RunContext[AgentDependencies],
+    cypher_query: str,
+    parameters: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Execute a Cypher query against the knowledge graph (read-only).
+
+    Use this for complex graph queries that can't be answered with other tools.
+
+    Args:
+        ctx: Runtime context with dependencies
+        cypher_query: Cypher query to execute (read-only, no CREATE/DELETE/etc)
+        parameters: Optional query parameters
+
+    Returns:
+        Query results
+
+    Example queries:
+    - Find all entities connected to a specific entity:
+      MATCH (e:Entity {name: $name})-[r]-(related) RETURN related, type(r)
+    - Find shortest path between two entities:
+      MATCH path = shortestPath((a:Entity {name: $name1})-[*]-(b:Entity {name: $name2}))
+      RETURN path
+    """
+    try:
+        results = await ctx.deps.neo4j_client.execute_safe_cypher(
+            cypher_query=cypher_query,
+            parameters=parameters or {},
+        )
+        return results
+    except ValueError as e:
+        return [{"error": str(e)}]
+
+
 async def query(
     question: str,
     neo4j_client: Neo4jClient,
     embedding_service: EmbeddingService,
     project_id: str,
+    system_prompt: str | None = None,
 ) -> str:
     """Query the knowledge graph.
 
@@ -103,6 +333,7 @@ async def query(
         neo4j_client: Neo4j client instance
         embedding_service: Embedding service instance
         project_id: Project ID
+        system_prompt: Optional custom system prompt (uses default if not provided)
 
     Returns:
         Answer from the agent
@@ -111,8 +342,21 @@ async def query(
         neo4j_client=neo4j_client,
         embedding_service=embedding_service,
         project_id=project_id,
+        system_prompt=system_prompt,
     )
 
-    result = await query_agent.run(question, deps=deps)
+    # Create agent with custom prompt if provided
+    agent = query_agent
+    if system_prompt:
+        agent = Agent(
+            "openai:gpt-4o",
+            deps_type=AgentDependencies,
+            system_prompt=system_prompt,
+        )
+        # Register all tools on the new agent
+        for tool in query_agent._function_tools.values():
+            agent._function_tools[tool.name] = tool
+
+    result = await agent.run(question, deps=deps)
 
     return result.data

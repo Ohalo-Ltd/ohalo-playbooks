@@ -5,21 +5,37 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export interface QueryRequest {
-  query: string;
-  conversation_id?: string;
+  question: string;
+  project_id?: string;
+  top_k?: number;
+  include_graph_context?: boolean;
+}
+
+export interface SourceChunk {
+  id: string;
+  text: string;
+  score: number;
+  chunk_index: number;
+}
+
+export interface RelatedEntity {
+  id: string;
+  name: string;
+  type: string;
+}
+
+export interface EntityRelationship {
+  from_entity: string;
+  to_entity: string;
+  relationship_type: string;
 }
 
 export interface QueryResponse {
   answer: string;
+  sources: SourceChunk[];
+  related_entities: RelatedEntity[];
+  relationships: EntityRelationship[];
   conversation_id: string;
-  sources: Array<{
-    file_id: string;
-    file_name: string;
-    chunk_id: string;
-    similarity: number;
-    text: string;
-  }>;
-  entities_mentioned: string[];
 }
 
 export interface IngestionRequest {
@@ -41,6 +57,21 @@ export interface IngestionStatus {
   error?: string;
   started_at: string;
   completed_at?: string;
+}
+
+export interface GraphSchema {
+  entity_types: Array<{
+    type: string;
+    count: number;
+    properties: string[];
+  }>;
+  relationship_types: Array<{
+    type: string;
+    from_type: string;
+    to_type: string;
+    count: number;
+  }>;
+  statistics: Record<string, number>;
 }
 
 export class ApiClient {
@@ -90,6 +121,28 @@ export class ApiClient {
     if (!response.ok) {
       const error = await response.json();
       throw new Error(error.detail || 'Failed to get status');
+    }
+
+    return response.json();
+  }
+
+  async getSchema(): Promise<GraphSchema> {
+    const response = await fetch(`${this.baseUrl}/api/chat/schema`);
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to get schema');
+    }
+
+    return response.json();
+  }
+
+  async getSchemaSuggestions(): Promise<any> {
+    const response = await fetch(`${this.baseUrl}/api/chat/schema/suggestions`);
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to get suggestions');
     }
 
     return response.json();

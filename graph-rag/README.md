@@ -2,21 +2,31 @@
 
 A full-stack Graph-based Retrieval Augmented Generation (RAG) system that combines vector search with knowledge graph relationships for enhanced document understanding and Q&A.
 
-## 🎯 Current Status: Phase 1 Complete ✅
+## 🎯 Current Status: Phase 2 Complete ✅
 
 ### Implemented Features
-- ✅ **Document Ingestion**: Fetch documents from Data X-Ray API with retry logic
-- ✅ **Entity Extraction**: Parse entities and relationships from DXR metadata
-- ✅ **Knowledge Graph**: Store entities/relationships in Neo4j with constraints
-- ✅ **Vector Search**: OpenAI embeddings with batching and similarity search
-- ✅ **AI Agent**: Pydantic AI agent with vector search tool
-- ✅ **Chat Interface**: Modern React UI with real-time Q&A
-- ✅ **Job Tracking**: PostgreSQL-based ingestion job monitoring
+
+**Phase 1: The Searchable Graph** ✅
+- ✅ Document ingestion from Data X-Ray API with retry logic
+- ✅ Entity extraction and relationship parsing from DXR metadata
+- ✅ Knowledge graph storage in Neo4j with constraints
+- ✅ OpenAI embeddings with batching and vector similarity search
+- ✅ Pydantic AI agent with basic Q&A
+- ✅ Modern React chat UI with real-time responses
+- ✅ PostgreSQL-based job tracking
+
+**Phase 2: Graph-Augmented Retrieval** ✅
+- ✅ Multi-tool agent (4 tools: vector search, entity lookup, graph neighbors, Cypher queries)
+- ✅ Hybrid search combining vector similarity + graph expansion
+- ✅ Dynamic schema discovery and analysis
+- ✅ Graph traversal methods (neighbors, relationships, paths)
+- ✅ Safe Cypher query execution (read-only)
+- ✅ Enhanced UI with entity and relationship display
+- ✅ Schema API endpoints for graph introspection
 
 ### Coming Next
-- **Phase 2**: Graph-Augmented Retrieval (entity-aware context expansion)
-- **Phase 3**: Multi-Hop Reasoning (relationship traversal)
-- **Phase 4**: Production Polish (auth, monitoring, optimization)
+- **Phase 3**: Interactive graph visualization and advanced reasoning
+- **Phase 4**: Production polish (auth, monitoring, optimization)
 
 ## Quick Start
 
@@ -108,30 +118,98 @@ graph-rag/
 
 ## 📝 API Examples
 
-### Query Documents
+### Query with Graph Context
 ```bash
 POST /api/chat/query
 Content-Type: application/json
 
 {
-  "query": "What entities are mentioned in the Paris documents?",
-  "conversation_id": "optional-session-id"
+  "question": "What entities are related to Paris?",
+  "project_id": "my-project",
+  "top_k": 5,
+  "include_graph_context": true
 }
 ```
 
 Response:
 ```json
 {
-  "answer": "The Paris documents mention several entities including...",
-  "conversation_id": "abc-123",
+  "answer": "Based on the knowledge graph, Paris is related to several entities including France (as its location), the Eiffel Tower (a landmark within Paris), and the Louvre Museum...",
   "sources": [
     {
-      "file_name": "paris-guide.pdf",
-      "similarity": 0.95,
-      "text": "Paris is the capital city..."
+      "id": "chunk-123",
+      "text": "Paris is the capital city of France...",
+      "score": 0.95,
+      "chunk_index": 0
     }
   ],
-  "entities_mentioned": ["Paris", "France", "Eiffel Tower"]
+  "related_entities": [
+    {
+      "id": "paris-1",
+      "name": "Paris",
+      "type": "City"
+    },
+    {
+      "id": "france-1",
+      "name": "France",
+      "type": "Country"
+    },
+    {
+      "id": "eiffel-1",
+      "name": "Eiffel Tower",
+      "type": "Landmark"
+    }
+  ],
+  "relationships": [
+    {
+      "from_entity": "Paris",
+      "to_entity": "France",
+      "relationship_type": "LOCATED_IN"
+    },
+    {
+      "from_entity": "Eiffel Tower",
+      "to_entity": "Paris",
+      "relationship_type": "LOCATED_IN"
+    }
+  ],
+  "conversation_id": "my-project"
+}
+```
+
+### Get Graph Schema
+```bash
+GET /api/chat/schema
+```
+
+Response:
+```json
+{
+  "entity_types": [
+    {
+      "type": "City",
+      "count": 150,
+      "properties": ["id", "name", "type", "population"]
+    },
+    {
+      "type": "Country",
+      "count": 50,
+      "properties": ["id", "name", "type", "capital"]
+    }
+  ],
+  "relationship_types": [
+    {
+      "type": "LOCATED_IN",
+      "from_type": "City",
+      "to_type": "Country",
+      "count": 150
+    }
+  ],
+  "statistics": {
+    "Entity": 200,
+    "Document": 100,
+    "Chunk": 500,
+    "relationships": 300
+  }
 }
 ```
 

@@ -6,7 +6,7 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api import chat, ingestion
+from api import chat, ingestion, projects
 from core.config import settings
 
 
@@ -40,6 +40,7 @@ app.add_middleware(
 # Include routers
 app.include_router(chat.router)
 app.include_router(ingestion.router)
+app.include_router(projects.router)
 
 
 @app.get("/")

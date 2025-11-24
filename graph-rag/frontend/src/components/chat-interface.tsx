@@ -6,7 +6,13 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { apiClient, QueryResponse } from '@/lib/api';
+import {
+  apiClient,
+  QueryResponse,
+  SourceChunk,
+  RelatedEntity,
+  EntityRelationship,
+} from "@/lib/api";
 import { ChatMessage } from './chat-message';
 import { ChatInput } from './chat-input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,48 +21,49 @@ import { Loader2Icon } from 'lucide-react';
 
 interface Message {
   id: string;
-  role: 'user' | 'assistant';
+  role: "user" | "assistant";
   content: string;
-  sources?: Array<{
-    file_name: string;
-    similarity: number;
-    text: string;
-  }>;
-  entities?: string[];
+  sources?: SourceChunk[];
+  entities?: RelatedEntity[];
+  relationships?: EntityRelationship[];
   timestamp: Date;
 }
 
 export function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [conversationId, setConversationId] = useState<string | undefined>();
+  const [projectId] = useState<string>("default");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const queryMutation = useMutation({
-    mutationFn: async (query: string) => {
-      return apiClient.query({ query, conversation_id: conversationId });
+    mutationFn: async (question: string) => {
+      return apiClient.query({
+        question,
+        project_id: projectId,
+        top_k: 5,
+        include_graph_context: true,
+      });
     },
     onSuccess: (response: QueryResponse) => {
-      setConversationId(response.conversation_id);
-      
       const assistantMessage: Message = {
         id: crypto.randomUUID(),
-        role: 'assistant',
+        role: "assistant",
         content: response.answer,
         sources: response.sources,
-        entities: response.entities_mentioned,
+        entities: response.related_entities,
+        relationships: response.relationships,
         timestamp: new Date(),
       };
-      
+
       setMessages((prev) => [...prev, assistantMessage]);
     },
     onError: (error: Error) => {
       const errorMessage: Message = {
         id: crypto.randomUUID(),
-        role: 'assistant',
+        role: "assistant",
         content: `Sorry, I encountered an error: ${error.message}`,
         timestamp: new Date(),
       };
-      
+
       setMessages((prev) => [...prev, errorMessage]);
     },
   });
@@ -90,10 +97,12 @@ export function ChatInterface() {
             {messages.length === 0 && (
               <div className="text-center text-muted-foreground py-12">
                 <p className="text-lg font-medium">Welcome to Graph RAG</p>
-                <p className="text-sm mt-2">Ask questions about your documents and knowledge graph</p>
+                <p className="text-sm mt-2">
+                  Ask questions about your documents and knowledge graph
+                </p>
               </div>
             )}
-            
+
             {messages.map((message) => (
               <ChatMessage
                 key={message.id}
@@ -101,17 +110,18 @@ export function ChatInterface() {
                 content={message.content}
                 sources={message.sources}
                 entities={message.entities}
+                relationships={message.relationships}
                 timestamp={message.timestamp}
               />
             ))}
-            
+
             {queryMutation.isPending && (
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Loader2Icon className="h-4 w-4 animate-spin" />
                 <span className="text-sm">Thinking...</span>
               </div>
             )}
-            
+
             <div ref={scrollRef} />
           </div>
         </ScrollArea>
