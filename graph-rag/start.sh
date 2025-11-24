@@ -9,7 +9,7 @@ echo "🚀 Starting Graph RAG..."
 
 # Start Docker services
 echo "📦 Starting Neo4j and PostgreSQL..."
-docker compose up -d
+docker compose up -d postgres neo4j
 
 # Wait for services to be ready
 echo "⏳ Waiting for databases to be ready..."
@@ -19,7 +19,7 @@ sleep 5
 echo "🐍 Starting backend..."
 cd backend
 uv sync
-uv run uvicorn api.app:app --reload &
+uv run uvicorn api.app:app --reload --env-file ../.env &
 BACKEND_PID=$!
 cd ..
 

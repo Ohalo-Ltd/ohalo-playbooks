@@ -185,6 +185,11 @@ class GraphWriter:
         MATCH (e:Entity {id: $entity_id})
         MATCH (d:Document {id: $document_id})
         MERGE (e)-[:MENTIONED_IN]->(d)
+        SET e.source_file_ids = CASE 
+            WHEN e.source_file_ids IS NULL THEN [$document_id] 
+            WHEN NOT $document_id IN e.source_file_ids THEN e.source_file_ids + $document_id 
+            ELSE e.source_file_ids 
+        END
         """
 
         await self.client.execute_write(
