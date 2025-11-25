@@ -13,10 +13,10 @@ import {
   Settings,
   Link as LinkIcon,
   Loader2,
-  RefreshCw,
   Upload,
   Trash2,
   Shield,
+  Network,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -153,6 +153,11 @@ export default function ProjectSettingsPage({ params }: PageProps) {
       dxr_url: dxrUrl,
       dxr_api_token: dxrApiToken,
       dxr_datasource_id: dxrDatasourceId,
+    });
+  };
+
+  const handleSaveGraph = () => {
+    updateProjectMutation.mutate({
       dxr_extractor_id: dxrExtractorId,
     });
   };
@@ -207,21 +212,25 @@ export default function ProjectSettingsPage({ params }: PageProps) {
       {/* Content */}
       <main className="container mx-auto px-4 py-8">
         <Tabs defaultValue="documents" className="w-full">
-          <TabsList className="grid w-full grid-cols-4 max-w-2xl">
+          <TabsList className="grid w-full grid-cols-5 max-w-3xl">
+            <TabsTrigger value="connection">
+              <LinkIcon className="h-4 mr-2" />
+              Connect to DXR
+            </TabsTrigger>
             <TabsTrigger value="documents">
-              <FileText className="h-4 w-4 mr-2" />
+              <FileText className="h-4 mr-2" />
               Documents
             </TabsTrigger>
-            <TabsTrigger value="connection">
-              <LinkIcon className="h-4 w-4 mr-2" />
-              Connection
+            <TabsTrigger value="graph">
+              <Network className="h-4 mr-2" />
+              Graph
             </TabsTrigger>
             <TabsTrigger value="customize">
-              <Settings className="h-4 w-4 mr-2" />
+              <Settings className="h-4 mr-2" />
               Customize
             </TabsTrigger>
             <TabsTrigger value="entitlements">
-              <Shield className="h-4 w-4 mr-2" />
+              <Shield className="h-4 mr-2" />
               Entitlements
             </TabsTrigger>
           </TabsList>
@@ -236,17 +245,15 @@ export default function ProjectSettingsPage({ params }: PageProps) {
                 </p>
               </div>
               <Button
-                variant="outline"
-                size="sm"
-                onClick={() => refetchDocs()}
-                disabled={isLoadingDocs}
+                onClick={() => ingestMutation.mutate()}
+                disabled={ingestMutation.isPending || !dxrDatasourceId}
+                size="lg"
               >
-                <RefreshCw
-                  className={`h-4 w-4 mr-2 ${
-                    isLoadingDocs ? "animate-spin" : ""
-                  }`}
-                />
-                Refresh
+                {ingestMutation.isPending && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                <Upload className="mr-2 h-4 w-4" />
+                Start Ingestion
               </Button>
             </div>
 
@@ -330,93 +337,101 @@ export default function ProjectSettingsPage({ params }: PageProps) {
               </p>
             </div>
 
-            <div className="border rounded-lg p-6 space-y-4">
-              <h3 className="font-semibold">Connection Details</h3>
-              <div className="grid gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="dxrUrl">DXR URL</Label>
-                  <Input
-                    id="dxrUrl"
-                    value={dxrUrl}
-                    onChange={(e) => setDxrUrl(e.target.value)}
-                    placeholder="https://api.dataxray.com"
-                  />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="border rounded-lg p-6 space-y-4">
+                <h3 className="font-semibold">Connection Details</h3>
+                <div className="grid gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="dxrUrl">DXR URL</Label>
+                    <Input
+                      id="dxrUrl"
+                      value={dxrUrl}
+                      onChange={(e) => setDxrUrl(e.target.value)}
+                      placeholder="https://api.dataxray.com"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="dxrApiToken">API Token</Label>
+                    <Input
+                      id="dxrApiToken"
+                      type="password"
+                      value={dxrApiToken}
+                      onChange={(e) => setDxrApiToken(e.target.value)}
+                      placeholder="sk-..."
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="dxrDatasourceId">Datasource ID</Label>
+                    <Input
+                      id="dxrDatasourceId"
+                      value={dxrDatasourceId}
+                      onChange={(e) => setDxrDatasourceId(e.target.value)}
+                      placeholder="ds_..."
+                    />
+                  </div>
                 </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="dxrApiToken">API Token</Label>
-                  <Input
-                    id="dxrApiToken"
-                    type="password"
-                    value={dxrApiToken}
-                    onChange={(e) => setDxrApiToken(e.target.value)}
-                    placeholder="sk-..."
-                  />
+                <div className="flex justify-end">
+                  <Button
+                    onClick={handleSaveConnection}
+                    disabled={updateProjectMutation.isPending}
+                  >
+                    {updateProjectMutation.isPending && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    )}
+                    Save Connection
+                  </Button>
                 </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="dxrDatasourceId">Datasource ID</Label>
-                  <Input
-                    id="dxrDatasourceId"
-                    value={dxrDatasourceId}
-                    onChange={(e) => setDxrDatasourceId(e.target.value)}
-                    placeholder="ds_..."
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="dxrExtractorId">Extractor ID</Label>
-                  <Input
-                    id="dxrExtractorId"
-                    value={dxrExtractorId}
-                    onChange={(e) => setDxrExtractorId(e.target.value)}
-                    placeholder="extracted_metadata#123"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    The extractor output field to use (e.g.,
-                    extracted_metadata#123)
-                  </p>
-                </div>
-              </div>
-              <div className="flex justify-end">
-                <Button
-                  onClick={handleSaveConnection}
-                  disabled={updateProjectMutation.isPending}
-                >
-                  {updateProjectMutation.isPending && (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  )}
-                  Save Connection
-                </Button>
               </div>
             </div>
+          </TabsContent>
 
-            <div className="border rounded-lg p-6 space-y-4">
-              <h3 className="font-semibold">Extractor Configuration</h3>
-              <p className="text-sm text-muted-foreground">
-                The extractor must output JSON in the following format:
+          {/* Graph Tab */}
+          <TabsContent value="graph" className="space-y-6 mt-6">
+            <div>
+              <h2 className="text-xl font-semibold">Graph Configuration</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Configure how entities and relationships are extracted
               </p>
-              <div className="bg-muted p-4 rounded-lg overflow-x-auto">
-                <pre className="text-xs font-mono">{EXTRACTOR_PREVIEW}</pre>
-              </div>
             </div>
 
-            <div className="border rounded-lg p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-semibold">Ingest Documents</h3>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Start ingesting documents from your data source
-                  </p>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="border rounded-lg p-6 space-y-4">
+                <h3 className="font-semibold">Extractor Settings</h3>
+                <div className="grid gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="dxrExtractorId">Extractor ID</Label>
+                    <Input
+                      id="dxrExtractorId"
+                      value={dxrExtractorId}
+                      onChange={(e) => setDxrExtractorId(e.target.value)}
+                      placeholder="extracted_metadata#123"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      The extractor output field to use (e.g.,
+                      extracted_metadata#123)
+                    </p>
+                  </div>
                 </div>
-                <Button
-                  onClick={() => ingestMutation.mutate()}
-                  disabled={ingestMutation.isPending || !dxrDatasourceId}
-                  size="lg"
-                >
-                  {ingestMutation.isPending && (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  )}
-                  <Upload className="mr-2 h-4 w-4" />
-                  Start Ingestion
-                </Button>
+                <div className="flex justify-end">
+                  <Button
+                    onClick={handleSaveGraph}
+                    disabled={updateProjectMutation.isPending}
+                  >
+                    {updateProjectMutation.isPending && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    )}
+                    Save Graph Settings
+                  </Button>
+                </div>
+              </div>
+              <div className="border rounded-lg p-6 space-y-4">
+                <h3 className="font-semibold">Extractor Configuration</h3>
+                <p className="text-sm text-muted-foreground">
+                  The extractor must output JSON in the following format:
+                </p>
+                <div className="bg-muted p-4 rounded-lg overflow-x-auto">
+                  <pre className="text-xs font-mono">{EXTRACTOR_PREVIEW}</pre>
+                </div>
               </div>
             </div>
           </TabsContent>

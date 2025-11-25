@@ -81,45 +81,6 @@ export function ReasoningStep({ step, isLast }: ReasoningStepProps) {
     );
   }
 
-  // Tool call result
-  if (step.type === 'tool_call_result' && step.tool) {
-    const config = TOOL_CONFIG[step.tool];
-    const Icon = config?.icon || Database;
-
-    return (
-      <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
-        <div className="border-l-2 border-muted pl-4 py-2">
-          <CollapsibleTrigger className="flex items-start gap-3 w-full hover:bg-muted/50 -ml-4 pl-4 pr-2 py-1 rounded-r transition-colors">
-            <Icon className={cn('h-4 w-4 mt-1', config?.color || 'text-muted-foreground')} />
-            <div className="flex-1 text-left">
-              <p className="text-sm font-medium">
-                {config?.label || step.tool}{' '}
-                <span className="text-muted-foreground font-normal">completed</span>
-              </p>
-              {step.result && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  {renderResultSummary(step.tool, step.result)}
-                </p>
-              )}
-            </div>
-            <ChevronDown
-              className={cn(
-                'h-4 w-4 mt-1 text-muted-foreground transition-transform',
-                isExpanded && 'rotate-180'
-              )}
-            />
-          </CollapsibleTrigger>
-
-          <CollapsibleContent className="mt-2">
-            <div className="bg-muted/30 rounded-md p-3">
-              {renderToolResult(step.tool, step.result)}
-            </div>
-          </CollapsibleContent>
-        </div>
-      </Collapsible>
-    );
-  }
-
   // Final answer
   if (step.type === 'answer') {
     return (

@@ -114,9 +114,7 @@ export function TopBar({
               users.length > 0 &&
               onUserChange && (
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">
-                    View as:
-                  </span>
+                  <span className="text-xs text-muted-foreground">Ask as:</span>
                   <UserSwitcher
                     users={users.map((u) => ({ email: u.email, name: u.name }))}
                     currentUser={currentUser || null}

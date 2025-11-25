@@ -39,6 +39,9 @@ export function ChatInterface({
   const [currentAssistantMessage, setCurrentAssistantMessage] =
     useState<Message | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const shouldAutoScrollRef = useRef(true);
+  const prevMessagesLengthRef = useRef(messages.length);
   const completionHandledRef = useRef(false);
   const currentAssistantRef = useRef<Message | null>(null);
   // Fetch project details
@@ -156,9 +159,34 @@ export function ChatInterface({
   };
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollIntoView({ behavior: "smooth" });
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = viewport;
+      // If user is within 50px of bottom, enable auto-scroll
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+      shouldAutoScrollRef.current = isAtBottom;
+    };
+
+    viewport.addEventListener("scroll", handleScroll);
+    return () => viewport.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  useEffect(() => {
+    const isNewMessage = messages.length > prevMessagesLengthRef.current;
+
+    if (isNewMessage || shouldAutoScrollRef.current) {
+      if (scrollRef.current) {
+        scrollRef.current.scrollIntoView({ behavior: "smooth" });
+      }
+      // If it was a new message, we force auto-scroll back on
+      if (isNewMessage) {
+        shouldAutoScrollRef.current = true;
+      }
     }
+
+    prevMessagesLengthRef.current = messages.length;
   }, [messages, currentAssistantMessage]);
 
   const hasMessages = messages.length > 0 || currentAssistantMessage;
@@ -168,7 +196,7 @@ export function ChatInterface({
       {hasMessages ? (
         <>
           <div className="flex-1 overflow-hidden">
-            <ScrollArea className="h-full">
+            <ScrollArea className="h-full" viewportRef={viewportRef}>
               <div className="space-y-6 py-4 px-4 max-w-4xl mx-auto">
                 {messages.map((message) => (
                   <div key={message.id} className="space-y-2">
@@ -278,12 +306,11 @@ export function ChatInterface({
           ) : (
             <div className="w-full max-w-2xl space-y-8">
               <div className="text-center space-y-4">
-                <h2 className="text-3xl font-semibold">Welcome to Graph RAG</h2>
+                <h2 className="text-3xl font-semibold">
+                  Welcome to Data X-Ray RAG demo
+                </h2>
                 <p className="text-muted-foreground text-lg">
                   Ask questions about your documents and knowledge graph
-                </p>
-                <p className="text-sm text-muted-foreground/70">
-                  Watch the agent think and explore the graph in real-time
                 </p>
               </div>
 
