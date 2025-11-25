@@ -10,7 +10,7 @@ import { ChatInput } from "./chat-input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Loader2Icon } from "lucide-react";
 import { useAgentStream, AgentStep } from "@/hooks/use-agent-stream";
-import { ReasoningStep } from "./reasoning-step";
+import { ReasoningAccordion } from "./reasoning-accordion";
 import { UserSwitcher, User } from "./user-switcher";
 import { apiClient } from "@/lib/api";
 
@@ -139,58 +139,72 @@ export function ChatInterface({
     <div className="flex flex-col h-full">
       {hasMessages ? (
         <>
-          <ScrollArea className="flex-1 px-4">
-            <div className="space-y-6 py-4 max-w-4xl mx-auto">
-              {messages.map((message) => (
-                <div key={message.id} className="space-y-2">
-                  {message.role === "user" ? (
-                    <div className="flex justify-end">
-                      <div className="bg-primary text-primary-foreground rounded-2xl px-4 py-3 max-w-[80%]">
-                        <p className="text-sm">{message.content}</p>
+          <div className="flex-1 overflow-hidden">
+            <ScrollArea className="h-full">
+              <div className="space-y-6 py-4 px-4 max-w-4xl mx-auto">
+                {messages.map((message) => (
+                  <div key={message.id} className="space-y-2">
+                    {message.role === "user" ? (
+                      <div className="flex justify-end">
+                        <div className="bg-primary text-primary-foreground rounded-2xl px-4 py-3 max-w-[80%]">
+                          <p className="text-sm">{message.content}</p>
+                        </div>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="bg-muted/50 rounded-2xl p-4 space-y-2">
-                      {message.steps?.map((step, i) => (
-                        <ReasoningStep
-                          key={i}
-                          step={step}
-                          isLast={i === (message.steps?.length || 0) - 1}
-                        />
-                      ))}
-                      {!message.steps && (
-                        <p className="text-sm">{message.content}</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
+                    ) : (
+                      <div className="space-y-3">
+                        {/* Reasoning accordion before answer */}
+                        {message.steps && message.steps.length > 0 && (
+                          <ReasoningAccordion steps={message.steps} isStreaming={false} />
+                        )}
+                        
+                        {/* Answer content */}
+                        {message.content && (
+                          <div className="bg-muted/50 rounded-2xl p-4">
+                            <div className="prose prose-sm max-w-none dark:prose-invert">
+                              {message.content.split('\n').map((line, i) => (
+                                <p key={i}>{line}</p>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
 
-              {/* Current streaming message */}
-              {currentAssistantMessage && (
-                <div className="bg-muted/50 rounded-2xl p-4 space-y-2">
-                  {currentAssistantMessage.steps?.map((step, i) => (
-                    <ReasoningStep
-                      key={i}
-                      step={step}
-                      isLast={
-                        i === (currentAssistantMessage.steps?.length || 0) - 1
-                      }
-                    />
-                  ))}
-                </div>
-              )}
+                {/* Current streaming message */}
+                {currentAssistantMessage && (
+                  <div className="space-y-3">
+                    {currentAssistantMessage.steps && currentAssistantMessage.steps.length > 0 && (
+                      <ReasoningAccordion 
+                        steps={currentAssistantMessage.steps} 
+                        isStreaming={isStreaming} 
+                      />
+                    )}
+                    
+                    {currentAssistantMessage.content && (
+                      <div className="bg-muted/50 rounded-2xl p-4">
+                        <div className="prose prose-sm max-w-none dark:prose-invert">
+                          {currentAssistantMessage.content.split('\n').map((line, i) => (
+                            <p key={i}>{line}</p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
-              {isStreaming && !currentAssistantMessage?.steps?.length && (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Loader2Icon className="h-4 w-4 animate-spin" />
-                  <span className="text-sm">Connecting to agent...</span>
-                </div>
-              )}
+                {isStreaming && !currentAssistantMessage?.steps?.length && (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Loader2Icon className="h-4 w-4 animate-spin" />
+                    <span className="text-sm">Connecting to agent...</span>
+                  </div>
+                )}
 
-              <div ref={scrollRef} />
-            </div>
-          </ScrollArea>
+                <div ref={scrollRef} />
+              </div>
+            </ScrollArea>
+          </div>
 
           <div className="border-t p-4">
             <div className="max-w-4xl mx-auto">

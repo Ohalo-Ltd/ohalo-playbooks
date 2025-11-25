@@ -1,5 +1,6 @@
 """Embedding service for generating text embeddings via OpenAI."""
 
+import asyncio
 from typing import Optional
 
 from openai import AsyncOpenAI
@@ -15,6 +16,7 @@ class EmbeddingService:
         api_key: Optional[str] = None,
         model: Optional[str] = None,
         batch_size: int = 100,
+        max_concurrent_batches: int = 5,
     ):
         """Initialize embedding service.
 
@@ -22,10 +24,12 @@ class EmbeddingService:
             api_key: OpenAI API key
             model: Embedding model name
             batch_size: Maximum texts per batch
+            max_concurrent_batches: Maximum number of batches to process concurrently
         """
         self.api_key = api_key or settings.openai_api_key
         self.model = model or settings.openai_embedding_model
         self.batch_size = batch_size
+        self.max_concurrent_batches = max_concurrent_batches
 
         if not self.api_key:
             raise ValueError("OpenAI API key is required")
@@ -46,11 +50,12 @@ class EmbeddingService:
         if text in self._cache:
             return self._cache[text]
 
-        # Generate embedding
-        response = await self.client.embeddings.create(
-            model=self.model,
-            input=text,
-        )
+        # Generate embedding with optional dimensions parameter
+        kwargs = {"model": self.model, "input": text}
+        if settings.openai_embedding_dimensions:
+            kwargs["dimensions"] = settings.openai_embedding_dimensions
+
+        response = await self.client.embeddings.create(**kwargs)
 
         embedding = response.data[0].embedding
 
@@ -62,13 +67,13 @@ class EmbeddingService:
     async def generate_embeddings_batch(
         self, texts: list[str]
     ) -> list[list[float]]:
-        """Generate embeddings for multiple texts in batches.
+        """Generate embeddings for multiple texts in batches with parallel processing.
 
         Args:
             texts: List of input texts
 
         Returns:
-            List of embedding vectors
+            List of embedding vectors in the same order as input
         """
         if not texts:
             return []
@@ -86,29 +91,51 @@ class EmbeddingService:
             else:
                 uncached_texts.append(text)
 
-        # Generate embeddings for uncached texts in batches
-        new_embeddings: dict[str, list[float]] = {}
+        # If all cached, return immediately
+        if not uncached_texts:
+            return [cached_embeddings[text] for text in texts]
 
-        for i in range(0, len(uncached_texts), self.batch_size):
-            batch = uncached_texts[i : i + self.batch_size]
+        # Split uncached texts into batches
+        batches = [
+            uncached_texts[i : i + self.batch_size]
+            for i in range(0, len(uncached_texts), self.batch_size)
+        ]
 
-            response = await self.client.embeddings.create(
-                model=self.model,
-                input=batch,
-            )
+        # Process batches concurrently with semaphore to limit concurrency
+        semaphore = asyncio.Semaphore(self.max_concurrent_batches)
 
-            for text, data in zip(batch, response.data):
-                embedding = data.embedding
-                new_embeddings[text] = embedding
-                self._cache[text] = embedding
+        async def process_batch(batch: list[str]) -> dict[str, list[float]]:
+            """Process a single batch with rate limiting."""
+            async with semaphore:
+                kwargs = {"model": self.model, "input": batch}
+                if settings.openai_embedding_dimensions:
+                    kwargs["dimensions"] = settings.openai_embedding_dimensions
 
-        # Combine cached and new embeddings in original order
+                response = await self.client.embeddings.create(**kwargs)
+
+                batch_embeddings = {}
+                for text, data in zip(batch, response.data):
+                    embedding = data.embedding
+                    batch_embeddings[text] = embedding
+                    self._cache[text] = embedding
+
+                return batch_embeddings
+
+        # Process all batches concurrently
+        batch_results = await asyncio.gather(
+            *[process_batch(batch) for batch in batches]
+        )
+
+        # Combine all batch results
+        new_embeddings = {}
+        for batch_result in batch_results:
+            new_embeddings.update(batch_result)
+
+        # Combine cached and new embeddings
         all_embeddings = {**cached_embeddings, **new_embeddings}
-        result = [all_embeddings[text] for text in unique_texts]
 
-        # Map back to original list (including duplicates)
-        text_to_embedding = dict(zip(unique_texts, result))
-        return [text_to_embedding[text] for text in texts]
+        # Return in original order (including duplicates)
+        return [all_embeddings[text] for text in texts]
 
     def clear_cache(self) -> None:
         """Clear the embedding cache."""

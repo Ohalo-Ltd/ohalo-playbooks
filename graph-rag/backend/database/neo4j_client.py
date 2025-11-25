@@ -180,6 +180,24 @@ class Neo4jClient:
         """
         await self.execute_write(query)
 
+    async def document_has_chunks(self, document_id: str) -> bool:
+        """Check if a document has any chunks.
+
+        Args:
+            document_id: Document ID to check
+
+        Returns:
+            True if document has chunks, False otherwise
+        """
+        query = """
+        MATCH (d:Document {id: $document_id})-[:HAS_CHUNK]->(c:Chunk)
+        RETURN count(c) as chunk_count
+        """
+        result = await self.execute_query(query, {"document_id": document_id})
+        if result and len(result) > 0:
+            return result[0].get("chunk_count", 0) > 0
+        return False
+
     async def initialize_graph_schema(self) -> None:
         """Initialize graph schema with indexes and constraints."""
         # Create constraints for entity IDs

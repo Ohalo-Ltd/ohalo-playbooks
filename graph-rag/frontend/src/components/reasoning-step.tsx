@@ -20,30 +20,30 @@ const TOOL_CONFIG: Record<
     color: string;
   }
 > = {
-  discover_schema: {
+  discover_graph: {
     icon: Database,
-    label: 'Discovering graph structure',
-    color: 'text-blue-600',
+    label: "Checking graph structure",
+    color: "text-blue-600",
   },
   vector_search: {
     icon: Search,
-    label: 'Searching documents',
-    color: 'text-purple-600',
+    label: "Searching documents",
+    color: "text-purple-600",
   },
   entity_lookup: {
     icon: FileSearch,
-    label: 'Looking up entities',
-    color: 'text-green-600',
+    label: "Looking up entities",
+    color: "text-green-600",
   },
   graph_neighbors: {
     icon: Network,
-    label: 'Exploring relationships',
-    color: 'text-orange-600',
+    label: "Exploring relationships",
+    color: "text-orange-600",
   },
   graph_query: {
     icon: Database,
-    label: 'Running graph query',
-    color: 'text-red-600',
+    label: "Running graph query",
+    color: "text-red-600",
   },
 };
 
@@ -150,18 +150,20 @@ function renderResultSummary(tool: string, result: any): string {
   if (!result) return '';
 
   switch (tool) {
-    case 'discover_schema':
-      return `Found ${result.entity_count || 0} entities, ${result.relationship_count || 0} relationships`;
-    case 'vector_search':
+    case "discover_graph":
+      return `Found ${result.entity_count || 0} entities, ${
+        result.relationship_count || 0
+      } relationships`;
+    case "vector_search":
       return `Found ${result.count || 0} relevant documents`;
-    case 'entity_lookup':
+    case "entity_lookup":
       return `Found ${result.count || 0} matching entities`;
-    case 'graph_neighbors':
+    case "graph_neighbors":
       return `Found ${result.total_found || 0} neighbors`;
-    case 'graph_query':
+    case "graph_query":
       return `Returned ${result.count || 0} results`;
     default:
-      return '';
+      return "";
   }
 }
 
@@ -181,55 +183,72 @@ function renderToolResult(tool: string, result: any) {
   }
 
   switch (tool) {
-    case 'discover_schema':
+    case "discover_graph":
       return (
         <div className="space-y-3">
-          {/* Entity type badges */}
-          <div>
-            <p className="text-sm font-medium">Entity Types ({result.entity_types?.length || 0})</p>
-            <div className="flex flex-wrap gap-1 mt-1">
-              {result.entity_types?.map((type: string, i: number) => (
-                <span
-                  key={i}
-                  className="inline-flex items-center px-2 py-1 rounded-md bg-primary/10 text-primary text-xs font-medium"
-                >
-                  {type}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          {/* Schema graph visualization */}
-          {result.entity_types && result.entity_types.length > 0 && (
+          {/* Node type badges */}
+          {result.node_stats && result.node_stats.length > 0 && (
             <div>
-              <p className="text-sm font-medium mb-2">Schema Diagram</p>
-              <GraphPreview
-                nodes={result.entity_types.map((type: string, i: number) => ({
-                  id: `entity-${i}`,
-                  name: type,
-                  type: type,
-                }))}
-                links={[]}
-                height={250}
-              />
+              <p className="text-sm font-medium">Available Data</p>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {result.node_stats.map((stat: any, i: number) => (
+                  <span
+                    key={i}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-muted text-foreground text-xs font-medium"
+                  >
+                    <span className="font-semibold">{stat.label}</span>
+                    <span className="text-muted-foreground">
+                      ({stat.count})
+                    </span>
+                  </span>
+                ))}
+              </div>
             </div>
           )}
 
-          {/* Full schema markdown */}
-          {result.schema && (
-            <div className="mt-2">
-              <details>
-                <summary className="text-sm font-medium cursor-pointer hover:text-primary">
-                  View full schema
-                </summary>
-                <pre className="text-xs mt-2 whitespace-pre-wrap">{result.schema}</pre>
-              </details>
+          {/* Entity type badges */}
+          {result.entity_types && result.entity_types.length > 0 && (
+            <div>
+              <p className="text-sm font-medium">
+                Entity Types ({result.entity_types.length})
+              </p>
+              <div className="flex flex-wrap gap-1 mt-1">
+                {result.entity_types.map((type: string, i: number) => (
+                  <span
+                    key={i}
+                    className="inline-flex items-center px-2 py-1 rounded-md bg-primary/10 text-primary text-xs font-medium"
+                  >
+                    {type}
+                  </span>
+                ))}
+              </div>
             </div>
+          )}
+
+          {/* No entities message */}
+          {(!result.entity_types || result.entity_types.length === 0) && (
+            <div className="text-sm text-muted-foreground">
+              <p>
+                No graph entities found. Document chunks are available for
+                semantic search.
+              </p>
+            </div>
+          )}
+
+          {/* Full schema if available */}
+          {result.schema && (
+            <details className="text-sm">
+              <summary className="cursor-pointer font-medium">
+                View full schema
+              </summary>
+              <pre className="mt-2 p-2 bg-background rounded text-xs whitespace-pre-wrap">
+                {result.schema}
+              </pre>
+            </details>
           )}
         </div>
       );
-
-    case 'vector_search':
+    case "vector_search":
       return (
         <div className="space-y-2">
           {result.results?.slice(0, 3).map((doc: any, i: number) => (
@@ -252,7 +271,7 @@ function renderToolResult(tool: string, result: any) {
         </div>
       );
 
-    case 'entity_lookup':
+    case "entity_lookup":
       return (
         <div className="space-y-2">
           {result.entities?.map((entity: any, i: number) => (
@@ -264,7 +283,7 @@ function renderToolResult(tool: string, result: any) {
         </div>
       );
 
-    case 'graph_neighbors':
+    case "graph_neighbors":
       // Build graph data from neighbors
       const neighborNodes: GraphNode[] = [];
       const neighborLinks: GraphLink[] = [];
@@ -272,8 +291,8 @@ function renderToolResult(tool: string, result: any) {
       // Add center node
       neighborNodes.push({
         id: result.source_entity_id,
-        name: 'Center',
-        type: 'Center',
+        name: "Center",
+        type: "Center",
       });
 
       // Add neighbor nodes and links
@@ -282,14 +301,14 @@ function renderToolResult(tool: string, result: any) {
         neighborNodes.push({
           id: neighborId,
           name: neighbor.entity?.name || `Entity ${i}`,
-          type: neighbor.entity?.type || 'Unknown',
+          type: neighbor.entity?.type || "Unknown",
         });
 
         // Create link from center to neighbor
         neighborLinks.push({
           source: result.source_entity_id,
           target: neighborId,
-          type: neighbor.relationships?.[0] || 'RELATED_TO',
+          type: neighbor.relationships?.[0] || "RELATED_TO",
         });
       });
 
@@ -314,10 +333,12 @@ function renderToolResult(tool: string, result: any) {
             {result.neighbors?.slice(0, 5).map((neighbor: any, i: number) => (
               <div key={i} className="border-l-2 border-orange-500/30 pl-3">
                 <p className="text-sm font-medium">{neighbor.entity?.name}</p>
-                <p className="text-xs text-muted-foreground">{neighbor.entity?.type}</p>
+                <p className="text-xs text-muted-foreground">
+                  {neighbor.entity?.type}
+                </p>
                 {neighbor.relationships?.length > 0 && (
                   <p className="text-xs text-muted-foreground mt-1">
-                    via {neighbor.relationships.join(', ')}
+                    via {neighbor.relationships.join(", ")}
                   </p>
                 )}
               </div>
@@ -326,7 +347,7 @@ function renderToolResult(tool: string, result: any) {
         </div>
       );
 
-    case 'graph_query':
+    case "graph_query":
       // Try to extract graph data from Cypher results
       const queryNodes: GraphNode[] = [];
       const queryLinks: GraphLink[] = [];
@@ -336,13 +357,13 @@ function renderToolResult(tool: string, result: any) {
         result.results.forEach((row: any) => {
           // Look for node-like objects in the result
           Object.values(row).forEach((value: any) => {
-            if (value && typeof value === 'object') {
+            if (value && typeof value === "object") {
               // If it has id, name, type - treat as node
               if (value.id && !seenNodeIds.has(value.id)) {
                 queryNodes.push({
                   id: value.id,
                   name: value.name || value.id,
-                  type: value.type || 'Unknown',
+                  type: value.type || "Unknown",
                   properties: value,
                 });
                 seenNodeIds.add(value.id);
@@ -354,13 +375,19 @@ function renderToolResult(tool: string, result: any) {
 
       return (
         <div className="space-y-3">
-          <p className="text-sm font-medium mb-2">Query returned {result.count} results</p>
+          <p className="text-sm font-medium mb-2">
+            Query returned {result.count} results
+          </p>
 
           {/* Graph visualization if we extracted nodes */}
           {queryNodes.length > 0 && (
             <div>
               <p className="text-sm font-medium mb-2">Graph View</p>
-              <GraphPreview nodes={queryNodes} links={queryLinks} height={300} />
+              <GraphPreview
+                nodes={queryNodes}
+                links={queryLinks}
+                height={300}
+              />
             </div>
           )}
 
@@ -369,12 +396,18 @@ function renderToolResult(tool: string, result: any) {
             <summary className="text-sm font-medium cursor-pointer hover:text-primary">
               View raw results
             </summary>
-            <pre className="text-xs overflow-x-auto mt-2">{JSON.stringify(result.results, null, 2)}</pre>
+            <pre className="text-xs overflow-x-auto mt-2">
+              {JSON.stringify(result.results, null, 2)}
+            </pre>
           </details>
         </div>
       );
 
     default:
-      return <pre className="text-xs overflow-x-auto">{JSON.stringify(result, null, 2)}</pre>;
+      return (
+        <pre className="text-xs overflow-x-auto">
+          {JSON.stringify(result, null, 2)}
+        </pre>
+      );
   }
 }

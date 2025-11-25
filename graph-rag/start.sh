@@ -7,6 +7,19 @@ set -e
 
 echo "🚀 Starting Graph RAG..."
 
+# Check if ports are already in use
+if lsof -ti:8000 > /dev/null 2>&1; then
+    echo "⚠️  Port 8000 is already in use. Stopping existing backend..."
+    lsof -ti:8000 | xargs kill -9 2>/dev/null || true
+    sleep 1
+fi
+
+if lsof -ti:3000 > /dev/null 2>&1; then
+    echo "⚠️  Port 3000 is already in use. Stopping existing frontend..."
+    lsof -ti:3000 | xargs kill -9 2>/dev/null || true
+    sleep 1
+fi
+
 # Start Docker services
 echo "📦 Starting Neo4j and PostgreSQL..."
 docker compose up -d postgres neo4j
@@ -38,7 +51,34 @@ echo "Frontend: http://localhost:3000"
 echo "Neo4j:    http://localhost:7474"
 echo ""
 echo "Press Ctrl+C to stop all services"
+echo "Or run ./stop.sh to stop services"
+
+# Cleanup function
+cleanup() {
+    echo ""
+    echo "🛑 Stopping services..."
+    
+    # Kill backend
+    if kill -0 $BACKEND_PID 2>/dev/null; then
+        kill $BACKEND_PID 2>/dev/null || true
+    fi
+    
+    # Kill frontend
+    if kill -0 $FRONTEND_PID 2>/dev/null; then
+        kill $FRONTEND_PID 2>/dev/null || true
+    fi
+    
+    # Kill any remaining processes on ports
+    lsof -ti:8000 | xargs kill -9 2>/dev/null || true
+    lsof -ti:3000 | xargs kill -9 2>/dev/null || true
+    
+    # Stop Docker services
+    docker compose down
+    
+    echo "✅ All services stopped"
+    exit 0
+}
 
 # Wait for Ctrl+C
-trap "echo '🛑 Stopping services...'; docker compose down; kill $BACKEND_PID $FRONTEND_PID; exit" INT
+trap cleanup INT TERM
 wait

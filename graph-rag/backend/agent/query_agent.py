@@ -42,37 +42,56 @@ class SearchResult(BaseModel):
     node_id: str
     text: str
     score: float
+    document_name: str  # Name of the parent document
+    document_id: str  # ID of the parent document
+    chunk_index: int = 0
     metadata: dict[str, Any] = {}
 
 
 # Default system prompt - can be overridden per project
-DEFAULT_SYSTEM_PROMPT = """You are an intelligent assistant that answers questions using a knowledge graph.
+DEFAULT_SYSTEM_PROMPT = """You are an intelligent assistant that answers questions by searching documents.
 
-You have access to multiple tools to explore the knowledge base:
-1. **discover_schema**: Understand the structure of the knowledge graph (entities, relationships, patterns)
-2. **vector_search**: Find relevant document chunks using semantic similarity
-3. **entity_lookup**: Find specific entities by name
-4. **graph_neighbors**: Explore relationships between entities
-5. **graph_query**: Execute Cypher queries for complex graph traversal
+**How Search Works:**
+- Documents are split into chunks for better semantic search
+- **Semantic search** finds chunks with similar MEANING, not exact keyword matches
+- When you search, you're finding relevant chunks within documents
+- **Always cite the DOCUMENT NAME** when answering, not chunk numbers
+- Users care about documents, not chunks (chunks are just our search mechanism)
 
-**Recommended Strategy:**
-1. **First interaction**: Call discover_schema to understand what entities and relationships exist
-2. **For questions**: Start with vector_search to find relevant context
-3. **For entity questions**: Use entity_lookup, then graph_neighbors to expand context
-4. **For complex queries**: Use graph_query for multi-hop reasoning
+**Available Tools:**
+1. **vector_search**: Semantic search over document chunks (ALWAYS AVAILABLE)
+   - Finds chunks by semantic similarity, not keyword matching
+   - Returns chunks with their parent document names
+   - Try multiple searches with different phrasings if first search returns nothing
+   - If looking for specific terms, include context: instead of "UAV", try "UAV unmanned aircraft applications"
+2. **discover_graph**: Check for extracted entities/relationships (optional)
+3. **entity_lookup**: Find entities by name (only if graph exists)
+4. **graph_neighbors**: Explore entity relationships (only if graph exists)
+5. **graph_query**: Complex graph queries (only if graph exists)
 
-**Hybrid Search Approach:**
-- Use vector_search to get initial relevant chunks
-- Extract entity names from chunks or question
-- Use entity_lookup to find those entities in the graph
-- Use graph_neighbors to expand context around entities
-- Combine all information for a comprehensive answer
+**Search Strategy:**
+- First search: Use the user's question directly
+- If no results: Try rephrasing with more context or related terms
+- If still no results: Explain semantic search limitations and suggest more descriptive queries
+- Use top_k parameter wisely (default 5, increase to 10-15 for broader searches)
 
-Always:
-- Cite your sources by mentioning documents and entities
-- Explain relationships you discovered in the graph
-- If you find related entities, mention them to provide context
-- Be clear about what information comes from direct search vs graph traversal"""
+**How to Answer Questions:**
+1. Use vector_search to find relevant information
+2. Read the chunk text to get the information
+3. **Cite the document name** (not chunk index) when answering
+4. Group information by document when possible
+5. Be specific: "According to [Document Name]..." or "In [Document Name], it states..."
+
+**Example:**
+- ✅ GOOD: "The MQ-1 Gray Eagle UAV is mentioned in the document 'Army RDT&E Volume 4b'..."
+- ❌ BAD: "Chunk 236 mentions UAV..."
+
+**Important:**
+- Semantic search finds meaning, not exact words - a chunk about "drones" won't necessarily match "UAV"
+- If search returns nothing, try broader/more contextual queries
+- Graph tools are optional - vector_search always works
+- Always mention document names in your citations
+- If multiple documents contain information, list them all"""
 
 
 def build_entitlement_filter(user_email: str | None) -> str:
@@ -110,36 +129,51 @@ query_agent = Agent(
 
 
 @query_agent.tool
-async def discover_schema(
+async def discover_graph(
     ctx: RunContext[AgentDependencies],
 ) -> str:
-    """Discover the structure of the knowledge graph.
+    """Check if additional graph structure (entities and relationships) exists beyond document chunks.
 
-    This tool provides a formatted overview of:
-    - Entity types and their counts
-    - Relationship patterns between entities
-    - Key properties available on entities
+    This tool shows:
+    - Whether any Entity nodes were extracted during ingestion
+    - Entity types and their counts (if any exist)
+    - Relationship patterns between entities (if any exist)
 
-    Call this tool at the start of a conversation to understand what's available
-    in the knowledge graph, then use that knowledge to plan your search strategy.
+    NOTE: This is optional! The system always has document chunks available for vector_search.
+    Graph entities are additional enrichment that may or may not exist.
 
     Args:
         ctx: Runtime context with dependencies
 
     Returns:
-        Formatted markdown description of the graph schema
+        Description of available graph structure, or a message indicating only document chunks are available
     """
     # Emit tool start event if callback is available
     if ctx.deps.step_callback:
         await ctx.deps.step_callback(
             AgentStep(
                 type="tool_call_start",
-                tool="discover_schema",
-                args={},
+                tool="discover_graph",
+                args={"description": "Analyzing graph structure..."},
             )
         )
 
-    # Get entity types and counts
+    # First check what node types exist in the database
+    node_stats_query = """
+    CALL db.labels() YIELD label
+    CALL {
+        WITH label
+        MATCH (n)
+        WHERE label IN labels(n)
+        RETURN count(n) as count
+    }
+    RETURN label, count
+    ORDER BY count DESC
+    """
+
+    node_stats = await ctx.deps.neo4j_client.execute_query(node_stats_query)
+
+    # Get entity types and counts (may be empty)
     entity_query = """
     MATCH (e:Entity)
     WITH e.type as entity_type, count(e) as count, collect(e)[0..3] as samples
@@ -150,7 +184,7 @@ async def discover_schema(
 
     entity_results = await ctx.deps.neo4j_client.execute_query(entity_query)
 
-    # Get relationship patterns
+    # Get relationship patterns (may be empty)
     rel_query = """
     MATCH (a:Entity)-[r]->(b:Entity)
     WITH type(r) as rel_type, a.type as from_type, b.type as to_type, count(r) as count
@@ -162,53 +196,71 @@ async def discover_schema(
     rel_results = await ctx.deps.neo4j_client.execute_query(rel_query)
 
     # Format as markdown
-    schema_md = "# Knowledge Graph Schema\n\n"
+    schema_md = "# Graph Structure\n\n"
 
-    # Entity types section
-    schema_md += "## Entity Types\n\n"
+    # Show all node types
+    schema_md += "## Available Data\n\n"
+    for stat in node_stats:
+        label = stat.get("label", "Unknown")
+        count = stat.get("count", 0)
+        schema_md += f"- **{label}**: {count} nodes\n"
+    schema_md += "\n"
+
+    # Entity types section (if any exist)
     total_entities = 0
-    for result in entity_results:
-        entity_type = result.get("entity_type", "Unknown")
-        count = result.get("count", 0)
-        total_entities += count
+    if entity_results:
+        schema_md += "## Extracted Entities\n\n"
+        for result in entity_results:
+            entity_type = result.get("entity_type", "Unknown")
+            count = result.get("count", 0)
+            total_entities += count
 
-        # Get common properties across samples
-        property_sets = result.get("property_sets", [])
-        common_props = set(property_sets[0]) if property_sets else set()
-        for prop_set in property_sets[1:]:
-            common_props &= set(prop_set)
+            # Get common properties across samples
+            property_sets = result.get("property_sets", [])
+            common_props = set(property_sets[0]) if property_sets else set()
+            for prop_set in property_sets[1:]:
+                common_props &= set(prop_set)
 
-        schema_md += f"- **{entity_type}**: {count} entities\n"
-        if common_props:
-            schema_md += f"  - Properties: {', '.join(sorted(common_props))}\n"
+            schema_md += f"- **{entity_type}**: {count} entities\n"
+            if common_props:
+                schema_md += f"  - Properties: {', '.join(sorted(common_props))}\n"
 
-    schema_md += f"\n**Total Entities**: {total_entities}\n\n"
+        schema_md += f"\n**Total Entities**: {total_entities}\n\n"
+    else:
+        schema_md += "## Extracted Entities\n\n"
+        schema_md += "*No entity nodes found. The system contains document chunks that can be searched using vector_search.*\n\n"
 
-    # Relationship patterns section
-    schema_md += "## Relationship Patterns\n\n"
+    # Relationship patterns section (if any exist)
     total_relationships = 0
-    for result in rel_results:
-        rel_type = result.get("rel_type", "Unknown")
-        from_type = result.get("from_type", "Unknown")
-        to_type = result.get("to_type", "Unknown")
-        count = result.get("count", 0)
-        total_relationships += count
+    if rel_results:
+        schema_md += "## Relationship Patterns\n\n"
+        for result in rel_results:
+            rel_type = result.get("rel_type", "Unknown")
+            from_type = result.get("from_type", "Unknown")
+            to_type = result.get("to_type", "Unknown")
+            count = result.get("count", 0)
+            total_relationships += count
 
-        schema_md += f"- **{from_type}** --[{rel_type}]--> **{to_type}**: {count} relationships\n"
+            schema_md += f"- **{from_type}** --[{rel_type}]--> **{to_type}**: {count} relationships\n"
 
-    schema_md += f"\n**Total Relationships**: {total_relationships}\n"
+        schema_md += f"\n**Total Relationships**: {total_relationships}\n"
+    else:
+        schema_md += "## Relationships\n\n"
+        schema_md += "*No entity relationships found.*\n"
 
     # Emit tool result event
     if ctx.deps.step_callback:
         await ctx.deps.step_callback(
             AgentStep(
                 type="tool_call_result",
-                tool="discover_schema",
+                tool="discover_graph",
                 result={
                     "schema": schema_md,
+                    "node_stats": node_stats,
                     "entity_count": total_entities,
                     "relationship_count": total_relationships,
                     "entity_types": [r.get("entity_type") for r in entity_results],
+                    "has_entities": total_entities > 0,
                 },
             )
         )
@@ -238,7 +290,11 @@ async def vector_search(
             AgentStep(
                 type="tool_call_start",
                 tool="vector_search",
-                args={"query": query, "top_k": top_k},
+                args={
+                    "query": query,
+                    "top_k": top_k,
+                    "description": f"Searching for '{query}'...",
+                },
             )
         )
 
@@ -249,18 +305,18 @@ async def vector_search(
     entitlement_filter = build_entitlement_filter(ctx.deps.current_user_email)
 
     # Perform vector search with entitlement filtering
-    # We need to get the parent Document and check entitlements
+    # Get chunks and their parent documents, checking entitlements
     cypher_query = f"""
     CALL db.index.vector.queryNodes('chunk_embeddings', $top_k, $embedding)
     YIELD node as chunk, score
-    MATCH (chunk)-[:PART_OF]->(doc:Document)
+    MATCH (doc:Document)-[:HAS_CHUNK]->(chunk)
     WHERE doc.project_id = $project_id {entitlement_filter}
-    RETURN chunk, score
+    RETURN chunk, score, doc
     ORDER BY score DESC
     LIMIT $top_k
     """
 
-    results = await ctx.deps.neo4j_client.execute_read(
+    results = await ctx.deps.neo4j_client.execute_query(
         cypher_query,
         {
             "embedding": embedding,
@@ -269,11 +325,12 @@ async def vector_search(
         },
     )
 
-    # Format results
+    # Format results with document information
     search_results: list[SearchResult] = []
 
     for result in results:
         chunk = result.get("chunk", {})
+        doc = result.get("doc", {})
         score = result.get("score", 0.0)
 
         search_results.append(
@@ -281,8 +338,12 @@ async def vector_search(
                 node_id=chunk.get("id", ""),
                 text=chunk.get("text", ""),
                 score=score,
+                document_name=doc.get("name", "Unknown Document"),
+                document_id=doc.get("id", ""),
+                chunk_index=chunk.get("chunk_index", 0),
                 metadata={
-                    "chunk_index": chunk.get("chunk_index", 0),
+                    "document_path": doc.get("path", ""),
+                    "document_size": doc.get("size", 0),
                 },
             )
         )
@@ -325,7 +386,11 @@ async def entity_lookup(
             AgentStep(
                 type="tool_call_start",
                 tool="entity_lookup",
-                args={"entity_name": entity_name, "fuzzy": fuzzy},
+                args={
+                    "entity_name": entity_name,
+                    "fuzzy": fuzzy,
+                    "description": f"Looking up entity '{entity_name}'...",
+                },
             )
         )
 
@@ -387,6 +452,7 @@ async def graph_neighbors(
                     "entity_id": entity_id,
                     "relationship_types": relationship_types,
                     "max_depth": max_depth,
+                    "description": f"Exploring relationships for '{entity_id}'...",
                 },
             )
         )
@@ -468,7 +534,11 @@ async def graph_query(
             AgentStep(
                 type="tool_call_start",
                 tool="graph_query",
-                args={"cypher_query": cypher_query, "parameters": parameters},
+                args={
+                    "cypher_query": cypher_query,
+                    "parameters": parameters,
+                    "description": "Running custom graph query...",
+                },
             )
         )
 

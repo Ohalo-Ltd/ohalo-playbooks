@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     # OpenAI
     openai_api_key: str = ""
     openai_embedding_model: str = "text-embedding-3-large"
+    openai_embedding_dimensions: Optional[int] = None  # None = use model default
     openai_chat_model: str = "gpt-4o"
 
     # DXR (Data X-Ray)

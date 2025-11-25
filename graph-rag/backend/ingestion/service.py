@@ -1,5 +1,6 @@
 """Ingestion service for orchestrating the data pipeline."""
 
+import json
 import logging
 from typing import Any, Optional
 from uuid import uuid4
@@ -19,38 +20,92 @@ logger = logging.getLogger(__name__)
 
 def extract_entitlement_metadata(hit: Hit) -> dict[str, Any]:
     """Extract entitlement metadata from DXR hit.
+    
+    DXR stores entitlements as JSON-encoded strings:
+    - OWNER: JSON string with {id, uuid, name, email, accountType, ...}
+    - WHO_CAN_ACCESS: Array of JSON strings with the same structure
 
     Args:
         hit: DXR Hit object from search results
 
     Returns:
-        Dictionary with owner_email and accessible_by_emails
+        Dictionary with owner_email, owner_uuid, accessible_by_group_uuids, accessible_by_user_emails
     """
     entitlements = {}
 
-    # Try to get from hit._source first (standard DXR location)
-    source = getattr(hit, "_source", None) or {}
+    # Try to get from hit.metadata with computed.metadata# prefix
+    owner_raw = hit.metadata.get("computed.metadata#OWNER")
+    who_can_access_raw = hit.metadata.get("computed.metadata#WHO_CAN_ACCESS")
 
-    # Extract OWNER (single email)
-    owner = source.get("OWNER") or hit.metadata.get("OWNER")
-    if owner:
-        entitlements["owner_email"] = str(owner)
+    # Also try without the prefix as fallback
+    if not owner_raw:
+        owner_raw = hit.metadata.get("OWNER")
+    if not who_can_access_raw:
+        who_can_access_raw = hit.metadata.get("WHO_CAN_ACCESS")
 
-    # Extract WHO_CAN_ACCESS (list of emails or comma-separated string)
-    who_can_access = source.get("WHO_CAN_ACCESS") or hit.metadata.get("WHO_CAN_ACCESS")
-    if who_can_access:
-        if isinstance(who_can_access, list):
-            # Already a list
-            entitlements["accessible_by_emails"] = [
-                str(email) for email in who_can_access if email
-            ]
-        elif isinstance(who_can_access, str):
-            # Comma-separated string
-            emails = [
-                email.strip() for email in who_can_access.split(",") if email.strip()
-            ]
-            if emails:
-                entitlements["accessible_by_emails"] = emails
+    # Parse OWNER (JSON-encoded string)
+    if owner_raw:
+        try:
+            if isinstance(owner_raw, str):
+                owner_data = json.loads(owner_raw)
+            else:
+                owner_data = owner_raw
+
+            # Extract email and uuid from owner
+            if isinstance(owner_data, dict):
+                if owner_data.get("email"):
+                    entitlements["owner_email"] = owner_data["email"]
+                if owner_data.get("uuid"):
+                    entitlements["owner_uuid"] = owner_data["uuid"]
+
+                logger.debug(f"Parsed OWNER: email={owner_data.get('email')}, uuid={owner_data.get('uuid')}")
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(f"Failed to parse OWNER metadata: {e}")
+
+    # Parse WHO_CAN_ACCESS (array of JSON-encoded strings)
+    if who_can_access_raw:
+        try:
+            if isinstance(who_can_access_raw, str):
+                who_can_access_list = json.loads(who_can_access_raw)
+            else:
+                who_can_access_list = who_can_access_raw
+
+            group_uuids = []
+            user_emails = []
+
+            if isinstance(who_can_access_list, list):
+                for item in who_can_access_list:
+                    # Each item is a JSON-encoded string
+                    if isinstance(item, str):
+                        try:
+                            access_data = json.loads(item)
+                        except json.JSONDecodeError:
+                            logger.warning(f"Failed to parse WHO_CAN_ACCESS item: {item}")
+                            continue
+                    else:
+                        access_data = item
+
+                    if isinstance(access_data, dict):
+                        account_type = access_data.get("accountType", "")
+                        uuid = access_data.get("uuid", "")
+                        email = access_data.get("email", "")
+
+                        # Groups are identified by accountType="GROUP"
+                        if account_type == "GROUP" and uuid:
+                            group_uuids.append(uuid)
+                        # Users have accountType="USER" and should have an email
+                        elif account_type == "USER" and email:
+                            user_emails.append(email)
+
+                if group_uuids:
+                    entitlements["accessible_by_group_uuids"] = group_uuids
+                if user_emails:
+                    entitlements["accessible_by_user_emails"] = user_emails
+
+                logger.debug(f"Parsed WHO_CAN_ACCESS: {len(group_uuids)} groups, {len(user_emails)} users")
+
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(f"Failed to parse WHO_CAN_ACCESS metadata: {e}")
 
     return entitlements
 
@@ -104,7 +159,7 @@ class IngestionService:
             file_name = hit.file_name or hit.metadata.get("ds#file_name", "unknown")
             file_id = hit.id or "unknown"  # Ensure file_id is not None
 
-            logger.info(f"Ingesting document: {file_name} (ID: {file_id})")
+            logger.info(f"Processing: {file_name}")
 
             # Extract entitlement metadata
             entitlements = extract_entitlement_metadata(hit)
@@ -122,9 +177,21 @@ class IngestionService:
             # Add entitlement properties if available
             if entitlements:
                 doc_properties.update(entitlements)
-                logger.info(f"Document entitlements: {entitlements}")
+                logger.debug(
+                    f"  └─ Entitlements: owner={entitlements.get('owner_email', 'N/A')}, groups={len(entitlements.get('accessible_by_group_uuids', []))}"
+                )
 
-            # Create document node
+            # Check if document already has chunks (embeddings)
+            has_chunks = await self.neo4j_client.document_has_chunks(file_id)
+
+            logger.info(
+                f"  └─ Has chunks: {has_chunks}, Fetch content: {fetch_content}"
+            )
+
+            if has_chunks:
+                logger.info(f"  └─ Skipping embeddings (already exists)")
+
+            # Create/update document node (always update properties even if chunks exist)
             await self.graph_writer.create_document_node(
                 document_id=file_id,
                 name=file_name,
@@ -141,9 +208,8 @@ class IngestionService:
                 )
 
                 if parsed:
-                    logger.info(
-                        f"Found {len(parsed.entities)} entities and "
-                        f"{len(parsed.relationships)} relationships"
+                    logger.debug(
+                        f"  └─ Extracted {len(parsed.entities)} entities, {len(parsed.relationships)} relationships"
                     )
 
                     # Merge entities
@@ -158,27 +224,31 @@ class IngestionService:
                         parsed.relationships
                     )
 
-            # Fetch and chunk content if requested
-            if fetch_content:
+            # Fetch and chunk content if requested and chunks don't already exist
+            if fetch_content and not has_chunks:
                 # Get raw_text from the hit metadata (already fetched during search)
                 content = hit.metadata.get("dxr#raw_text", "")
 
                 logger.info(
-                    f"Content length for {file_name}: {len(content) if content else 0} characters"
+                    f"  └─ Content available: {len(content) > 0}, Length: {len(content)} chars"
                 )
 
                 if content:
                     # Chunk the content
                     chunks = chunk_text(content, chunk_size=1000, chunk_overlap=200)
-
-                    logger.info(f"Created {len(chunks)} chunks")
+                    logger.info(f"  └─ Creating {len(chunks)} chunks with embeddings")
 
                     # Generate embeddings in batch
+                    logger.debug(
+                        f"  └─ Generating embeddings for {len(chunks)} chunks..."
+                    )
                     embeddings = await self.embedding_service.generate_embeddings_batch(
                         chunks
                     )
+                    logger.debug(f"  └─ Embeddings generated: {len(embeddings)}")
 
                     # Create chunk nodes
+                    logger.debug(f"  └─ Creating chunk nodes in Neo4j...")
                     for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
                         await self.graph_writer.create_chunk_node(
                             chunk_id=None,
@@ -187,15 +257,16 @@ class IngestionService:
                             embedding=embedding,
                             chunk_index=idx,
                         )
+                    logger.info(f"  └─ ✓ Created {len(chunks)} chunks")
                 else:
-                    logger.warning(
-                        f"No raw_text content found for {file_name}. Available metadata keys: {list(hit.metadata.keys())}"
-                    )
-
-            logger.info(f"Successfully ingested document: {file_name}")
+                    logger.warning(f"  └─ No content available for chunking")
+            elif fetch_content and has_chunks:
+                logger.debug(f"  └─ Skipping content fetch (chunks exist)")
+            elif not fetch_content:
+                logger.debug(f"  └─ Content fetch disabled")
 
         except Exception as e:
-            logger.error(f"Failed to ingest document {file_id}: {e}")
+            logger.error(f"Failed to ingest {file_name}: {e}")
             raise
 
     async def ingest_datasource(
@@ -288,21 +359,15 @@ class IngestionService:
             )
             for idx, doc in enumerate(documents, 1):
                 try:
-                    doc_id = doc.id or "unknown"
                     doc_name = doc.file_name or doc.metadata.get(
                         "ds#file_name", "unknown"
                     )
-                    logger.info(
-                        f"[Job {job_id}] Processing document {idx}/{len(documents)}: {doc_name} (ID: {doc_id})"
-                    )
+                    logger.info(f"[Job {job_id}] [{idx}/{len(documents)}] {doc_name}")
 
                     await self.ingest_document(
                         doc, project_id, fetch_content, extractor_id, datasource_id
                     )
                     processed += 1
-                    logger.info(
-                        f"[Job {job_id}] Successfully processed {idx}/{len(documents)} - {doc_name}"
-                    )
 
                     # Update progress
                     await self.postgres_client.execute(

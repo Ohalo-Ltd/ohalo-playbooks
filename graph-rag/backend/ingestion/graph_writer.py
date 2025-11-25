@@ -1,10 +1,13 @@
 """Graph writer service for writing entities and relationships to Neo4j."""
 
+import logging
 from typing import Any, Optional
 from uuid import uuid4
 
 from database.neo4j_client import Neo4jClient
 from ingestion.metadata_parser import ExtractedEntity, ExtractedRelationship
+
+logger = logging.getLogger(__name__)
 
 
 class GraphWriter:
@@ -109,15 +112,29 @@ class GraphWriter:
         if project_id:
             props["project_id"] = project_id
 
-        query = """
-        MERGE (d:Document {id: $id})
-        SET d += $properties
+        logger.debug(
+            f"Creating/updating document node {document_id} with properties: {list(props.keys())}"
+        )
+
+        # Build SET clause dynamically based on available properties
+        set_clauses = []
+        for key in props.keys():
+            if key != "id":  # Don't set id again, it's used in MERGE
+                set_clauses.append(f"d.{key} = $props.{key}")
+
+        set_clause = (
+            ", ".join(set_clauses) if set_clauses else "d.id = d.id"
+        )  # No-op if no properties
+
+        query = f"""
+        MERGE (d:Document {{id: $props.id}})
+        SET {set_clause}
         RETURN elementId(d) as node_id
         """
 
         result = await self.client.execute_write(
             query,
-            {"id": document_id, "properties": props},
+            {"props": props},
         )
 
         if result:
