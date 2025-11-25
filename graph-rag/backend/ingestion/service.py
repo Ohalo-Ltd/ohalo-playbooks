@@ -68,6 +68,7 @@ class IngestionService:
                     "mime_type": dxr_file.mime_type,
                     "categories": dxr_file.categories,
                 },
+                project_id=project_id,
             )
 
             # Parse and ingest entities from metadata

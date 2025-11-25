@@ -88,7 +88,42 @@ def test_delete_project(client, mock_pg_client):
 
 def test_delete_project_not_found(client, mock_pg_client):
     mock_pg_client.execute = AsyncMock(return_value="DELETE 0")
-    
+
     response = client.delete("/api/projects/123e4567-e89b-12d3-a456-426614174000")
-    
+
     assert response.status_code == 404
+
+
+def test_create_project_with_encrypted_token(client, mock_pg_client):
+    """Test that DXR API token is properly encrypted when creating a project."""
+    long_token = "sk-" + "a" * 1230  # Simulate a 1233 character token
+
+    mock_row = {
+        "id": "123e4567-e89b-12d3-a456-426614174000",
+        "name": "Project with Token",
+        "description": "Test",
+        "system_prompt": None,
+        "dxr_url": "https://api.dataxray.com",
+        "dxr_api_token": long_token,  # Should be decrypted in response
+        "dxr_datasource_id": "ds_123",
+        "dxr_extractor_id": "extracted_metadata#1",
+        "created_at": datetime.now(),
+        "updated_at": datetime.now(),
+    }
+    mock_pg_client.fetchrow = AsyncMock(return_value=mock_row)
+
+    response = client.post(
+        "/api/projects",
+        json={
+            "name": "Project with Token",
+            "dxr_url": "https://api.dataxray.com",
+            "dxr_api_token": long_token,
+            "dxr_datasource_id": "ds_123",
+            "dxr_extractor_id": "extracted_metadata#1",
+        },
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["dxr_api_token"] == long_token
+    assert len(data["dxr_api_token"]) == 1233

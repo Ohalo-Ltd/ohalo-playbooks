@@ -39,8 +39,11 @@ export interface QueryResponse {
 }
 
 export interface IngestionRequest {
-  datasource_name: string;
-  datasource_id?: string;
+  project_id: string;
+  datasource_id: string;
+  extractor_id?: string;
+  max_documents?: number;
+  fetch_content?: boolean;
 }
 
 export interface IngestionResponse {
@@ -79,6 +82,10 @@ export interface Project {
   name: string;
   description?: string;
   system_prompt?: string;
+  dxr_url?: string;
+  dxr_api_token?: string;
+  dxr_datasource_id?: string;
+  dxr_extractor_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -87,12 +94,20 @@ export interface ProjectCreate {
   name: string;
   description?: string;
   system_prompt?: string;
+  dxr_url?: string;
+  dxr_api_token?: string;
+  dxr_datasource_id?: string;
+  dxr_extractor_id?: string;
 }
 
 export interface ProjectUpdate {
   name?: string;
   description?: string;
   system_prompt?: string;
+  dxr_url?: string;
+  dxr_api_token?: string;
+  dxr_datasource_id?: string;
+  dxr_extractor_id?: string;
 }
 
 export class ApiClient {
@@ -235,6 +250,17 @@ export class ApiClient {
       const error = await response.json();
       throw new Error(error.detail || 'Failed to delete project');
     }
+  }
+
+  async listDocuments(projectId: string): Promise<any[]> {
+    const response = await fetch(`${this.baseUrl}/api/documents?project_id=${projectId}`);
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to list documents');
+    }
+
+    return response.json();
   }
 }
 

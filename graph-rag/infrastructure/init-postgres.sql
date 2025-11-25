@@ -10,6 +10,10 @@ CREATE TABLE IF NOT EXISTS projects (
     name VARCHAR(255) NOT NULL,
     description TEXT,
     system_prompt TEXT,
+    dxr_url VARCHAR(255),
+    dxr_api_token BYTEA,  -- Encrypted using pgp_sym_encrypt, supports long tokens (1233+ chars)
+    dxr_datasource_id VARCHAR(255),
+    dxr_extractor_id VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

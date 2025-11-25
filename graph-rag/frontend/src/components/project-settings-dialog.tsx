@@ -6,7 +6,13 @@
 
 import React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2 } from 'lucide-react';
+import {
+  Loader2,
+  Settings as SettingsIcon,
+  Database,
+  FileText,
+  RefreshCw,
+} from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -29,48 +35,60 @@ interface ProjectSettingsDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-const DEFAULT_SYSTEM_PROMPT = `You are an intelligent assistant that answers questions using a knowledge graph.
-
-You have access to multiple tools to explore the knowledge base:
-1. **discover_schema**: Understand the structure of the knowledge graph (entities, relationships, patterns)
-2. **vector_search**: Find relevant document chunks using semantic similarity
-3. **entity_lookup**: Find specific entities by name
-4. **graph_neighbors**: Explore relationships between entities
-5. **graph_query**: Execute Cypher queries for complex graph traversal
-
-**Recommended Strategy:**
-1. **First interaction**: Call discover_schema to understand what entities and relationships exist
-2. **For questions**: Start with vector_search to find relevant context
-3. **For entity questions**: Use entity_lookup, then graph_neighbors to expand context
-4. **For complex queries**: Use graph_query for multi-hop reasoning
-
-**Hybrid Search Approach:**
-- Use vector_search to get initial relevant chunks
-- Extract entity names from chunks or question
-- Use entity_lookup to find those entities in the graph
-- Use graph_neighbors to expand context around entities
-- Combine all information for a comprehensive answer
-
-Always:
-- Cite your sources by mentioning documents and entities
-- Explain relationships you discovered in the graph
-- If you find related entities, mention them to provide context
-- Be clear about what information comes from direct search vs graph traversal`;
+const EXTRACTOR_PREVIEW = `{
+  "entities": [
+    {
+      "id": "e1",
+      "type": "Person",
+      "properties": {
+        "name": "John Doe",
+        "role": "Engineer"
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "from": "e1",
+      "to": "e2",
+      "type": "WORKS_ON",
+      "properties": {
+        "since": "2023"
+      }
+    }
+  ]
+}`;
 
 export function ProjectSettingsDialog({
   projectId,
   open,
   onOpenChange,
 }: ProjectSettingsDialogProps) {
-  const [name, setName] = React.useState('');
-  const [description, setDescription] = React.useState('');
-  const [systemPrompt, setSystemPrompt] = React.useState('');
+  const [name, setName] = React.useState("");
+  const [description, setDescription] = React.useState("");
+  const [systemPrompt, setSystemPrompt] = React.useState("");
+
+  // DXR Fields
+  const [dxrUrl, setDxrUrl] = React.useState("");
+  const [dxrApiToken, setDxrApiToken] = React.useState("");
+  const [dxrDatasourceId, setDxrDatasourceId] = React.useState("");
+
   const queryClient = useQueryClient();
 
   // Fetch project details
   const { data: project, isLoading } = useQuery({
-    queryKey: ['project', projectId],
+    queryKey: ["project", projectId],
     queryFn: () => apiClient.getProject(projectId!),
+    enabled: !!projectId && open,
+  });
+
+  // Fetch documents
+  const {
+    data: documents = [],
+    isLoading: isLoadingDocs,
+    refetch: refetchDocs,
+  } = useQuery({
+    queryKey: ["documents", projectId],
+    queryFn: () => apiClient.listDocuments(projectId!),
     enabled: !!projectId && open,
   });
 
@@ -78,8 +96,11 @@ export function ProjectSettingsDialog({
   React.useEffect(() => {
     if (project) {
       setName(project.name);
-      setDescription(project.description || '');
-      setSystemPrompt(project.system_prompt || '');
+      setDescription(project.description || "");
+      setSystemPrompt(project.system_prompt || "");
+      setDxrUrl(project.dxr_url || "");
+      setDxrApiToken(project.dxr_api_token || "");
+      setDxrDatasourceId(project.dxr_datasource_id || "");
     }
   }, [project]);
 
@@ -89,205 +110,286 @@ export function ProjectSettingsDialog({
       name?: string;
       description?: string;
       system_prompt?: string;
+      dxr_url?: string;
+      dxr_api_token?: string;
+      dxr_datasource_id?: string;
     }) => apiClient.updateProject(projectId!, updates),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['projects'] });
-      queryClient.invalidateQueries({ queryKey: ['project', projectId] });
-      toast.success('Settings saved', {
-        description: 'Project settings have been updated successfully.',
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      toast.success("Settings saved", {
+        description: "Project settings have been updated successfully.",
       });
       onOpenChange(false);
     },
     onError: (error: Error) => {
-      toast.error('Error', {
+      toast.error("Error", {
+        description: error.message,
+      });
+    },
+  });
+
+  // Ingest mutation
+  const ingestMutation = useMutation({
+    mutationFn: () =>
+      apiClient.startIngestion({
+        project_id: projectId!,
+        datasource_id: dxrDatasourceId,
+      }),
+    onSuccess: () => {
+      toast.success("Ingestion started", {
+        description: "Documents are being processed.",
+      });
+      refetchDocs();
+    },
+    onError: (error: Error) => {
+      toast.error("Ingestion failed", {
         description: error.message,
       });
     },
   });
 
   const handleSave = () => {
-    const updates: any = {};
-
-    if (name !== project?.name) {
-      updates.name = name;
-    }
-    if (description !== (project?.description || '')) {
-      updates.description = description;
-    }
-    if (systemPrompt !== (project?.system_prompt || '')) {
-      updates.system_prompt = systemPrompt || null;
-    }
-
-    if (Object.keys(updates).length > 0) {
-      updateProjectMutation.mutate(updates);
-    } else {
-      onOpenChange(false);
-    }
-  };
-
-  const handleResetPrompt = () => {
-    setSystemPrompt('');
-    toast.info('Prompt reset', {
-      description: 'System prompt will use the default when saved.',
+    updateProjectMutation.mutate({
+      name,
+      description,
+      system_prompt: systemPrompt,
+      dxr_url: dxrUrl,
+      dxr_api_token: dxrApiToken,
+      dxr_datasource_id: dxrDatasourceId,
     });
   };
-
-  const handleLoadDefault = () => {
-    setSystemPrompt(DEFAULT_SYSTEM_PROMPT);
-    toast.info('Default loaded', {
-      description: 'Default system prompt has been loaded.',
-    });
-  };
-
-  if (!projectId) return null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl h-[80vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Project Settings</DialogTitle>
           <DialogDescription>
-            Manage project details and customize the AI system prompt.
+            Manage project configuration, DXR connection, and documents.
           </DialogDescription>
         </DialogHeader>
 
-        {isLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin" />
-          </div>
-        ) : (
-          <Tabs defaultValue="general" className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="general">General</TabsTrigger>
-              <TabsTrigger value="prompt">System Prompt</TabsTrigger>
-            </TabsList>
+        <Tabs
+          defaultValue="general"
+          className="flex-1 flex flex-col overflow-hidden"
+        >
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="general">
+              <SettingsIcon className="w-4 h-4 mr-2" />
+              General
+            </TabsTrigger>
+            <TabsTrigger value="dxr">
+              <Database className="w-4 h-4 mr-2" />
+              DXR Connection
+            </TabsTrigger>
+            <TabsTrigger value="documents">
+              <FileText className="w-4 h-4 mr-2" />
+              Documents
+            </TabsTrigger>
+          </TabsList>
 
-            <TabsContent value="general" className="space-y-4">
+          <div className="flex-1 overflow-y-auto p-4">
+            <TabsContent value="general" className="space-y-4 mt-0">
               <div className="grid gap-2">
-                <Label htmlFor="project-name">Project Name</Label>
+                <Label htmlFor="name">Project Name</Label>
                 <Input
-                  id="project-name"
+                  id="name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="My Project"
                 />
               </div>
-
               <div className="grid gap-2">
-                <Label htmlFor="project-description">Description</Label>
-                <Textarea
-                  id="project-description"
+                <Label htmlFor="description">Description</Label>
+                <Input
+                  id="description"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="A brief description of this project"
-                  rows={3}
+                  placeholder="Project description"
                 />
               </div>
-
-              <div className="rounded-lg border p-4 space-y-2">
-                <h4 className="text-sm font-medium">Project Info</h4>
-                <div className="text-xs text-muted-foreground space-y-1">
-                  <div>
-                    <span className="font-medium">ID:</span> {project?.id}
-                  </div>
-                  <div>
-                    <span className="font-medium">Created:</span>{' '}
-                    {new Date(project?.created_at || '').toLocaleString()}
-                  </div>
-                  <div>
-                    <span className="font-medium">Updated:</span>{' '}
-                    {new Date(project?.updated_at || '').toLocaleString()}
-                  </div>
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="prompt" className="space-y-4">
               <div className="grid gap-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="system-prompt">Custom System Prompt</Label>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleLoadDefault}
-                      type="button"
-                    >
-                      Load Default
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleResetPrompt}
-                      type="button"
-                    >
-                      Clear
-                    </Button>
-                  </div>
-                </div>
+                <Label htmlFor="systemPrompt">System Prompt</Label>
                 <Textarea
-                  id="system-prompt"
+                  id="systemPrompt"
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
-                  placeholder="Leave empty to use the default system prompt..."
-                  rows={15}
-                  className="font-mono text-sm"
+                  placeholder="You are a helpful assistant..."
+                  className="min-h-[200px] font-mono text-sm"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Customize the AI agent's behavior by defining your own system prompt.
-                  This allows you to tailor the chain-of-thought, tool usage, and response
-                  style for your specific use case. Leave empty to use the default prompt.
+                  Customize how the AI agent behaves and answers questions.
                 </p>
               </div>
+            </TabsContent>
 
-              <div className="rounded-lg border p-4 space-y-2">
-                <h4 className="text-sm font-medium">Available Tools</h4>
-                <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
-                  <li>
-                    <code className="bg-muted px-1 py-0.5 rounded">discover_schema</code>
-                    - Introspect graph structure
-                  </li>
-                  <li>
-                    <code className="bg-muted px-1 py-0.5 rounded">vector_search</code>
-                    - Semantic similarity search
-                  </li>
-                  <li>
-                    <code className="bg-muted px-1 py-0.5 rounded">entity_lookup</code>
-                    - Find entities by name
-                  </li>
-                  <li>
-                    <code className="bg-muted px-1 py-0.5 rounded">graph_neighbors</code>
-                    - Explore relationships
-                  </li>
-                  <li>
-                    <code className="bg-muted px-1 py-0.5 rounded">graph_query</code>
-                    - Execute Cypher queries
-                  </li>
-                </ul>
+            <TabsContent value="dxr" className="space-y-6 mt-0">
+              <div className="grid gap-4 border p-4 rounded-lg">
+                <h3 className="font-semibold">Connection Details</h3>
+                <div className="grid gap-2">
+                  <Label htmlFor="dxrUrl">DXR URL</Label>
+                  <Input
+                    id="dxrUrl"
+                    value={dxrUrl}
+                    onChange={(e) => setDxrUrl(e.target.value)}
+                    placeholder="https://api.dataxray.com"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="dxrApiToken">API Token</Label>
+                  <Input
+                    id="dxrApiToken"
+                    type="password"
+                    value={dxrApiToken}
+                    onChange={(e) => setDxrApiToken(e.target.value)}
+                    placeholder="sk-..."
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="dxrDatasourceId">Datasource ID</Label>
+                  <Input
+                    id="dxrDatasourceId"
+                    value={dxrDatasourceId}
+                    onChange={(e) => setDxrDatasourceId(e.target.value)}
+                    placeholder="ds_..."
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-4">
+                <h3 className="font-semibold">Extractor Configuration</h3>
+                <p className="text-sm text-muted-foreground">
+                  The extractor must output JSON in the following format:
+                </p>
+                <div className="bg-muted p-4 rounded-lg overflow-x-auto">
+                  <pre className="text-xs font-mono">{EXTRACTOR_PREVIEW}</pre>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between border-t pt-4">
+                <div className="text-sm text-muted-foreground">
+                  Ready to ingest documents from DXR?
+                </div>
+                <Button
+                  onClick={() => ingestMutation.mutate()}
+                  disabled={ingestMutation.isPending || !dxrDatasourceId}
+                >
+                  {ingestMutation.isPending && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
+                  Start Ingestion
+                </Button>
               </div>
             </TabsContent>
-          </Tabs>
-        )}
 
-        <DialogFooter>
+            <TabsContent
+              value="documents"
+              className="mt-0 h-full flex flex-col"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold">Ingested Documents</h3>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => refetchDocs()}
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh
+                </Button>
+              </div>
+
+              {isLoadingDocs ? (
+                <div className="flex items-center justify-center h-40">
+                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                </div>
+              ) : documents.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg text-center p-8">
+                  <FileText className="h-12 w-12 text-muted-foreground mb-4" />
+                  <h3 className="text-lg font-semibold">No documents yet</h3>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Connect to DXR and start ingestion to see documents here.
+                  </p>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      // Switch to DXR tab - hacky but works for now
+                      const dxrTab = document.querySelector(
+                        '[value="dxr"]'
+                      ) as HTMLElement;
+                      dxrTab?.click();
+                    }}
+                  >
+                    Go to DXR Connection
+                  </Button>
+                </div>
+              ) : (
+                <div className="border rounded-md">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr className="border-b">
+                        <th className="h-10 px-4 text-left font-medium">
+                          Name
+                        </th>
+                        <th className="h-10 px-4 text-left font-medium">
+                          Size
+                        </th>
+                        <th className="h-10 px-4 text-left font-medium">
+                          Type
+                        </th>
+                        <th className="h-10 px-4 text-left font-medium">
+                          Path
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {documents.map((doc: any) => (
+                        <tr
+                          key={doc.id}
+                          className="border-b last:border-0 hover:bg-muted/50"
+                        >
+                          <td className="p-4 font-medium">{doc.name}</td>
+                          <td className="p-4">
+                            {doc.properties.size
+                              ? `${(doc.properties.size / 1024).toFixed(1)} KB`
+                              : "-"}
+                          </td>
+                          <td className="p-4">
+                            {doc.properties.mime_type || "-"}
+                          </td>
+                          <td
+                            className="p-4 text-muted-foreground truncate max-w-[200px]"
+                            title={doc.properties.path}
+                          >
+                            {doc.properties.path || "-"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </TabsContent>
+          </div>
+        </Tabs>
+
+        <DialogFooter className="border-t p-4 mt-auto">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
           <Button
             onClick={handleSave}
-            disabled={updateProjectMutation.isPending || isLoading}
+            disabled={updateProjectMutation.isPending}
           >
-            {updateProjectMutation.isPending ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              'Save Changes'
+            {updateProjectMutation.isPending && (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             )}
+            Save Changes
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
+
+

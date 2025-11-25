@@ -1,48 +1,44 @@
 /**
- * Main page - chat interface with sidebar.
+ * Main page - chat interface with top bar.
  */
 
 "use client";
 
 import React from "react";
 import { ChatInterface } from "@/components/chat-interface";
-import { AppSidebar } from "@/components/app-sidebar";
-import { ProjectSettingsDialog } from "@/components/project-settings-dialog";
-import {
-  SidebarProvider,
-  SidebarTrigger,
-  SidebarInset,
-} from "@/components/ui/sidebar";
+import { TopBar } from "@/components/top-bar";
+import { useQuery } from "@tanstack/react-query";
+import { apiClient } from "@/lib/api";
 
 export default function Home() {
-  const [currentProjectId, setCurrentProjectId] =
-    React.useState<string>("default");
-  const [settingsProjectId, setSettingsProjectId] = React.useState<
-    string | null
-  >(null);
+  const [currentProjectId, setCurrentProjectId] = React.useState<
+    string | undefined
+  >();
+
+  const { data: projects = [] } = useQuery({
+    queryKey: ["projects"],
+    queryFn: () => apiClient.listProjects(),
+  });
+
+  // Auto-select first project if none selected
+  React.useEffect(() => {
+    if (!currentProjectId && projects.length > 0) {
+      setCurrentProjectId(projects[0].id);
+    }
+  }, [projects, currentProjectId]);
 
   return (
-    <SidebarProvider>
-      <AppSidebar
+    <div className="flex flex-col h-screen">
+      <TopBar
         currentProjectId={currentProjectId}
         onProjectChange={setCurrentProjectId}
-        onOpenSettings={setSettingsProjectId}
       />
-      <SidebarInset>
-        <header className="flex h-14 items-center gap-4 border-b px-4">
-          <SidebarTrigger />
-          <h1 className="text-lg font-semibold">Graph RAG Chat</h1>
-        </header>
-        <main className="flex-1 overflow-auto p-4">
-          <ChatInterface projectId={currentProjectId} />
-        </main>
-      </SidebarInset>
-
-      <ProjectSettingsDialog
-        projectId={settingsProjectId}
-        open={settingsProjectId !== null}
-        onOpenChange={(open) => !open && setSettingsProjectId(null)}
-      />
-    </SidebarProvider>
+      <main className="flex-1 overflow-hidden">
+        <ChatInterface
+          projectId={currentProjectId}
+          hasProjects={projects.length > 0}
+        />
+      </main>
+    </div>
   );
 }

@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/sidebar';
 import { apiClient, Project } from '@/lib/api';
 import { Button } from '@/components/ui/button';
+import { ThemeToggle } from "@/components/theme-toggle";
 import {
   Dialog,
   DialogContent,
@@ -132,44 +133,16 @@ export function AppSidebar({
       </SidebarHeader>
 
       <SidebarContent>
-        {/* Navigation */}
-        <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive>
-                  <a href="/">
-                    <MessageSquare className="h-4 w-4" />
-                    <span>Chat</span>
-                  </a>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild>
-                  <a href="/ingestion">
-                    <Database className="h-4 w-4" />
-                    <span>Ingestion</span>
-                  </a>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarSeparator />
-
         {/* Projects */}
         <SidebarGroup>
           <SidebarGroupLabel>
             Projects
-            <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+            <Dialog
+              open={isCreateDialogOpen}
+              onOpenChange={setIsCreateDialogOpen}
+            >
               <DialogTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="ml-auto h-6 w-6"
-                >
+                <Button variant="ghost" size="icon" className="ml-auto h-6 w-6">
                   <Plus className="h-4 w-4" />
                 </Button>
               </DialogTrigger>
@@ -211,7 +184,7 @@ export function AppSidebar({
                     onClick={handleCreateProject}
                     disabled={createProjectMutation.isPending}
                   >
-                    {createProjectMutation.isPending ? 'Creating...' : 'Create'}
+                    {createProjectMutation.isPending ? "Creating..." : "Create"}
                   </Button>
                 </DialogFooter>
               </DialogContent>
@@ -239,7 +212,7 @@ export function AppSidebar({
                       isActive={currentProjectId === project.id}
                       onClick={() => onProjectChange?.(project.id)}
                     >
-                      <div className="flex items-center">
+                      <div className="flex items-center cursor-pointer">
                         <FolderOpen className="h-4 w-4" />
                         <span className="truncate">{project.name}</span>
                       </div>
@@ -251,7 +224,9 @@ export function AppSidebar({
                       <Settings className="h-4 w-4" />
                     </SidebarMenuAction>
                     <SidebarMenuAction
-                      onClick={() => handleDeleteProject(project.id, project.name)}
+                      onClick={() =>
+                        handleDeleteProject(project.id, project.name)
+                      }
                       title="Delete"
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
@@ -262,11 +237,39 @@ export function AppSidebar({
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        <SidebarSeparator />
+
+        {/* Navigation */}
+        <SidebarGroup>
+          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive>
+                  <a href="/">
+                    <MessageSquare className="h-4 w-4" />
+                    <span>Chat</span>
+                  </a>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild>
+                  <a href="/ingestion">
+                    <Database className="h-4 w-4" />
+                    <span>Ingestion</span>
+                  </a>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter className="border-t p-4">
-        <div className="text-xs text-muted-foreground">
-          Graph RAG v0.1.0
+        <div className="flex items-center justify-between">
+          <div className="text-xs text-muted-foreground">Graph RAG v0.1.0</div>
+          <ThemeToggle />
         </div>
       </SidebarFooter>
     </Sidebar>

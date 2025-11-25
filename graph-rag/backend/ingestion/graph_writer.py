@@ -90,13 +90,15 @@ class GraphWriter:
         document_id: str,
         name: str,
         properties: Optional[dict[str, Any]] = None,
+        project_id: Optional[str] = None,
     ) -> str:
         """Create a document node.
 
         Args:
             document_id: Document ID
             name: Document name
-            properties: Additional properties
+            properties: Document properties
+            project_id: Project ID
 
         Returns:
             Document node ID
@@ -104,18 +106,14 @@ class GraphWriter:
         props = properties or {}
         props["id"] = document_id
         props["name"] = name
+        if project_id:
+            props["project_id"] = project_id
 
         query = """
         MERGE (d:Document {id: $id})
         SET d += $properties
         RETURN elementId(d) as node_id
         """
-
-        result = await self.client.execute_write(query, {"id": document_id, "properties": props})
-
-        if result:
-            return result[0]["node_id"]
-        return document_id
 
     async def create_chunk_node(
         self,

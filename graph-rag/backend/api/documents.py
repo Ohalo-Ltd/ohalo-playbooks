@@ -28,6 +28,43 @@ async def get_neo4j_client() -> AsyncGenerator[Neo4jClient, None]:
         await client.close()
 
 
+@router.get("", response_model=list[DocumentResponse])
+async def list_documents(
+    project_id: str,
+    client: Neo4jClient = Depends(get_neo4j_client),
+) -> list[DocumentResponse]:
+    """List documents for a project.
+
+    Args:
+        project_id: Project ID
+        client: Neo4j client
+
+    Returns:
+        List of documents
+    """
+    query = """
+    MATCH (d:Document {project_id: $project_id})
+    RETURN d
+    """
+
+    results = await client.execute_query(query, {"project_id": project_id})
+
+    documents = []
+    for result in results:
+        node = result["d"]
+        properties = dict(node)
+        name = properties.pop("name", "Untitled")
+        documents.append(
+            DocumentResponse(
+                id=properties.get("id", ""),
+                name=name,
+                properties=properties,
+            )
+        )
+
+    return documents
+
+
 @router.get("/{document_id}", response_model=DocumentResponse)
 async def get_document(
     document_id: str,

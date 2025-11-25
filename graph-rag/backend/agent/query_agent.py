@@ -74,7 +74,7 @@ Always:
 
 # Define the query agent
 query_agent = Agent(
-    "openai:gpt-4o",
+    "openai:gpt-4o-mini",
     deps_type=AgentDependencies,
     system_prompt=DEFAULT_SYSTEM_PROMPT,
 )
@@ -490,7 +490,7 @@ async def query(
     agent = query_agent
     if system_prompt:
         agent = Agent(
-            "openai:gpt-4o",
+            "openai:gpt-4o-mini",
             deps_type=AgentDependencies,
             system_prompt=system_prompt,
         )
@@ -500,7 +500,7 @@ async def query(
 
     result = await agent.run(question, deps=deps)
 
-    return result.data
+    return result.output
 
 
 async def query_with_steps(
@@ -540,7 +540,7 @@ async def query_with_steps(
     agent = query_agent
     if system_prompt:
         agent = Agent(
-            "openai:gpt-4o",
+            "openai:gpt-4o-mini",
             deps_type=AgentDependencies,
             system_prompt=system_prompt,
         )
@@ -558,5 +558,5 @@ async def query_with_steps(
     # Yield final answer
     yield {
         "type": "answer",
-        "content": result.data,
+        "content": result.output,
     }
