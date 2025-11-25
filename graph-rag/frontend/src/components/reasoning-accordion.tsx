@@ -84,12 +84,12 @@ export function ReasoningAccordion({ steps, isStreaming }: ReasoningAccordionPro
       };
     }
 
-    if (lastStep.type === 'tool_call_result' && lastStep.tool) {
-      const config = TOOL_CONFIG[lastStep.tool];
-      const Icon = config?.icon || Database;
+    if (lastStep.type === "tool_call_result" && lastStep.tool) {
       return {
-        text: `${config?.label || lastStep.tool} completed`,
-        icon: <Icon className={cn('h-4 w-4', config?.color || 'text-muted-foreground')} />,
+        text: "Thinking...",
+        icon: (
+          <Sparkles className="h-4 w-4 animate-pulse text-muted-foreground" />
+        ),
       };
     }
 
@@ -114,11 +114,18 @@ export function ReasoningAccordion({ steps, isStreaming }: ReasoningAccordionPro
   };
 
   const currentStatus = getCurrentStatus();
-  const stepCount = steps.filter(s => s.type !== 'answer').length;
+  const stepCount = steps.filter(
+    (s) => s.type !== "answer" && s.type !== "answer_chunk"
+  ).length;
 
   return (
     <div className="border border-muted rounded-lg bg-muted/30 overflow-hidden">
-      <Accordion type="single" collapsible value={isExpanded} onValueChange={setIsExpanded}>
+      <Accordion
+        type="single"
+        collapsible
+        value={isExpanded}
+        onValueChange={setIsExpanded}
+      >
         <AccordionItem value="reasoning" className="border-none">
           <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-muted/50 transition-colors">
             <div className="flex items-center gap-3 flex-1">
@@ -127,7 +134,7 @@ export function ReasoningAccordion({ steps, isStreaming }: ReasoningAccordionPro
                 <p className="text-sm font-medium">{currentStatus.text}</p>
                 {stepCount > 0 && (
                   <p className="text-xs text-muted-foreground">
-                    {stepCount} reasoning {stepCount === 1 ? 'step' : 'steps'}
+                    {stepCount} reasoning {stepCount === 1 ? "step" : "steps"}
                   </p>
                 )}
               </div>
@@ -138,9 +145,11 @@ export function ReasoningAccordion({ steps, isStreaming }: ReasoningAccordionPro
           </AccordionTrigger>
           <AccordionContent className="px-4 pb-3">
             <div className="space-y-3 pt-2">
-              {steps.filter(s => s.type !== 'answer').map((step, i) => (
-                <StepItem key={i} step={step} />
-              ))}
+              {steps
+                .filter((s) => s.type !== "answer" && s.type !== "answer_chunk")
+                .map((step, i) => (
+                  <StepItem key={i} step={step} />
+                ))}
             </div>
           </AccordionContent>
         </AccordionItem>
@@ -166,19 +175,23 @@ function StepItem({ step }: { step: AgentStep }) {
 
     return (
       <div className="flex items-start gap-3 py-1">
-        <Icon className={cn('h-4 w-4 mt-0.5', config?.color || 'text-muted-foreground')} />
+        <Icon
+          className={cn(
+            "h-4 w-4 mt-0.5",
+            config?.color || "text-muted-foreground"
+          )}
+        />
         <div className="flex-1">
           <p className="text-sm font-medium">{description}</p>
           {step.args && step.args.description !== description && (
             <p className="text-xs text-muted-foreground mt-0.5">
               {Object.entries(step.args)
-                .filter(([k]) => k !== 'description')
+                .filter(([k]) => k !== "description")
                 .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
-                .join(', ')}
+                .join(", ")}
             </p>
           )}
         </div>
-        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
       </div>
     );
   }

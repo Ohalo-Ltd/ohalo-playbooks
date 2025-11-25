@@ -6,6 +6,8 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { ChatInput } from "./chat-input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Loader2Icon } from "lucide-react";
@@ -56,15 +58,38 @@ export function ChatInterface({
           next = {
             id: "", // Will be set on completion
             role: "assistant",
-            content: "",
-            steps: [step],
+            content: step.type === "answer_chunk" ? step.content || "" : "",
+            steps: step.type !== "answer_chunk" ? [step] : [],
             timestamp: new Date(),
           };
         } else {
+          const isChunk = step.type === "answer_chunk";
+          const isAnswer = step.type === "answer";
+
+          let newContent = prev.content;
+          if (isChunk) {
+            const chunkContent = step.content || "";
+            // Check if the chunk is the full text (starts with previous content)
+            // or a delta (append it)
+            if (
+              chunkContent.length > (prev.content?.length || 0) &&
+              chunkContent.startsWith(prev.content || "")
+            ) {
+              newContent = chunkContent;
+            } else {
+              newContent = (prev.content || "") + chunkContent;
+            }
+          } else if (isAnswer) {
+            newContent = step.content || "";
+          }
+
+          // Don't add chunks to steps array to avoid pollution
+          const newSteps = isChunk ? prev.steps : [...(prev.steps || []), step];
+
           next = {
             ...prev,
-            steps: [...(prev.steps || []), step],
-            content: step.type === "answer" ? step.content || "" : prev.content,
+            steps: newSteps,
+            content: newContent,
           };
         }
         currentAssistantRef.current = next;
@@ -124,7 +149,10 @@ export function ChatInterface({
     };
 
     setMessages((prev) => [...prev, userMessage]);
-    startStream(message, projectId, currentUser?.email);
+
+    // Pass history to the agent
+    const history = messages.map((m) => ({ role: m.role, content: m.content }));
+    startStream(message, projectId, currentUser?.email, history);
   };
 
   useEffect(() => {
@@ -154,16 +182,19 @@ export function ChatInterface({
                       <div className="space-y-3">
                         {/* Reasoning accordion before answer */}
                         {message.steps && message.steps.length > 0 && (
-                          <ReasoningAccordion steps={message.steps} isStreaming={false} />
+                          <ReasoningAccordion
+                            steps={message.steps}
+                            isStreaming={false}
+                          />
                         )}
-                        
+
                         {/* Answer content */}
                         {message.content && (
                           <div className="bg-muted/50 rounded-2xl p-4">
                             <div className="prose prose-sm max-w-none dark:prose-invert">
-                              {message.content.split('\n').map((line, i) => (
-                                <p key={i}>{line}</p>
-                              ))}
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {message.content}
+                              </ReactMarkdown>
                             </div>
                           </div>
                         )}
@@ -175,19 +206,20 @@ export function ChatInterface({
                 {/* Current streaming message */}
                 {currentAssistantMessage && (
                   <div className="space-y-3">
-                    {currentAssistantMessage.steps && currentAssistantMessage.steps.length > 0 && (
-                      <ReasoningAccordion 
-                        steps={currentAssistantMessage.steps} 
-                        isStreaming={isStreaming} 
-                      />
-                    )}
-                    
+                    {currentAssistantMessage.steps &&
+                      currentAssistantMessage.steps.length > 0 && (
+                        <ReasoningAccordion
+                          steps={currentAssistantMessage.steps}
+                          isStreaming={isStreaming}
+                        />
+                      )}
+
                     {currentAssistantMessage.content && (
                       <div className="bg-muted/50 rounded-2xl p-4">
                         <div className="prose prose-sm max-w-none dark:prose-invert">
-                          {currentAssistantMessage.content.split('\n').map((line, i) => (
-                            <p key={i}>{line}</p>
-                          ))}
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {currentAssistantMessage.content}
+                          </ReactMarkdown>
                         </div>
                       </div>
                     )}

@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 
 export interface AgentStep {
-  type: 'thinking' | 'tool_call_start' | 'tool_call_result' | 'answer' | 'error';
+  type: 'thinking' | 'tool_call_start' | 'tool_call_result' | 'answer' | 'answer_chunk' | 'error';
   content?: string;
   tool?: string;
   args?: Record<string, any>;
@@ -26,7 +26,12 @@ export function useAgentStream(options: UseAgentStreamOptions = {}) {
   optionsRef.current = options;
 
   const startStream = useCallback(
-    async (question: string, projectId: string = 'default', currentUserEmail?: string) => {
+    async (
+      question: string,
+      projectId: string = 'default',
+      currentUserEmail?: string,
+      messages: Array<{ role: string; content: string }> = []
+    ) => {
       // Reset state
       setSteps([]);
       setError(null);
@@ -50,6 +55,7 @@ export function useAgentStream(options: UseAgentStreamOptions = {}) {
             top_k: 5,
             include_graph_context: true,
             current_user_email: currentUserEmail,
+            messages,
           }),
         });
 

@@ -5,6 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, UserPromptPart
 
 from database.neo4j_client import Neo4jClient
 from ingestion.embedder import EmbeddingService
@@ -13,11 +14,12 @@ from ingestion.embedder import EmbeddingService
 class AgentStep(BaseModel):
     """Agent execution step for streaming."""
 
-    type: str  # 'thinking', 'tool_call_start', 'tool_call_result', 'answer'
+    type: str  # 'thinking', 'tool_call_start', 'tool_call_result', 'answer', 'error'
     content: str | None = None
     tool: str | None = None
     args: dict[str, Any] | None = None
     result: Any = None
+    message: str | None = None  # For error messages
 
 
 class AgentDependencies(BaseModel):
@@ -59,21 +61,25 @@ DEFAULT_SYSTEM_PROMPT = """You are an intelligent assistant that answers questio
 - Users care about documents, not chunks (chunks are just our search mechanism)
 
 **Available Tools:**
-1. **vector_search**: Semantic search over document chunks (ALWAYS AVAILABLE)
+1. **decompose_query**: Break down complex/ambiguous questions into multiple search queries (optional)
+   - Use this when the question is broad, complex, or covers multiple topics
+   - Helps broaden the search scope
+2. **vector_search**: Semantic search over document chunks (ALWAYS AVAILABLE)
    - Finds chunks by semantic similarity, not keyword matching
    - Returns chunks with their parent document names
    - Try multiple searches with different phrasings if first search returns nothing
    - If looking for specific terms, include context: instead of "UAV", try "UAV unmanned aircraft applications"
-2. **discover_graph**: Check for extracted entities/relationships (optional)
-3. **entity_lookup**: Find entities by name (only if graph exists)
-4. **graph_neighbors**: Explore entity relationships (only if graph exists)
-5. **graph_query**: Complex graph queries (only if graph exists)
+3. **discover_graph**: Check for extracted entities/relationships (optional)
+4. **entity_lookup**: Find entities by name (only if graph exists)
+5. **graph_neighbors**: Explore entity relationships (only if graph exists)
+6. **graph_query**: Complex graph queries (only if graph exists)
 
 **Search Strategy:**
-- First search: Use the user's question directly
-- If no results: Try rephrasing with more context or related terms
-- If still no results: Explain semantic search limitations and suggest more descriptive queries
-- Use top_k parameter wisely (default 5, increase to 10-15 for broader searches)
+- **Analyze the question**: Is it complex? Does it need decomposition?
+- **Decompose if needed**: Use `decompose_query` to get better search terms for complex questions
+- **Search**: Use `vector_search` with the original or decomposed queries
+- **Explore Graph**: If relevant entities are found, use graph tools to explore relationships
+- **Synthesize**: Combine information from all sources to answer the question
 
 **How to Answer Questions:**
 1. Use vector_search to find relevant information
@@ -575,6 +581,86 @@ async def graph_query(
         return error_result
 
 
+# Decomposition agent for breaking down complex queries
+decomposition_agent = Agent(
+    "openai:gpt-4o-mini",
+    system_prompt="""Break this user question into 3 more diverse, but related sets of keywords. The context is military, defense, procurement, military doctrine + any inferred context from user question, biased towards user's question. Each set of sentence-like keywords attempts to broaden the semantic embedding search while keeping it on topic. Just output the list as a simple JSON array: ["equipment procurement for FY26", "military equipment bidding fiscal year 2026", "..."]""",
+)
+
+
+@query_agent.tool
+async def decompose_query(
+    ctx: RunContext[AgentDependencies],
+    query: str,
+) -> list[str]:
+    """Decompose a complex query into multiple search queries.
+
+    Use this tool when:
+    - The user's question is complex or ambiguous
+    - The question covers multiple topics
+    - A direct search might miss relevant context
+    - You want to broaden the search scope
+
+    Args:
+        ctx: Runtime context
+        query: The user's original query
+
+    Returns:
+        List of search queries to try
+    """
+    # Emit tool start event
+    if ctx.deps.step_callback:
+        await ctx.deps.step_callback(
+            AgentStep(
+                type="tool_call_start",
+                tool="decompose_query",
+                args={
+                    "query": query,
+                    "description": "Decomposing query into multiple search variations...",
+                },
+            )
+        )
+
+    try:
+        result = await decomposition_agent.run(f"User question:\n{query}")
+        # Parse JSON array from response
+        import json
+        
+        # Clean up response if it contains markdown code blocks
+        content = getattr(result, "data", None)
+        if content is None:
+            content = getattr(result, "output", str(result))
+            
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0].strip()
+        elif "```" in content:
+            content = content.split("```")[1].split("```")[0].strip()
+            
+        queries = json.loads(content)
+        
+        # Emit tool result event
+        if ctx.deps.step_callback:
+            await ctx.deps.step_callback(
+                AgentStep(
+                    type="tool_call_result",
+                    tool="decompose_query",
+                    result={"queries": queries},
+                )
+            )
+            
+        return queries
+    except Exception as e:
+        # Fallback to original query if decomposition fails
+        if ctx.deps.step_callback:
+            await ctx.deps.step_callback(
+                AgentStep(
+                    type="error",
+                    message=f"Decomposition failed: {str(e)}",
+                )
+            )
+        return [query]
+
+
 async def query(
     question: str,
     neo4j_client: Neo4jClient,
@@ -613,8 +699,10 @@ async def query(
             system_prompt=system_prompt,
         )
         # Register all tools on the new agent
-        for tool in query_agent._function_tools.values():
-            agent._function_tools[tool.name] = tool
+        # type: ignore
+        if hasattr(query_agent, "_function_tools"):
+            for tool in query_agent._function_tools.values():  # type: ignore
+                agent._function_tools[tool.name] = tool  # type: ignore
 
     result = await agent.run(question, deps=deps)
 
@@ -628,6 +716,7 @@ async def query_with_steps(
     project_id: str,
     system_prompt: str | None = None,
     current_user_email: str | None = None,
+    messages: list[dict[str, str]] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Query the knowledge graph with step-by-step streaming.
 
@@ -638,15 +727,19 @@ async def query_with_steps(
         project_id: Project ID
         system_prompt: Optional custom system prompt
         current_user_email: Optional user email for entitlement filtering
+        messages: Optional chat history
 
     Yields:
         Agent step events (tool calls, results, final answer)
     """
-    steps: list[AgentStep] = []
+    import asyncio
+    
+    # Queue for streaming steps
+    queue: asyncio.Queue[AgentStep | None] = asyncio.Queue()
 
     async def step_callback(step: AgentStep):
         """Collect steps for yielding."""
-        steps.append(step)
+        await queue.put(step)
 
     deps = AgentDependencies(
         neo4j_client=neo4j_client,
@@ -666,18 +759,40 @@ async def query_with_steps(
             system_prompt=system_prompt,
         )
         # Register all tools on the new agent
-        for tool in query_agent._function_tools.values():
-            agent._function_tools[tool.name] = tool
+        # type: ignore
+        if hasattr(query_agent, "_function_tools"):
+            for tool in query_agent._function_tools.values():  # type: ignore
+                agent._function_tools[tool.name] = tool  # type: ignore
 
-    # Run agent (steps will be collected via callback)
-    result = await agent.run(question, deps=deps)
+    # Run agent in background task
+    async def run_agent():
+        try:
+            # Convert history
+            history: list[ModelMessage] = []
+            if messages:
+                for msg in messages:
+                    if msg["role"] == "user":
+                        history.append(ModelRequest(parts=[UserPromptPart(content=msg["content"])]))
+                    elif msg["role"] == "assistant":
+                        history.append(ModelResponse(parts=[TextPart(content=msg["content"])]))
 
-    # Yield all collected steps
-    for step in steps:
+            async with agent.run_stream(question, deps=deps, message_history=history) as result:
+                async for chunk in result.stream():
+                    await queue.put(AgentStep(type="answer_chunk", content=chunk))
+                
+                # We can also get the full result data if needed, but chunks are enough for streaming
+                # await queue.put(AgentStep(type="answer", content=result.data)) 
+                
+        except Exception as e:
+            await queue.put(AgentStep(type="error", message=str(e)))
+        finally:
+            await queue.put(None)  # Sentinel
+
+    asyncio.create_task(run_agent())
+
+    # Yield steps as they arrive
+    while True:
+        step = await queue.get()
+        if step is None:
+            break
         yield step.model_dump()
-
-    # Yield final answer
-    yield {
-        "type": "answer",
-        "content": result.output,
-    }

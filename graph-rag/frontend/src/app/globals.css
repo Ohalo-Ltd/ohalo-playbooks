@@ -120,3 +120,22 @@
     @apply bg-background text-foreground;
   }
 }
+
+.prose ol {
+  @apply mt-6 mb-6;
+  list-style-type: decimal;
+}
+.prose ol li {
+  @apply mb-1 ml-6;
+}
+.prose ol li::marker {
+  font-weight: 600;
+}
+.prose ol li p {
+  @apply mb-1 mt-4;
+}
+
+
+.prose ul {
+  list-style-type: disc;
+}

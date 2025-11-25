@@ -24,6 +24,7 @@ class QueryRequest(BaseModel):
     top_k: int = 5
     include_graph_context: bool = True
     current_user_email: str | None = None  # User email for entitlement filtering
+    messages: list[dict[str, str]] = []  # Chat history
 
 
 class SourceChunk(BaseModel):
@@ -203,10 +204,11 @@ async def stream_query_endpoint(
                 project_id=request.project_id,
                 system_prompt=system_prompt,
                 current_user_email=request.current_user_email,
+                messages=request.messages,
             ):
                 # Emit step as SSE event
                 yield f"data: {json.dumps(step)}\n\n"
-                await asyncio.sleep(0.05)  # Throttle for better UX
+                await asyncio.sleep(0.01)  # Minimal throttle
 
             # Signal completion
             yield "data: [DONE]\n\n"
