@@ -23,6 +23,7 @@ class QueryRequest(BaseModel):
     project_id: str = "default"
     top_k: int = 5
     include_graph_context: bool = True
+    current_user_email: str | None = None  # User email for entitlement filtering
 
 
 class SourceChunk(BaseModel):
@@ -132,6 +133,7 @@ async def query_endpoint(
             embedding_service=embedding_service,
             project_id=request.project_id,
             system_prompt=system_prompt,
+            current_user_email=request.current_user_email,
         )
 
         # For now, return a simple response
@@ -200,6 +202,7 @@ async def stream_query_endpoint(
                 embedding_service=embedding_service,
                 project_id=request.project_id,
                 system_prompt=system_prompt,
+                current_user_email=request.current_user_email,
             ):
                 # Emit step as SSE event
                 yield f"data: {json.dumps(step)}\n\n"

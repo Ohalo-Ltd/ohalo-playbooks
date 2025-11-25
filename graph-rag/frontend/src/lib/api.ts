@@ -9,6 +9,7 @@ export interface QueryRequest {
   project_id?: string;
   top_k?: number;
   include_graph_context?: boolean;
+  current_user_email?: string;
 }
 
 export interface SourceChunk {
@@ -86,6 +87,7 @@ export interface Project {
   dxr_api_token?: string;
   dxr_datasource_id?: string;
   dxr_extractor_id?: string;
+  entitlements_enabled?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -108,6 +110,48 @@ export interface ProjectUpdate {
   dxr_api_token?: string;
   dxr_datasource_id?: string;
   dxr_extractor_id?: string;
+  entitlements_enabled?: boolean;
+}
+
+export interface ProjectUser {
+  id: string;
+  project_id: string;
+  email: string;
+  name: string;
+  idp_id?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectUserCreate {
+  email: string;
+  name: string;
+  idp_id?: string;
+}
+
+export interface ProjectUserUpdate {
+  email?: string;
+  name?: string;
+  idp_id?: string;
+}
+
+export interface ProjectGroup {
+  id: string;
+  project_id: string;
+  code: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectGroupCreate {
+  code: string;
+  name: string;
+}
+
+export interface ProjectGroupUpdate {
+  code?: string;
+  name?: string;
 }
 
 export class ApiClient {
@@ -261,6 +305,98 @@ export class ApiClient {
     }
 
     return response.json();
+  }
+
+  // Entitlements - Users
+  async listProjectUsers(projectId: string): Promise<ProjectUser[]> {
+    const response = await fetch(`${this.baseUrl}/api/projects/${projectId}/entitlements/users`);
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to list users');
+    }
+    return response.json();
+  }
+
+  async createProjectUser(projectId: string, user: ProjectUserCreate): Promise<ProjectUser> {
+    const response = await fetch(`${this.baseUrl}/api/projects/${projectId}/entitlements/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(user),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to create user');
+    }
+    return response.json();
+  }
+
+  async updateProjectUser(projectId: string, userId: string, updates: ProjectUserUpdate): Promise<ProjectUser> {
+    const response = await fetch(`${this.baseUrl}/api/projects/${projectId}/entitlements/users/${userId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to update user');
+    }
+    return response.json();
+  }
+
+  async deleteProjectUser(projectId: string, userId: string): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/api/projects/${projectId}/entitlements/users/${userId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to delete user');
+    }
+  }
+
+  // Entitlements - Groups
+  async listProjectGroups(projectId: string): Promise<ProjectGroup[]> {
+    const response = await fetch(`${this.baseUrl}/api/projects/${projectId}/entitlements/groups`);
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to list groups');
+    }
+    return response.json();
+  }
+
+  async createProjectGroup(projectId: string, group: ProjectGroupCreate): Promise<ProjectGroup> {
+    const response = await fetch(`${this.baseUrl}/api/projects/${projectId}/entitlements/groups`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(group),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to create group');
+    }
+    return response.json();
+  }
+
+  async updateProjectGroup(projectId: string, groupId: string, updates: ProjectGroupUpdate): Promise<ProjectGroup> {
+    const response = await fetch(`${this.baseUrl}/api/projects/${projectId}/entitlements/groups/${groupId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to update group');
+    }
+    return response.json();
+  }
+
+  async deleteProjectGroup(projectId: string, groupId: string): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/api/projects/${projectId}/entitlements/groups/${groupId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to delete group');
+    }
   }
 }
 

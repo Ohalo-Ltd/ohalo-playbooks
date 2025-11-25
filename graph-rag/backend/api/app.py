@@ -7,7 +7,7 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api import chat, ingestion, projects, documents
+from api import chat, ingestion, projects, documents, entitlements
 from core.config import settings
 
 # Configure logging
@@ -54,6 +54,7 @@ app.include_router(chat.router)
 app.include_router(ingestion.router)
 app.include_router(projects.router)
 app.include_router(documents.router)
+app.include_router(entitlements.router)
 
 
 @app.get("/")

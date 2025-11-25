@@ -28,6 +28,9 @@ class AgentDependencies(BaseModel):
     project_id: str
     system_prompt: str | None = None
     step_callback: Any | None = None  # Async callback for streaming steps
+    current_user_email: str | None = (
+        None  # Current user's email for entitlement filtering
+    )
 
     class Config:
         arbitrary_types_allowed = True
@@ -70,6 +73,32 @@ Always:
 - Explain relationships you discovered in the graph
 - If you find related entities, mention them to provide context
 - Be clear about what information comes from direct search vs graph traversal"""
+
+
+def build_entitlement_filter(user_email: str | None) -> str:
+    """Build Cypher WHERE clause for entitlement filtering.
+
+    Args:
+        user_email: Current user's email address, or None for no filtering
+
+    Returns:
+        Cypher WHERE clause fragment for entitlement filtering
+    """
+    if not user_email:
+        # No user context - return all documents (or based on project settings)
+        return ""
+
+    # Filter to only documents where:
+    # 1. User is the owner, OR
+    # 2. User is in the accessible_by_emails list, OR
+    # 3. Document has no entitlement restrictions (owner_email is NULL)
+    return f"""
+    AND (
+        doc.owner_email = '{user_email}'
+        OR '{user_email}' IN COALESCE(doc.accessible_by_emails, [])
+        OR doc.owner_email IS NULL
+    )
+    """
 
 
 # Define the query agent
@@ -216,28 +245,44 @@ async def vector_search(
     # Generate embedding for query
     embedding = await ctx.deps.embedding_service.generate_embedding(query)
 
-    # Perform vector search
-    results = await ctx.deps.neo4j_client.vector_search(
-        embedding=embedding,
-        label="Chunk",
-        property_name="embedding",
-        top_k=top_k,
+    # Build entitlement filter if user email is provided
+    entitlement_filter = build_entitlement_filter(ctx.deps.current_user_email)
+
+    # Perform vector search with entitlement filtering
+    # We need to get the parent Document and check entitlements
+    cypher_query = f"""
+    CALL db.index.vector.queryNodes('chunk_embeddings', $top_k, $embedding)
+    YIELD node as chunk, score
+    MATCH (chunk)-[:PART_OF]->(doc:Document)
+    WHERE doc.project_id = $project_id {entitlement_filter}
+    RETURN chunk, score
+    ORDER BY score DESC
+    LIMIT $top_k
+    """
+
+    results = await ctx.deps.neo4j_client.execute_read(
+        cypher_query,
+        {
+            "embedding": embedding,
+            "top_k": top_k,
+            "project_id": ctx.deps.project_id,
+        },
     )
 
     # Format results
     search_results: list[SearchResult] = []
 
     for result in results:
-        node = result.get("node", {})
+        chunk = result.get("chunk", {})
         score = result.get("score", 0.0)
 
         search_results.append(
             SearchResult(
-                node_id=node.get("id", ""),
-                text=node.get("text", ""),
+                node_id=chunk.get("id", ""),
+                text=chunk.get("text", ""),
                 score=score,
                 metadata={
-                    "chunk_index": node.get("chunk_index", 0),
+                    "chunk_index": chunk.get("chunk_index", 0),
                 },
             )
         )
@@ -466,6 +511,7 @@ async def query(
     embedding_service: EmbeddingService,
     project_id: str,
     system_prompt: str | None = None,
+    current_user_email: str | None = None,
 ) -> str:
     """Query the knowledge graph.
 
@@ -475,6 +521,7 @@ async def query(
         embedding_service: Embedding service instance
         project_id: Project ID
         system_prompt: Optional custom system prompt (uses default if not provided)
+        current_user_email: Optional user email for entitlement filtering
 
     Returns:
         Answer from the agent
@@ -484,6 +531,7 @@ async def query(
         embedding_service=embedding_service,
         project_id=project_id,
         system_prompt=system_prompt,
+        current_user_email=current_user_email,
     )
 
     # Create agent with custom prompt if provided
@@ -509,6 +557,7 @@ async def query_with_steps(
     embedding_service: EmbeddingService,
     project_id: str,
     system_prompt: str | None = None,
+    current_user_email: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Query the knowledge graph with step-by-step streaming.
 
@@ -518,6 +567,7 @@ async def query_with_steps(
         embedding_service: Embedding service instance
         project_id: Project ID
         system_prompt: Optional custom system prompt
+        current_user_email: Optional user email for entitlement filtering
 
     Yields:
         Agent step events (tool calls, results, final answer)
@@ -534,6 +584,7 @@ async def query_with_steps(
         project_id=project_id,
         system_prompt=system_prompt,
         step_callback=step_callback,
+        current_user_email=current_user_email,
     )
 
     # Create agent with custom prompt if provided

@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS projects (
     dxr_api_token BYTEA,  -- Encrypted using pgp_sym_encrypt, supports long tokens (1233+ chars)
     dxr_datasource_id VARCHAR(255),
     dxr_extractor_id VARCHAR(255),
+    entitlements_enabled BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -88,4 +89,41 @@ CREATE TRIGGER update_data_sources_updated_at BEFORE UPDATE ON data_sources
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_ingestion_jobs_updated_at BEFORE UPDATE ON ingestion_jobs
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Create project_users table for entitlements
+CREATE TABLE IF NOT EXISTS project_users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    role VARCHAR(100),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT unique_project_user_email UNIQUE(project_id, email)
+);
+
+-- Create project_groups table for entitlements
+CREATE TABLE IF NOT EXISTS project_groups (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    code VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT unique_project_group_code UNIQUE(project_id, code)
+);
+
+-- Create indexes for entitlements tables
+CREATE INDEX IF NOT EXISTS idx_project_users_project_id ON project_users(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_users_email ON project_users(email);
+CREATE INDEX IF NOT EXISTS idx_project_users_project_email ON project_users(project_id, email);
+CREATE INDEX IF NOT EXISTS idx_project_groups_project_id ON project_groups(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_groups_code ON project_groups(code);
+
+-- Create triggers for updated_at on entitlements tables
+CREATE TRIGGER update_project_users_updated_at BEFORE UPDATE ON project_users
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_project_groups_updated_at BEFORE UPDATE ON project_groups
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

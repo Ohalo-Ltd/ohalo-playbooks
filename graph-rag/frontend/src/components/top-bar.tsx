@@ -4,8 +4,9 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import { ProjectSwitcher } from "@/components/project-switcher"
 import { ThemeToggle } from "@/components/theme-toggle"
-import { apiClient } from "@/lib/api"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { UserSwitcher, User } from "@/components/user-switcher";
+import { apiClient } from "@/lib/api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner"
 import {
   Dialog,
@@ -20,55 +21,80 @@ import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 
 interface TopBarProps {
-  currentProjectId?: string
-  onProjectChange?: (projectId: string) => void
+  currentProjectId?: string;
+  onProjectChange?: (projectId: string) => void;
+  currentUser?: User | null;
+  onUserChange?: (user: User | null) => void;
 }
 
 export function TopBar({
   currentProjectId,
   onProjectChange,
+  currentUser,
+  onUserChange,
 }: TopBarProps) {
-  const router = useRouter()
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = React.useState(false)
-  const [newProjectName, setNewProjectName] = React.useState("")
-  const [newProjectDescription, setNewProjectDescription] = React.useState("")
-  const queryClient = useQueryClient()
+  const router = useRouter();
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = React.useState(false);
+  const [newProjectName, setNewProjectName] = React.useState("");
+  const [newProjectDescription, setNewProjectDescription] = React.useState("");
+  const queryClient = useQueryClient();
+
+  // Fetch project details to check if entitlements are enabled
+  const { data: project } = useQuery({
+    queryKey: ["project", currentProjectId],
+    queryFn: () => apiClient.getProject(currentProjectId!),
+    enabled: !!currentProjectId,
+  });
+
+  // Fetch users for switcher when entitlements are enabled
+  const { data: users = [] } = useQuery({
+    queryKey: ["project-users", currentProjectId],
+    queryFn: () => apiClient.listProjectUsers(currentProjectId!),
+    enabled: !!currentProjectId && !!project?.entitlements_enabled,
+  });
+
+  // Auto-select first user when users are loaded
+  React.useEffect(() => {
+    if (users.length > 0 && !currentUser && onUserChange) {
+      onUserChange({ email: users[0].email, name: users[0].name });
+    }
+  }, [users, currentUser, onUserChange]);
 
   const createProjectMutation = useMutation({
     mutationFn: (data: { name: string; description?: string }) =>
       apiClient.createProject(data),
     onSuccess: (newProject) => {
-      queryClient.invalidateQueries({ queryKey: ["projects"] })
-      setIsCreateDialogOpen(false)
-      setNewProjectName("")
-      setNewProjectDescription("")
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      setIsCreateDialogOpen(false);
+      setNewProjectName("");
+      setNewProjectDescription("");
       toast.success("Project created", {
         description: `${newProject.name} has been created successfully.`,
-      })
+      });
       if (onProjectChange) {
-        onProjectChange(newProject.id)
+        onProjectChange(newProject.id);
       }
     },
     onError: (error: Error) => {
       toast.error("Error", {
         description: error.message,
-      })
+      });
     },
-  })
+  });
 
   const handleCreateProject = () => {
     if (!newProjectName.trim()) {
       toast.error("Validation error", {
         description: "Project name is required.",
-      })
-      return
+      });
+      return;
     }
 
     createProjectMutation.mutate({
       name: newProjectName,
       description: newProjectDescription || undefined,
-    })
-  }
+    });
+  };
 
   return (
     <>
@@ -78,10 +104,27 @@ export function TopBar({
           <ProjectSwitcher
             currentProjectId={currentProjectId}
             onProjectChange={onProjectChange}
-            onOpenSettings={(projectId) => router.push(`/projects/${projectId}`)}
+            onOpenSettings={(projectId) =>
+              router.push(`/projects/${projectId}`)
+            }
             onCreateProject={() => setIsCreateDialogOpen(true)}
           />
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-3">
+            {project?.entitlements_enabled &&
+              users.length > 0 &&
+              onUserChange && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">
+                    View as:
+                  </span>
+                  <UserSwitcher
+                    users={users.map((u) => ({ email: u.email, name: u.name }))}
+                    currentUser={currentUser || null}
+                    onUserChange={onUserChange}
+                    enabled={true}
+                  />
+                </div>
+              )}
             <ThemeToggle />
           </div>
         </div>
@@ -132,5 +175,5 @@ export function TopBar({
         </DialogContent>
       </Dialog>
     </>
-  )
+  );
 }

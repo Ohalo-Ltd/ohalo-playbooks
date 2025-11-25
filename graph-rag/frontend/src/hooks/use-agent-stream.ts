@@ -21,8 +21,12 @@ export function useAgentStream(options: UseAgentStreamOptions = {}) {
   const [error, setError] = useState<string | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
+  // Use refs to avoid stale closures
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+
   const startStream = useCallback(
-    async (question: string, projectId: string = 'default') => {
+    async (question: string, projectId: string = 'default', currentUserEmail?: string) => {
       // Reset state
       setSteps([]);
       setError(null);
@@ -45,6 +49,7 @@ export function useAgentStream(options: UseAgentStreamOptions = {}) {
             project_id: projectId,
             top_k: 5,
             include_graph_context: true,
+            current_user_email: currentUserEmail,
           }),
         });
 
@@ -59,14 +64,19 @@ export function useAgentStream(options: UseAgentStreamOptions = {}) {
 
         const decoder = new TextDecoder();
         let buffer = '';
+        let completed = false;
 
         // Read stream
         while (true) {
           const { done, value } = await reader.read();
 
           if (done) {
+            console.log('[useAgentStream] Stream done, completed flag:', completed);
             setIsStreaming(false);
-            options.onComplete?.();
+            if (!completed) {
+              console.log('[useAgentStream] Calling onComplete from done');
+              optionsRef.current.onComplete?.();
+            }
             break;
           }
 
@@ -81,22 +91,26 @@ export function useAgentStream(options: UseAgentStreamOptions = {}) {
               const data = line.slice(6);
 
               if (data === '[DONE]') {
+                console.log('[useAgentStream] Received [DONE]');
                 setIsStreaming(false);
-                options.onComplete?.();
+                completed = true;
+                console.log('[useAgentStream] Calling onComplete from [DONE]');
+                optionsRef.current.onComplete?.();
                 break;
               }
 
               try {
                 const step: AgentStep = JSON.parse(data);
+                console.log('[useAgentStream] Received step:', step.type);
 
                 // Add step to state
                 setSteps((prev) => [...prev, step]);
-                options.onStep?.(step);
+                optionsRef.current.onStep?.(step);
 
                 // Handle errors
                 if (step.type === 'error') {
                   setError(step.message || 'Unknown error');
-                  options.onError?.(step.message || 'Unknown error');
+                  optionsRef.current.onError?.(step.message || 'Unknown error');
                 }
               } catch (e) {
                 console.error('Failed to parse SSE data:', data, e);
@@ -108,10 +122,10 @@ export function useAgentStream(options: UseAgentStreamOptions = {}) {
         const errorMessage = err instanceof Error ? err.message : 'Unknown error';
         setError(errorMessage);
         setIsStreaming(false);
-        options.onError?.(errorMessage);
+        optionsRef.current.onError?.(errorMessage);
       }
     },
-    [options]
+    [] // Remove options dependency
   );
 
   const stopStream = useCallback(() => {

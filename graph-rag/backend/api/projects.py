@@ -26,6 +26,7 @@ class ProjectCreate(BaseModel):
     dxr_api_token: Optional[str] = None
     dxr_datasource_id: Optional[str] = None
     dxr_extractor_id: Optional[str] = None
+    entitlements_enabled: Optional[bool] = None
 
 
 class ProjectUpdate(BaseModel):
@@ -38,6 +39,7 @@ class ProjectUpdate(BaseModel):
     dxr_api_token: Optional[str] = None
     dxr_datasource_id: Optional[str] = None
     dxr_extractor_id: Optional[str] = None
+    entitlements_enabled: Optional[bool] = None
 
 
 class ProjectResponse(BaseModel):
@@ -51,6 +53,7 @@ class ProjectResponse(BaseModel):
     dxr_api_token: Optional[str] = None
     dxr_datasource_id: Optional[str] = None
     dxr_extractor_id: Optional[str] = None
+    entitlements_enabled: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -87,7 +90,8 @@ async def list_projects(
                        THEN pgp_sym_decrypt(dxr_api_token, $1)::text 
                        ELSE NULL 
                    END as dxr_api_token,
-                   dxr_datasource_id, dxr_extractor_id, created_at, updated_at
+                   dxr_datasource_id, dxr_extractor_id, entitlements_enabled, 
+                   created_at, updated_at
             FROM projects
             ORDER BY created_at DESC
             """,
@@ -104,6 +108,7 @@ async def list_projects(
                 dxr_api_token=row["dxr_api_token"],
                 dxr_datasource_id=row["dxr_datasource_id"],
                 dxr_extractor_id=row["dxr_extractor_id"],
+                entitlements_enabled=row["entitlements_enabled"] or False,
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
@@ -139,7 +144,8 @@ async def get_project(
                        THEN pgp_sym_decrypt(dxr_api_token, $2)::text 
                        ELSE NULL 
                    END as dxr_api_token,
-                   dxr_datasource_id, dxr_extractor_id, created_at, updated_at
+                   dxr_datasource_id, dxr_extractor_id, entitlements_enabled,
+                   created_at, updated_at
             FROM projects
             WHERE id = $1
             """,
@@ -159,6 +165,7 @@ async def get_project(
             dxr_api_token=row["dxr_api_token"],
             dxr_datasource_id=row["dxr_datasource_id"],
             dxr_extractor_id=row["dxr_extractor_id"],
+            entitlements_enabled=row["entitlements_enabled"] or False,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -190,15 +197,16 @@ async def create_project(
         encryption_key = get_encryption_key()
         row = await pg_client.fetchrow(
             """
-            INSERT INTO projects (name, description, system_prompt, dxr_url, dxr_api_token, dxr_datasource_id, dxr_extractor_id)
-            VALUES ($1, $2, $3, $4, pgp_sym_encrypt($5, $8), $6, $7)
+            INSERT INTO projects (name, description, system_prompt, dxr_url, dxr_api_token, dxr_datasource_id, dxr_extractor_id, entitlements_enabled)
+            VALUES ($1, $2, $3, $4, pgp_sym_encrypt($5, $9), $6, $7, $8)
             RETURNING id, name, description, system_prompt, dxr_url,
                       CASE 
                           WHEN dxr_api_token IS NOT NULL 
-                          THEN pgp_sym_decrypt(dxr_api_token, $8)::text 
+                          THEN pgp_sym_decrypt(dxr_api_token, $9)::text 
                           ELSE NULL 
                       END as dxr_api_token,
-                      dxr_datasource_id, dxr_extractor_id, created_at, updated_at
+                      dxr_datasource_id, dxr_extractor_id, entitlements_enabled,
+                      created_at, updated_at
             """,
             project.name,
             project.description,
@@ -207,6 +215,7 @@ async def create_project(
             project.dxr_api_token,
             project.dxr_datasource_id,
             project.dxr_extractor_id,
+            project.entitlements_enabled,
             encryption_key,
         )
 
@@ -219,6 +228,7 @@ async def create_project(
             dxr_api_token=row["dxr_api_token"],
             dxr_datasource_id=row["dxr_datasource_id"],
             dxr_extractor_id=row["dxr_extractor_id"],
+            entitlements_enabled=row["entitlements_enabled"] or False,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -303,6 +313,11 @@ async def update_project(
             values.append(project_update.dxr_extractor_id)
             param_count += 1
 
+        if project_update.entitlements_enabled is not None:
+            update_fields.append(f"entitlements_enabled = ${param_count}")
+            values.append(project_update.entitlements_enabled)
+            param_count += 1
+
         if not update_fields:
             # No fields to update, just return current state
             row = await pg_client.fetchrow(
@@ -313,7 +328,8 @@ async def update_project(
                            THEN pgp_sym_decrypt(dxr_api_token, $2)::text 
                            ELSE NULL 
                        END as dxr_api_token,
-                       dxr_datasource_id, dxr_extractor_id, created_at, updated_at
+                       dxr_datasource_id, dxr_extractor_id, entitlements_enabled,
+                       created_at, updated_at
                 FROM projects
                 WHERE id = $1
                 """,
@@ -346,7 +362,8 @@ async def update_project(
                               THEN pgp_sym_decrypt(dxr_api_token, ${encryption_param_index})::text 
                               ELSE NULL 
                           END as dxr_api_token,
-                          dxr_datasource_id, dxr_extractor_id, created_at, updated_at
+                          dxr_datasource_id, dxr_extractor_id, entitlements_enabled,
+                          created_at, updated_at
             """
 
             row = await pg_client.fetchrow(query, *values)
@@ -360,6 +377,7 @@ async def update_project(
             dxr_api_token=row["dxr_api_token"],
             dxr_datasource_id=row["dxr_datasource_id"],
             dxr_extractor_id=row["dxr_extractor_id"],
+            entitlements_enabled=row["entitlements_enabled"] or False,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

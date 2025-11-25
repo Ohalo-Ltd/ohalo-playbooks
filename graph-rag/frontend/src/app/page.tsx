@@ -7,6 +7,7 @@
 import React from "react";
 import { ChatInterface } from "@/components/chat-interface";
 import { TopBar } from "@/components/top-bar";
+import { User } from "@/components/user-switcher";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api";
 
@@ -14,6 +15,7 @@ export default function Home() {
   const [currentProjectId, setCurrentProjectId] = React.useState<
     string | undefined
   >();
+  const [currentUser, setCurrentUser] = React.useState<User | null>(null);
 
   const { data: projects = [] } = useQuery({
     queryKey: ["projects"],
@@ -32,11 +34,14 @@ export default function Home() {
       <TopBar
         currentProjectId={currentProjectId}
         onProjectChange={setCurrentProjectId}
+        currentUser={currentUser}
+        onUserChange={setCurrentUser}
       />
       <main className="flex-1 overflow-hidden">
         <ChatInterface
           projectId={currentProjectId}
           hasProjects={projects.length > 0}
+          currentUser={currentUser}
         />
       </main>
     </div>

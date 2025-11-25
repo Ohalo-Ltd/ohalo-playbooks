@@ -5,11 +5,14 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ChatInput } from "./chat-input";
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2Icon } from 'lucide-react';
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Loader2Icon } from "lucide-react";
 import { useAgentStream, AgentStep } from "@/hooks/use-agent-stream";
 import { ReasoningStep } from "./reasoning-step";
+import { UserSwitcher, User } from "./user-switcher";
+import { apiClient } from "@/lib/api";
 
 interface Message {
   id: string;
@@ -22,40 +25,79 @@ interface Message {
 interface ChatInterfaceProps {
   projectId?: string;
   hasProjects?: boolean;
+  currentUser?: User | null;
 }
 
-export function ChatInterface({ projectId, hasProjects = true }: ChatInterfaceProps) {
+export function ChatInterface({
+  projectId,
+  hasProjects = true,
+  currentUser,
+}: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentAssistantMessage, setCurrentAssistantMessage] =
     useState<Message | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const completionHandledRef = useRef(false);
+  const currentAssistantRef = useRef<Message | null>(null);
+  // Fetch project details
+  const { data: project } = useQuery({
+    queryKey: ["project", projectId],
+    queryFn: () => apiClient.getProject(projectId!),
+    enabled: !!projectId,
+  });
 
   const { steps, isStreaming, error, startStream } = useAgentStream({
     onStep: (step) => {
+      console.log("[ChatInterface] onStep called:", step.type);
       // Update current assistant message with new step
       setCurrentAssistantMessage((prev) => {
+        let next: Message;
         if (!prev) {
-          return {
-            id: crypto.randomUUID(),
+          next = {
+            id: "", // Will be set on completion
             role: "assistant",
             content: "",
             steps: [step],
             timestamp: new Date(),
           };
+        } else {
+          next = {
+            ...prev,
+            steps: [...(prev.steps || []), step],
+            content: step.type === "answer" ? step.content || "" : prev.content,
+          };
         }
-        return {
-          ...prev,
-          steps: [...(prev.steps || []), step],
-          content: step.type === "answer" ? step.content || "" : prev.content,
-        };
+        currentAssistantRef.current = next;
+        return next;
       });
     },
     onComplete: () => {
-      // Finalize assistant message
-      if (currentAssistantMessage) {
-        setMessages((prev) => [...prev, currentAssistantMessage]);
-        setCurrentAssistantMessage(null);
+      console.log(
+        "[ChatInterface] onComplete called, already handled:",
+        completionHandledRef.current
+      );
+
+      // Prevent duplicate handling
+      if (completionHandledRef.current) {
+        console.log("[ChatInterface] onComplete already handled, skipping");
+        return;
       }
+      completionHandledRef.current = true;
+
+      const assistantMessage = currentAssistantRef.current;
+      console.log(
+        "[ChatInterface] onComplete - current ref message:",
+        assistantMessage ? "exists" : "null"
+      );
+      if (assistantMessage) {
+        const finalMessage: Message = {
+          ...assistantMessage,
+          id: crypto.randomUUID(),
+        };
+        setMessages((prev) => [...prev, finalMessage]);
+      }
+      currentAssistantRef.current = null;
+      setCurrentAssistantMessage(null);
     },
     onError: (errorMsg) => {
       const errorMessage: Message = {
@@ -70,6 +112,10 @@ export function ChatInterface({ projectId, hasProjects = true }: ChatInterfacePr
   });
 
   const handleSend = (message: string) => {
+    // Reset completion flag and pending message for new query
+    completionHandledRef.current = false;
+    currentAssistantRef.current = null;
+
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
@@ -78,7 +124,7 @@ export function ChatInterface({ projectId, hasProjects = true }: ChatInterfacePr
     };
 
     setMessages((prev) => [...prev, userMessage]);
-    startStream(message, projectId);
+    startStream(message, projectId, currentUser?.email);
   };
 
   useEffect(() => {
@@ -168,10 +214,12 @@ export function ChatInterface({ projectId, hasProjects = true }: ChatInterfacePr
             <div className="text-center space-y-4 max-w-md">
               <h2 className="text-2xl font-semibold">No Projects Yet</h2>
               <p className="text-muted-foreground">
-                Create your first project to start organizing your knowledge base and chatting with your documents.
+                Create your first project to start organizing your knowledge
+                base and chatting with your documents.
               </p>
               <p className="text-sm text-muted-foreground">
-                Click the project switcher in the top bar to create a new project.
+                Click the project switcher in the top bar to create a new
+                project.
               </p>
             </div>
           ) : !projectId ? (
@@ -192,7 +240,7 @@ export function ChatInterface({ projectId, hasProjects = true }: ChatInterfacePr
                   Watch the agent think and explore the graph in real-time
                 </p>
               </div>
-              
+
               <div className="w-full">
                 <ChatInput
                   onSend={handleSend}

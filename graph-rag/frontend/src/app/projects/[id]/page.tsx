@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Upload,
   Trash2,
+  Shield,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +25,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiClient } from "@/lib/api";
 import { toast } from "sonner";
+import { EntitlementsManagement } from "@/components/entitlements-management";
+import { Switch } from "@/components/ui/switch";
 
 interface PageProps {
   params: Promise<{
@@ -62,6 +65,7 @@ export default function ProjectSettingsPage({ params }: PageProps) {
   const [name, setName] = React.useState("");
   const [description, setDescription] = React.useState("");
   const [systemPrompt, setSystemPrompt] = React.useState("");
+  const [entitlementsEnabled, setEntitlementsEnabled] = React.useState(false);
   const [dxrUrl, setDxrUrl] = React.useState("");
   const [dxrApiToken, setDxrApiToken] = React.useState("");
   const [dxrDatasourceId, setDxrDatasourceId] = React.useState("");
@@ -89,6 +93,7 @@ export default function ProjectSettingsPage({ params }: PageProps) {
       setName(project.name);
       setDescription(project.description || "");
       setSystemPrompt(project.system_prompt || "");
+      setEntitlementsEnabled(project.entitlements_enabled || false);
       setDxrUrl(project.dxr_url || "");
       setDxrApiToken(project.dxr_api_token || "");
       setDxrDatasourceId(project.dxr_datasource_id || "");
@@ -106,6 +111,7 @@ export default function ProjectSettingsPage({ params }: PageProps) {
       dxr_api_token?: string;
       dxr_datasource_id?: string;
       dxr_extractor_id?: string;
+      entitlements_enabled?: boolean;
     }) => apiClient.updateProject(projectId, updates),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
@@ -156,6 +162,7 @@ export default function ProjectSettingsPage({ params }: PageProps) {
       name,
       description,
       system_prompt: systemPrompt,
+      entitlements_enabled: entitlementsEnabled,
     });
   };
 
@@ -191,9 +198,7 @@ export default function ProjectSettingsPage({ params }: PageProps) {
             </Button>
             <div>
               <h1 className="text-2xl font-semibold">{project.name}</h1>
-              <p className="text-sm text-muted-foreground">
-                Project Settings
-              </p>
+              <p className="text-sm text-muted-foreground">Project Settings</p>
             </div>
           </div>
         </div>
@@ -202,7 +207,7 @@ export default function ProjectSettingsPage({ params }: PageProps) {
       {/* Content */}
       <main className="container mx-auto px-4 py-8">
         <Tabs defaultValue="documents" className="w-full">
-          <TabsList className="grid w-full grid-cols-3 max-w-md">
+          <TabsList className="grid w-full grid-cols-4 max-w-2xl">
             <TabsTrigger value="documents">
               <FileText className="h-4 w-4 mr-2" />
               Documents
@@ -214,6 +219,10 @@ export default function ProjectSettingsPage({ params }: PageProps) {
             <TabsTrigger value="customize">
               <Settings className="h-4 w-4 mr-2" />
               Customize
+            </TabsTrigger>
+            <TabsTrigger value="entitlements">
+              <Shield className="h-4 w-4 mr-2" />
+              Entitlements
             </TabsTrigger>
           </TabsList>
 
@@ -233,7 +242,9 @@ export default function ProjectSettingsPage({ params }: PageProps) {
                 disabled={isLoadingDocs}
               >
                 <RefreshCw
-                  className={`h-4 w-4 mr-2 ${isLoadingDocs ? "animate-spin" : ""}`}
+                  className={`h-4 w-4 mr-2 ${
+                    isLoadingDocs ? "animate-spin" : ""
+                  }`}
                 />
                 Refresh
               </Button>
@@ -359,7 +370,8 @@ export default function ProjectSettingsPage({ params }: PageProps) {
                     placeholder="extracted_metadata#123"
                   />
                   <p className="text-xs text-muted-foreground">
-                    The extractor output field to use (e.g., extracted_metadata#123)
+                    The extractor output field to use (e.g.,
+                    extracted_metadata#123)
                   </p>
                 </div>
               </div>
@@ -443,6 +455,29 @@ export default function ProjectSettingsPage({ params }: PageProps) {
             </div>
 
             <div className="border rounded-lg p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-semibold">Entitlements</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Enable document-level access control based on user
+                    permissions
+                  </p>
+                </div>
+                <Switch
+                  checked={entitlementsEnabled}
+                  onCheckedChange={setEntitlementsEnabled}
+                />
+              </div>
+              {entitlementsEnabled && (
+                <p className="text-xs text-muted-foreground bg-blue-50 dark:bg-blue-950 p-3 rounded">
+                  ✓ Entitlements enabled. Users will only see documents they
+                  have access to. Go to the Entitlements tab to manage users and
+                  groups.
+                </p>
+              )}
+            </div>
+
+            <div className="border rounded-lg p-6 space-y-4">
               <h3 className="font-semibold">AI System Prompt</h3>
               <p className="text-sm text-muted-foreground">
                 Customize how the AI agent behaves and answers questions
@@ -458,8 +493,8 @@ export default function ProjectSettingsPage({ params }: PageProps) {
                 />
                 <p className="text-xs text-muted-foreground">
                   Leave empty to use the default system prompt. This allows you
-                  to tailor the chain-of-thought, tool usage, and response
-                  style for your specific use case.
+                  to tailor the chain-of-thought, tool usage, and response style
+                  for your specific use case.
                 </p>
               </div>
             </div>
@@ -493,6 +528,42 @@ export default function ProjectSettingsPage({ params }: PageProps) {
                 Save Changes
               </Button>
             </div>
+          </TabsContent>
+
+          {/* Entitlements Tab */}
+          <TabsContent value="entitlements" className="space-y-6 mt-6">
+            <div>
+              <h2 className="text-xl font-semibold">Entitlements</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Manage users and groups for document-level access control
+              </p>
+            </div>
+
+            {!entitlementsEnabled ? (
+              <div className="border-2 border-dashed rounded-lg p-12 text-center">
+                <Shield className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <h3 className="text-lg font-semibold mb-2">
+                  Entitlements Not Enabled
+                </h3>
+                <p className="text-sm text-muted-foreground max-w-md mx-auto mb-4">
+                  Enable entitlements in the Customize tab to manage
+                  document-level access control based on user permissions.
+                </p>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    const customizeTab = document.querySelector(
+                      '[value="customize"]'
+                    ) as HTMLElement;
+                    customizeTab?.click();
+                  }}
+                >
+                  Go to Customize
+                </Button>
+              </div>
+            ) : (
+              <EntitlementsManagement projectId={projectId} />
+            )}
           </TabsContent>
         </Tabs>
       </main>

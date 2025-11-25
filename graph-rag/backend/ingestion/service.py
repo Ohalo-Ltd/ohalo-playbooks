@@ -1,7 +1,7 @@
 """Ingestion service for orchestrating the data pipeline."""
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 from uuid import uuid4
 
 from database.neo4j_client import Neo4jClient
@@ -15,6 +15,44 @@ from ingestion.graph_writer import GraphWriter
 from ingestion.metadata_parser import DXRMetadataParser
 
 logger = logging.getLogger(__name__)
+
+
+def extract_entitlement_metadata(hit: Hit) -> dict[str, Any]:
+    """Extract entitlement metadata from DXR hit.
+
+    Args:
+        hit: DXR Hit object from search results
+
+    Returns:
+        Dictionary with owner_email and accessible_by_emails
+    """
+    entitlements = {}
+
+    # Try to get from hit._source first (standard DXR location)
+    source = getattr(hit, "_source", None) or {}
+
+    # Extract OWNER (single email)
+    owner = source.get("OWNER") or hit.metadata.get("OWNER")
+    if owner:
+        entitlements["owner_email"] = str(owner)
+
+    # Extract WHO_CAN_ACCESS (list of emails or comma-separated string)
+    who_can_access = source.get("WHO_CAN_ACCESS") or hit.metadata.get("WHO_CAN_ACCESS")
+    if who_can_access:
+        if isinstance(who_can_access, list):
+            # Already a list
+            entitlements["accessible_by_emails"] = [
+                str(email) for email in who_can_access if email
+            ]
+        elif isinstance(who_can_access, str):
+            # Comma-separated string
+            emails = [
+                email.strip() for email in who_can_access.split(",") if email.strip()
+            ]
+            if emails:
+                entitlements["accessible_by_emails"] = emails
+
+    return entitlements
 
 
 class IngestionService:
@@ -68,18 +106,29 @@ class IngestionService:
 
             logger.info(f"Ingesting document: {file_name} (ID: {file_id})")
 
+            # Extract entitlement metadata
+            entitlements = extract_entitlement_metadata(hit)
+
+            # Build document properties
+            doc_properties = {
+                "path": hit.metadata.get("ds#object_id", ""),
+                "size": hit.metadata.get("ds#size", 0),
+                "mime_type": hit.metadata.get(
+                    "ds#mime_type", "application/octet-stream"
+                ),
+                "content_sha256": hit.metadata.get("metadata#binary_hash"),
+            }
+
+            # Add entitlement properties if available
+            if entitlements:
+                doc_properties.update(entitlements)
+                logger.info(f"Document entitlements: {entitlements}")
+
             # Create document node
             await self.graph_writer.create_document_node(
                 document_id=file_id,
                 name=file_name,
-                properties={
-                    "path": hit.metadata.get("ds#object_id", ""),
-                    "size": hit.metadata.get("ds#size", 0),
-                    "mime_type": hit.metadata.get(
-                        "ds#mime_type", "application/octet-stream"
-                    ),
-                    "content_sha256": hit.metadata.get("metadata#binary_hash"),
-                },
+                properties=doc_properties,
                 project_id=project_id,
             )
 
