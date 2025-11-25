@@ -1,10 +1,15 @@
 """Neo4j database client."""
 
+import logging
 from typing import Any, Optional
 
 from neo4j import AsyncGraphDatabase, AsyncDriver
 
 from core.config import settings
+
+# Suppress verbose Neo4j warnings
+logging.getLogger("neo4j").setLevel(logging.ERROR)
+logging.getLogger("neo4j.notifications").setLevel(logging.ERROR)
 
 
 class Neo4jClient:
@@ -46,6 +51,13 @@ class Neo4jClient:
         self.driver = AsyncGraphDatabase.driver(
             self.uri,
             auth=(self.user, self.password),
+            # Suppress notifications about missing labels/properties
+            notifications_disabled_categories=[
+                "UNRECOGNIZED",
+                "UNSUPPORTED",
+                "PERFORMANCE",
+                "DEPRECATION",
+            ],
         )
         # Verify connectivity
         await self.driver.verify_connectivity()

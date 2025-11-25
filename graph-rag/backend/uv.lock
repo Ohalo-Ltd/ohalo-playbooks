@@ -706,6 +706,20 @@ wheels = [
 ]
 
 [[package]]
+name = "dxrpy"
+version = "0.2.12"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+    { name = "python-dotenv" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/72/0a/ff620e1fa1cb74bb07fe6859e7a2ef4e9a17086536bea760ad812caf7607/dxrpy-0.2.12.tar.gz", hash = "sha256:6e4b3bd4739e5d971c2771c11c2222237e8a58a5508a706fa8503d3130cc463e", size = 9595 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c1/35/d6e862950fb49f6602fb4d9b2750c0f8a6b80d7a27df7392f6d44906ca23/dxrpy-0.2.12-py3-none-any.whl", hash = "sha256:e9d4b11e2820479746e320b094f5a22c4393f912acffcb72880f75c343c0fe1e", size = 13051 },
+]
+
+[[package]]
 name = "ecdsa"
 version = "0.19.1"
 source = { registry = "https://pypi.org/simple" }
@@ -925,6 +939,7 @@ source = { editable = "." }
 dependencies = [
     { name = "alembic" },
     { name = "asyncpg" },
+    { name = "dxrpy" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "logfire" },
@@ -964,6 +979,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.13.0" },
     { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=24.1.0" },
+    { name = "dxrpy", specifier = ">=0.2.12" },
     { name = "fastapi", specifier = ">=0.109.0" },
     { name = "httpx", specifier = ">=0.26.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.26.0" },

@@ -1,5 +1,6 @@
 """FastAPI application."""
 
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -9,16 +10,27 @@ from fastapi.middleware.cors import CORSMiddleware
 from api import chat, ingestion, projects, documents
 from core.config import settings
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    force=True,  # Override any existing config
+)
+
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager."""
     # Startup
+    logger.info(f"Starting {settings.app_name} v{settings.app_version}")
     print(f"Starting {settings.app_name} v{settings.app_version}")
-    
+
     yield
-    
+
     # Shutdown
+    logger.info("Shutting down...")
     print("Shutting down...")
 
 

@@ -1,5 +1,6 @@
 """API endpoints for project management."""
 
+import logging
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
@@ -9,6 +10,8 @@ from pydantic import BaseModel
 
 from core.crypto import get_encryption_key
 from database.postgres_client import PostgresClient
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -108,7 +111,8 @@ async def list_projects(
         ]
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to list projects: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
@@ -164,7 +168,8 @@ async def get_project(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to get project {project_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
 @router.post("", response_model=ProjectResponse, status_code=201)

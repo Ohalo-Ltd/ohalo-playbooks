@@ -115,6 +115,15 @@ class GraphWriter:
         RETURN elementId(d) as node_id
         """
 
+        result = await self.client.execute_write(
+            query,
+            {"id": document_id, "properties": props},
+        )
+
+        if result:
+            return result[0]["node_id"]
+        return document_id
+
     async def create_chunk_node(
         self,
         chunk_id: Optional[str],

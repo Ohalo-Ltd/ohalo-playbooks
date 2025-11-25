@@ -54,8 +54,13 @@ services:
       - NEO4J_USER=neo4j
       - NEO4J_PASSWORD=graphrag123
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_EMBEDDING_MODEL=${OPENAI_EMBEDDING_MODEL:-text-embedding-3-large}
+      - OPENAI_CHAT_MODEL=${OPENAI_CHAT_MODEL:-gpt-4o-mini}
       - DXR_API_KEY=${DXR_API_KEY}
       - DXR_BASE_URL=${DXR_BASE_URL:-https://api.dataxray.com}
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - ALGORITHM=${ALGORITHM:-HS256}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
     ports:
       - "8000:8000"
     volumes:

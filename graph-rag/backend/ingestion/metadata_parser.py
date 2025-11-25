@@ -131,12 +131,15 @@ class DXRMetadataParser:
         return ParsedMetadata(entities=entities, relationships=relationships)
 
     def parse_from_dxr_file(
-        self, extracted_metadata: dict[str, Any]
+        self,
+        extracted_metadata: list[dict[str, Any]],
+        extractor_id: Optional[str] = None,
     ) -> Optional[ParsedMetadata]:
         """Parse metadata from a DXR file object.
 
         Args:
-            extracted_metadata: The extractedMetadata field from DXR file
+            extracted_metadata: The extractedMetadata field from DXR file (list of metadata objects)
+            extractor_id: Optional specific extractor ID to use (e.g., "11" or "extracted_metadata#11")
 
         Returns:
             Parsed metadata or None if parsing fails
@@ -145,7 +148,55 @@ class DXRMetadataParser:
             return None
 
         try:
-            return self.parse(extracted_metadata)
+            # If extractor_id is specified, find that specific metadata item
+            if extractor_id:
+                # Handle both "11" and "extracted_metadata#11" formats
+                extractor_num = extractor_id.replace("extracted_metadata#", "").strip()
+
+                for item in extracted_metadata:
+                    item_id = str(item.get("id", ""))
+                    if item_id == extractor_id or item_id == extractor_num:
+                        # Found the specific extractor - parse its value
+                        value = item.get("value")
+                        if isinstance(value, str):
+                            # Try to parse as JSON
+                            import json
+
+                            try:
+                                value = json.loads(value)
+                            except json.JSONDecodeError:
+                                pass
+
+                        if isinstance(value, dict):
+                            return self.parse(value)
+                        else:
+                            print(
+                                f"Extractor {extractor_id} value is not a dict/JSON object"
+                            )
+                            return None
+
+                print(f"Warning: Extractor {extractor_id} not found in metadata")
+                return None
+
+            # No specific extractor - try to find any JSON metadata
+            for item in extracted_metadata:
+                value = item.get("value")
+                if isinstance(value, str):
+                    # Try to parse as JSON
+                    import json
+
+                    try:
+                        value = json.loads(value)
+                    except json.JSONDecodeError:
+                        continue
+
+                if isinstance(value, dict):
+                    # Found a JSON object - use it
+                    return self.parse(value)
+
+            # No JSON metadata found
+            return None
+
         except Exception as e:
             # Log error but don't fail
             print(f"Failed to parse metadata: {e}")
