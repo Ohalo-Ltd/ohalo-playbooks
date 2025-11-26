@@ -113,16 +113,20 @@ async def query_endpoint(
         Query response with answer from the agent
     """
     try:
-        # Fetch project settings to get custom system prompt
+        # Fetch project settings to get custom system prompt and DXR URL
         system_prompt = None
+        dxr_url = None
         if request.project_id != "default":
             try:
                 project_row = await pg_client.fetchrow(
-                    "SELECT system_prompt FROM projects WHERE id = $1",
+                    "SELECT system_prompt, dxr_url FROM projects WHERE id = $1",
                     UUID(request.project_id),
                 )
-                if project_row and project_row["system_prompt"]:
-                    system_prompt = project_row["system_prompt"]
+                if project_row:
+                    if project_row["system_prompt"]:
+                        system_prompt = project_row["system_prompt"]
+                    if project_row["dxr_url"]:
+                        dxr_url = project_row["dxr_url"]
             except (ValueError, Exception):
                 # Invalid UUID or project not found - use default prompt
                 pass
@@ -135,6 +139,7 @@ async def query_endpoint(
             project_id=request.project_id,
             system_prompt=system_prompt,
             current_user_email=request.current_user_email,
+            dxr_url=dxr_url,
         )
 
         # For now, return a simple response
@@ -179,16 +184,20 @@ async def stream_query_endpoint(
     async def event_generator():
         """Generate SSE events for agent steps."""
         try:
-            # Fetch custom system prompt if available
+            # Fetch custom system prompt and DXR URL if available
             system_prompt = None
+            dxr_url = None
             if request.project_id != "default":
                 try:
                     project_row = await pg_client.fetchrow(
-                        "SELECT system_prompt FROM projects WHERE id = $1",
+                        "SELECT system_prompt, dxr_url FROM projects WHERE id = $1",
                         UUID(request.project_id),
                     )
-                    if project_row and project_row["system_prompt"]:
-                        system_prompt = project_row["system_prompt"]
+                    if project_row:
+                        if project_row["system_prompt"]:
+                            system_prompt = project_row["system_prompt"]
+                        if project_row["dxr_url"]:
+                            dxr_url = project_row["dxr_url"]
                 except (ValueError, Exception):
                     pass
 
@@ -205,6 +214,7 @@ async def stream_query_endpoint(
                 system_prompt=system_prompt,
                 current_user_email=request.current_user_email,
                 messages=request.messages,
+                dxr_url=dxr_url,
             ):
                 # Emit step as SSE event
                 yield f"data: {json.dumps(step)}\n\n"

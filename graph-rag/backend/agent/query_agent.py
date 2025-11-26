@@ -1,5 +1,7 @@
 """Query agent with vector search tool."""
 
+import re
+import urllib.parse
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -33,6 +35,7 @@ class AgentDependencies(BaseModel):
     current_user_email: str | None = (
         None  # Current user's email for entitlement filtering
     )
+    dxr_url: str | None = None  # DXR base URL for document link transformation
 
     class Config:
         arbitrary_types_allowed = True
@@ -80,9 +83,10 @@ DEFAULT_SYSTEM_PROMPT = """You are an intelligent assistant that answers questio
 
 **Citing Sources:**
 - You MUST include links to documents in your answers.
-- Citations include a link to the document internal ID and name with a format `[Document Name](#/d/{document_id})`
-- Example: "According to [Document Name](#/d/ifu8fduss8371), ..."
-- Example: "In [Document Name](#/d/abc123), it states..."
+- Citations include a link to the document with a format `[Document Name](#/d/{url_encoded_document_name})`
+- Example: "According to [Business Report 9](#/d/Business%20Report%209), ..."
+- Example: "In [State of Marketing 2025](#/d/State%20of%20Marketing%202025), it states..."
+- NEVER link to non-documents. BAD EXAMPLE: "Flight number [ABC123](#/d/ABC123) is set to..." <-- not a document
 - Include a separate "Sources" section listing all documents referenced when the response structure allows. I.e. for simple short answers, include citations inline only, but for longer answers, include a "Sources" section at the end.
 
 **Formatting Guidelines:**
@@ -126,6 +130,78 @@ def build_entitlement_filter(user_email: str | None) -> str:
         OR doc.owner_email IS NULL
     )
     """
+
+
+async def transform_document_links(
+    text: str,
+    neo4j_client: Neo4jClient,
+    dxr_url: str | None,
+) -> str:
+    """Transform internal document links to DXR search URLs.
+
+    Converts links in format [Document Name](#/d/{document_id}) to DXR search links
+    with proper URL encoding for document name filtering.
+
+    Args:
+        text: Text containing markdown links to transform
+        neo4j_client: Neo4j client to fetch document names
+        dxr_url: Base DXR URL (e.g., "https://leidos.dataxray.io")
+
+    Returns:
+        Text with transformed links
+    """
+    if not dxr_url:
+        # No DXR URL configured, return text unchanged
+        return text
+
+    # Pattern to match [Document Name](#/d/{document_id})
+    pattern = r"\[([^\]]+)\]\(#/d/([^\)]+)\)"
+
+    # Find all document links
+    matches = list(re.finditer(pattern, text))
+    if not matches:
+        return text
+
+    # Extract unique document IDs
+    doc_ids = list(set(match.group(2) for match in matches))
+
+    # Fetch document names from Neo4j
+    doc_id_to_name: dict[str, str] = {}
+    if doc_ids:
+        query = """
+        MATCH (d:Document)
+        WHERE d.id IN $doc_ids
+        RETURN d.id as id, d.name as name
+        """
+        results = await neo4j_client.execute_query(query, {"doc_ids": doc_ids})
+        for result in results:
+            doc_id_to_name[result.get("id", "")] = result.get("name", "")
+
+    # Replace each link
+    result_text = text
+    for match in reversed(matches):  # Reverse to preserve indices during replacement
+        full_match = match.group(0)
+        link_text = match.group(1)
+        doc_id = match.group(2)
+
+        # Get document name from database or use link text as fallback
+        doc_name = doc_id_to_name.get(doc_id, link_text)
+
+        # Build DXR search URL with file_name filter
+        # Example: https://leidos.dataxray.io/search#query={"file_name":"Aircraft Procurement Army.pdf"}
+        filter_query = {"file_name": doc_name}
+        encoded_query = urllib.parse.quote(
+            urllib.parse.quote(str(filter_query).replace("'", '"'))
+        )
+        dxr_link = f"{dxr_url.rstrip('/')}/search#query={encoded_query}"
+
+        # Replace with new link
+        new_link = f"[{link_text}]({dxr_link})"
+        result_text = (
+            result_text[: match.start()] + new_link + result_text[match.end() :]
+        )
+
+    return result_text
 
 
 # Define the query agent
@@ -670,6 +746,7 @@ async def query(
     project_id: str,
     system_prompt: str | None = None,
     current_user_email: str | None = None,
+    dxr_url: str | None = None,
 ) -> str:
     """Query the knowledge graph.
 
@@ -680,6 +757,7 @@ async def query(
         project_id: Project ID
         system_prompt: Optional custom system prompt (uses default if not provided)
         current_user_email: Optional user email for entitlement filtering
+        dxr_url: Optional DXR base URL for document link transformation
 
     Returns:
         Answer from the agent
@@ -690,6 +768,7 @@ async def query(
         project_id=project_id,
         system_prompt=system_prompt,
         current_user_email=current_user_email,
+        dxr_url=dxr_url,
     )
 
     # Create agent with custom prompt if provided
@@ -719,6 +798,7 @@ async def query_with_steps(
     system_prompt: str | None = None,
     current_user_email: str | None = None,
     messages: list[dict[str, str]] | None = None,
+    dxr_url: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Query the knowledge graph with step-by-step streaming.
 
@@ -730,6 +810,7 @@ async def query_with_steps(
         system_prompt: Optional custom system prompt
         current_user_email: Optional user email for entitlement filtering
         messages: Optional chat history
+        dxr_url: Optional DXR base URL for document link transformation
 
     Yields:
         Agent step events (tool calls, results, final answer)
@@ -750,6 +831,7 @@ async def query_with_steps(
         system_prompt=system_prompt,
         step_callback=step_callback,
         current_user_email=current_user_email,
+        dxr_url=dxr_url,
     )
 
     # Create agent with custom prompt if provided
@@ -781,9 +863,6 @@ async def query_with_steps(
             async with agent.run_stream(question, deps=deps, message_history=history) as result:
                 async for chunk in result.stream():
                     await queue.put(AgentStep(type="answer_chunk", content=chunk))
-
-                # We can also get the full result data if needed, but chunks are enough for streaming
-                # await queue.put(AgentStep(type="answer", content=result.data))
 
         except Exception as e:
             await queue.put(AgentStep(type="error", message=str(e)))

@@ -15,6 +15,8 @@ import { useAgentStream, AgentStep } from "@/hooks/use-agent-stream";
 import { ReasoningAccordion } from "./reasoning-accordion";
 import { UserSwitcher, User } from "./user-switcher";
 import { apiClient } from "@/lib/api";
+import { DocumentLink } from "./document-link";
+import { fixMarkdownLinks } from "@/lib/markdown-utils";
 
 interface Message {
   id: string;
@@ -220,8 +222,13 @@ export function ChatInterface({
                         {message.content && (
                           <div className="bg-muted/50 rounded-2xl p-4">
                             <div className="prose prose-sm max-w-none dark:prose-invert">
-                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                {message.content}
+                              <ReactMarkdown 
+                                remarkPlugins={[remarkGfm]}
+                                components={{
+                                  a: (props) => <DocumentLink {...props} projectId={projectId} />,
+                                }}
+                              >
+                                {fixMarkdownLinks(message.content)}
                               </ReactMarkdown>
                             </div>
                           </div>
@@ -245,8 +252,13 @@ export function ChatInterface({
                     {currentAssistantMessage.content && (
                       <div className="bg-muted/50 rounded-2xl p-4">
                         <div className="prose prose-sm max-w-none dark:prose-invert">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {currentAssistantMessage.content}
+                          <ReactMarkdown 
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                              a: (props) => <DocumentLink {...props} projectId={projectId} />,
+                            }}
+                          >
+                            {fixMarkdownLinks(currentAssistantMessage.content)}
                           </ReactMarkdown>
                         </div>
                       </div>
