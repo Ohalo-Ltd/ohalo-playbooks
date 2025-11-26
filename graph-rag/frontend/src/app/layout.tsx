@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Data X-Ray",
-  description: "Knowledge graph powered retrieval augmented generation",
+  description: "Data X-Ray powered RAG demo",
 };
 
 export default function RootLayout({

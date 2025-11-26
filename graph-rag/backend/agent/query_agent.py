@@ -76,6 +76,7 @@ DEFAULT_SYSTEM_PROMPT = """You are an intelligent assistant that answers questio
 4. Group information by document when possible
 5. Be specific: "According to [Document Name]..." or "In [Document Name], it states..."
 6. If user asks for more thorough search, or is trying to expand knowledge, run tools multiple times with varied queries and/or increase the number of top_k results to fetch from tools
+7. If a user asks for summary, always start with a table summary and then follow with detailed explanations, and conclude with the list of documents used.
 
 **Example:**
 - ✅ GOOD: "The MQ-1 Gray Eagle UAV is mentioned in the document 'Army RDT&E Volume 4b'..."
@@ -356,7 +357,7 @@ async def discover_graph(
 async def vector_search(
     ctx: RunContext[AgentDependencies],
     query: str,
-    top_k: int = 5,
+    top_k: int = 8,
 ) -> list[SearchResult]:
     """Search for relevant information using semantic search.
 

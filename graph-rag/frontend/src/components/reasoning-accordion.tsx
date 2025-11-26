@@ -119,7 +119,20 @@ export function ReasoningAccordion({ steps, isStreaming }: ReasoningAccordionPro
   ).length;
 
   return (
-    <div className="border border-muted rounded-lg bg-muted/30 overflow-hidden">
+    <div
+      className={cn(
+        "border rounded-lg overflow-hidden transition-all duration-500 relative",
+        isStreaming
+          ? "border-primary/30 shadow-[0_0_10px_-5px_rgba(var(--primary),0.2)]"
+          : "bg-muted/30 border-muted"
+      )}
+    >
+      {isStreaming && (
+        <div
+          className="absolute inset-0 bg-linear-to-r from-transparent via-primary/5 to-transparent animate-[shimmer_2s_infinite] pointer-events-none"
+          style={{ backgroundSize: "200% 100%" }}
+        />
+      )}
       <Accordion
         type="single"
         collapsible

@@ -27,15 +27,18 @@ export function DocumentLink({ href, children, projectId }: DocumentLinkProps) {
   
   // Transform internal links to DXR search URLs
   let transformedHref = href;
-  if (isInternalDocLink && project?.dxr_url) {
+  if (isInternalDocLink && project?.dxr_url && href) {
     // Extract document ID/name from href and decode if URL encoded
     const docPath = href.substring(4); // Remove "#/d/"
     const docName = decodeURIComponent(docPath);
-    
+
     // Build DXR search URL with file_name filter
     const filterQuery = { file_name: docName };
     const encodedQuery = encodeURIComponent(JSON.stringify(filterQuery));
-    transformedHref = `${project.dxr_url.replace(/\/$/, '')}/search#query=${encodedQuery}`;
+    transformedHref = `${project.dxr_url.replace(
+      /\/$/,
+      ""
+    )}/search#query=${encodedQuery}`;
   }
 
   // Check if this is a DXR link (after transformation or already a DXR link)

@@ -8,15 +8,17 @@ import React, { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
 import { ChatInput } from "./chat-input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Loader2Icon } from "lucide-react";
 import { useAgentStream, AgentStep } from "@/hooks/use-agent-stream";
 import { ReasoningAccordion } from "./reasoning-accordion";
-import { UserSwitcher, User } from "./user-switcher";
+import { User } from "./user-switcher";
 import { apiClient } from "@/lib/api";
 import { DocumentLink } from "./document-link";
 import { fixMarkdownLinks } from "@/lib/markdown-utils";
+import { BackgroundGradient } from "@/components/background-gradient";
 
 interface Message {
   id: string;
@@ -194,150 +196,193 @@ export function ChatInterface({
   const hasMessages = messages.length > 0 || currentAssistantMessage;
 
   return (
-    <div className="flex flex-col h-full">
-      {hasMessages ? (
-        <>
-          <div className="flex-1 overflow-hidden">
-            <ScrollArea className="h-full" viewportRef={viewportRef}>
-              <div className="space-y-6 py-4 px-4 max-w-4xl mx-auto">
-                {messages.map((message) => (
-                  <div key={message.id} className="space-y-2">
-                    {message.role === "user" ? (
-                      <div className="flex justify-end">
-                        <div className="bg-primary text-primary-foreground rounded-2xl px-4 py-3 max-w-[80%]">
-                          <p className="text-sm">{message.content}</p>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {/* Reasoning accordion before answer */}
-                        {message.steps && message.steps.length > 0 && (
+    <LayoutGroup>
+      <div className="flex flex-col h-full relative">
+        {hasMessages ? (
+          <>
+            <div className="flex-1 overflow-hidden z-10">
+              <ScrollArea className="h-full" viewportRef={viewportRef}>
+                <div className="space-y-6 py-4 px-4 max-w-4xl mx-auto">
+                  <AnimatePresence initial={false}>
+                    {messages.map((message) => (
+                      <motion.div
+                        key={message.id}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.15 }}
+                        className="space-y-2"
+                      >
+                        {message.role === "user" ? (
+                          <div className="flex justify-end">
+                            <div className="bg-primary text-primary-foreground rounded-2xl px-4 py-3 max-w-[80%]">
+                              <p className="text-sm">{message.content}</p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            {/* Reasoning accordion before answer */}
+                            {message.steps && message.steps.length > 0 && (
+                              <ReasoningAccordion
+                                steps={message.steps}
+                                isStreaming={false}
+                              />
+                            )}
+
+                            {/* Answer content */}
+                            {message.content && (
+                              <div className="bg-muted/50 rounded-2xl p-4">
+                                <div className="prose prose-sm max-w-none dark:prose-invert">
+                                  <ReactMarkdown
+                                    remarkPlugins={[remarkGfm]}
+                                    components={{
+                                      a: (props) => (
+                                        <DocumentLink
+                                          {...props}
+                                          projectId={projectId}
+                                        />
+                                      ),
+                                    }}
+                                  >
+                                    {fixMarkdownLinks(message.content)}
+                                  </ReactMarkdown>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+
+                  {/* Current streaming message */}
+                  {currentAssistantMessage && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="space-y-3"
+                    >
+                      {currentAssistantMessage.steps &&
+                        currentAssistantMessage.steps.length > 0 && (
                           <ReasoningAccordion
-                            steps={message.steps}
-                            isStreaming={false}
+                            steps={currentAssistantMessage.steps}
+                            isStreaming={isStreaming}
                           />
                         )}
 
-                        {/* Answer content */}
-                        {message.content && (
-                          <div className="bg-muted/50 rounded-2xl p-4">
-                            <div className="prose prose-sm max-w-none dark:prose-invert">
-                              <ReactMarkdown 
-                                remarkPlugins={[remarkGfm]}
-                                components={{
-                                  a: (props) => <DocumentLink {...props} projectId={projectId} />,
-                                }}
-                              >
-                                {fixMarkdownLinks(message.content)}
-                              </ReactMarkdown>
-                            </div>
+                      {currentAssistantMessage.content && (
+                        <div className="bg-muted/50 rounded-2xl p-4">
+                          <div className="prose prose-sm max-w-none dark:prose-invert">
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              components={{
+                                a: (props) => (
+                                  <DocumentLink
+                                    {...props}
+                                    projectId={projectId}
+                                  />
+                                ),
+                              }}
+                            >
+                              {fixMarkdownLinks(
+                                currentAssistantMessage.content
+                              )}
+                            </ReactMarkdown>
                           </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))}
-
-                {/* Current streaming message */}
-                {currentAssistantMessage && (
-                  <div className="space-y-3">
-                    {currentAssistantMessage.steps &&
-                      currentAssistantMessage.steps.length > 0 && (
-                        <ReasoningAccordion
-                          steps={currentAssistantMessage.steps}
-                          isStreaming={isStreaming}
-                        />
-                      )}
-
-                    {currentAssistantMessage.content && (
-                      <div className="bg-muted/50 rounded-2xl p-4">
-                        <div className="prose prose-sm max-w-none dark:prose-invert">
-                          <ReactMarkdown 
-                            remarkPlugins={[remarkGfm]}
-                            components={{
-                              a: (props) => <DocumentLink {...props} projectId={projectId} />,
-                            }}
-                          >
-                            {fixMarkdownLinks(currentAssistantMessage.content)}
-                          </ReactMarkdown>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                      )}
+                    </motion.div>
+                  )}
 
-                {isStreaming && !currentAssistantMessage?.steps?.length && (
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Loader2Icon className="h-4 w-4 animate-spin" />
-                    <span className="text-sm">Connecting to agent...</span>
-                  </div>
-                )}
+                  {isStreaming && !currentAssistantMessage?.steps?.length && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="flex items-center gap-2 text-muted-foreground"
+                    >
+                      <Loader2Icon className="h-4 w-4 animate-spin" />
+                      <span className="text-sm">Connecting to agent...</span>
+                    </motion.div>
+                  )}
 
-                <div ref={scrollRef} />
+                  <div ref={scrollRef} />
+                </div>
+              </ScrollArea>
+            </div>
+
+            <div className="border-t p-4 z-10 bg-background/80 backdrop-blur-sm">
+              <div className="max-w-4xl mx-auto">
+                <motion.div layoutId="chat-input-container">
+                  <ChatInput
+                    onSend={handleSend}
+                    disabled={isStreaming || !projectId || !hasProjects}
+                    placeholder={
+                      !hasProjects
+                        ? "Create a project first to start chatting..."
+                        : !projectId
+                        ? "Select a project to start chatting..."
+                        : "Ask a question about your documents..."
+                    }
+                  />
+                </motion.div>
               </div>
-            </ScrollArea>
-          </div>
-
-          <div className="border-t p-4">
-            <div className="max-w-4xl mx-auto">
-              <ChatInput
-                onSend={handleSend}
-                disabled={isStreaming || !projectId || !hasProjects}
-                placeholder={
-                  !hasProjects
-                    ? "Create a project first to start chatting..."
-                    : !projectId
-                    ? "Select a project to start chatting..."
-                    : "Ask a question about your documents..."
-                }
-              />
             </div>
-          </div>
-        </>
-      ) : (
-        <div className="flex flex-col items-center justify-center h-full px-4">
-          {!hasProjects ? (
-            <div className="text-center space-y-4 max-w-md">
-              <h2 className="text-2xl font-semibold">No Projects Yet</h2>
-              <p className="text-muted-foreground">
-                Create your first project to start organizing your knowledge
-                base and chatting with your documents.
-              </p>
-              <p className="text-sm text-muted-foreground">
-                Click the project switcher in the top bar to create a new
-                project.
-              </p>
-            </div>
-          ) : !projectId ? (
-            <div className="text-center space-y-4 max-w-md">
-              <h2 className="text-2xl font-semibold">Select a Project</h2>
-              <p className="text-muted-foreground">
-                Choose a project from the switcher above to start chatting.
-              </p>
-            </div>
-          ) : (
-            <div className="w-full max-w-2xl space-y-8">
-              <div className="text-center space-y-4">
-                <h2 className="text-3xl font-semibold">
-                  Welcome to Data X-Ray RAG demo
-                </h2>
-                <p className="text-muted-foreground text-lg">
-                  Ask questions about your documents and knowledge graph
+          </>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full px-4 relative">
+            <BackgroundGradient />
+            {!hasProjects ? (
+              <div className="text-center space-y-4 max-w-md z-10">
+                <h2 className="text-2xl font-semibold">No Projects Yet</h2>
+                <p className="text-muted-foreground">
+                  Create your first project to start organizing your knowledge
+                  base and chatting with your documents.
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Click the project switcher in the top bar to create a new
+                  project.
                 </p>
               </div>
-
-              <div className="w-full">
-                <ChatInput
-                  onSend={handleSend}
-                  disabled={isStreaming}
-                  placeholder="Ask a question about your documents..."
-                  centered
-                />
+            ) : !projectId ? (
+              <div className="text-center space-y-4 max-w-md z-10">
+                <h2 className="text-2xl font-semibold">Select a Project</h2>
+                <p className="text-muted-foreground">
+                  Choose a project from the switcher above to start chatting.
+                </p>
               </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+            ) : (
+              <div className="w-full max-w-2xl space-y-8 z-10">
+                <div className="text-center space-y-4">
+                  <motion.h2
+                    initial={{ opacity: 0, y: -20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.2 }}
+                    className="text-3xl font-semibold"
+                  >
+                    Welcome to Data X-Ray RAG demo
+                  </motion.h2>
+                  <motion.p
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.4 }}
+                    className="text-muted-foreground text-lg"
+                  >
+                    Ask questions about your documents and knowledge graph
+                  </motion.p>
+                </div>
+
+                <motion.div layoutId="chat-input-container" className="w-full">
+                  <ChatInput
+                    onSend={handleSend}
+                    disabled={isStreaming}
+                    placeholder="Ask a question about your documents..."
+                    centered
+                  />
+                </motion.div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </LayoutGroup>
   );
 }

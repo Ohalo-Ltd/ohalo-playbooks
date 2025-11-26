@@ -100,7 +100,7 @@ export function TopBar({
     <>
       <header className="border-b">
         <div className="flex h-14 items-center px-4 gap-4">
-          <h1 className="text-lg font-semibold">Graph RAG</h1>
+          <h1 className="text-lg font-semibold">Data X-Ray</h1>
           <ProjectSwitcher
             currentProjectId={currentProjectId}
             onProjectChange={onProjectChange}
