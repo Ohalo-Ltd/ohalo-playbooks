@@ -43,15 +43,17 @@ class GraphWriter:
         if embedding:
             properties["embedding"] = embedding
 
-        # Convert properties to Cypher-safe format
-        props_str = ", ".join(
-            [f"{k}: ${k}" for k in properties.keys()]
-        )
+        # Build SET clause for all properties
+        set_clauses = [f"e.{k} = ${k}" for k in properties.keys()]
+        set_clause = ", ".join(set_clauses)
+
+        # Sanitize entity type for label (remove spaces, special chars)
+        entity_label = entity.type.replace(" ", "_").replace("-", "_")
 
         query = f"""
         MERGE (e:Entity {{id: $id}})
-        SET e += ${{{props_str}}}
-        SET e:{entity.type}
+        SET {set_clause}
+        SET e:{entity_label}
         RETURN elementId(e) as node_id
         """
 

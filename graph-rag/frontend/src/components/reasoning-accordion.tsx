@@ -203,13 +203,26 @@ function StepItem({ step }: { step: AgentStep }) {
 
     return (
       <div className="flex items-start gap-3 py-1 opacity-70">
-        <Icon className={cn('h-4 w-4 mt-0.5', config?.color || 'text-muted-foreground')} />
+        <Icon
+          className={cn(
+            "h-4 w-4 mt-0.5",
+            config?.color || "text-muted-foreground"
+          )}
+        />
         <div className="flex-1">
           <p className="text-sm">
-            {config?.label || step.tool}{' '}
-            <span className="text-muted-foreground font-normal">completed</span>
+            <span className="font-semibold text-foreground">
+              {config?.label || step.tool}
+            </span>{" "}
+            <span className="text-secondary-foreground font-normal">
+              completed
+            </span>
           </p>
-          {summary && <p className="text-xs text-muted-foreground mt-0.5">{summary}</p>}
+          {summary && (
+            <p className="text-xs text-secondary-foreground mt-0.5">
+              {summary}
+            </p>
+          )}
         </div>
         <span className="text-green-600 text-xs">✓</span>
       </div>

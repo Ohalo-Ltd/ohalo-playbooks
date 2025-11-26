@@ -139,3 +139,25 @@
 .prose ul {
   list-style-type: disc;
 }
+
+.prose table {
+  @apply w-full;
+  border-collapse: collapse;
+  margin-top: 1.5em;
+  margin-bottom: 1.5em;
+
+  th, td {
+    @apply border-primary-foreground border-y p-2 text-left align-top;
+  
+    &:first-child {
+      @apply pl-0;
+    }
+
+    &:last-child {
+      @apply pr-0;
+    }
+  }
+  th {
+    @apply bg-muted font-medium;
+  }
+}

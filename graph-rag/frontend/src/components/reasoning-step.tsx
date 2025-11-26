@@ -107,27 +107,6 @@ export function ReasoningStep({ step, isLast }: ReasoningStepProps) {
   return null;
 }
 
-function renderResultSummary(tool: string, result: any): string {
-  if (!result) return '';
-
-  switch (tool) {
-    case "discover_graph":
-      return `Found ${result.entity_count || 0} entities, ${
-        result.relationship_count || 0
-      } relationships`;
-    case "vector_search":
-      return `Found ${result.count || 0} relevant documents`;
-    case "entity_lookup":
-      return `Found ${result.count || 0} matching entities`;
-    case "graph_neighbors":
-      return `Found ${result.total_found || 0} neighbors`;
-    case "graph_query":
-      return `Returned ${result.count || 0} results`;
-    default:
-      return "";
-  }
-}
-
 function renderToolResult(tool: string, result: any) {
   if (!result) {
     return <p className="text-sm text-muted-foreground">No data</p>;

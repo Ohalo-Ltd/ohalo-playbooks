@@ -45,19 +45,20 @@ export function ChatInput({
     >
       <div
         className={cn(
-          "flex items-center gap-2 rounded-3xl border bg-background p-2 shadow-lg",
+          "flex items-center gap-2 rounded-3xl border bg-background p-2 shadow-md shadow-black/5",
           centered && "w-full"
         )}
       >
         <Textarea
+          id="chat-input"
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           disabled={disabled}
           className={cn(
-            "flex-1 resize-none border-0 bg-transparent px-4 py-3 text-sm focus-visible:ring-0 focus-visible:ring-offset-0",
-            centered ? "min-h-[56px]" : "min-h-[60px]"
+            "flex-1 resize-none border-0 bg-transparent px-4 py-3 focus-visible:ring-0 focus-visible:ring-offset-0",
+            centered ? "min-h-14" : "min-h-16"
           )}
           rows={1}
           style={{ maxHeight: "200px" }}

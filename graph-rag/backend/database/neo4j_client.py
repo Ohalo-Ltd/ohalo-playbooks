@@ -308,9 +308,9 @@ class Neo4jClient:
         # Build relationship pattern based on direction
         if relationship_types:
             rel_types = "|".join(relationship_types)
-            rel_pattern = f"[r:{rel_types}]"
+            rel_pattern = f"[r:{rel_types}*1..{max_depth}]"
         else:
-            rel_pattern = "[r]"
+            rel_pattern = f"[r*1..{max_depth}]"
 
         if direction == "outgoing":
             pattern = f"-{rel_pattern}->"
@@ -319,15 +319,12 @@ class Neo4jClient:
         else:  # both
             pattern = f"-{rel_pattern}-"
 
-        # Limit max depth to prevent expensive queries
-        max_depth = min(max_depth, 3)
-
         query = f"""
         MATCH (start {{id: $node_id}})
-        MATCH path = (start){pattern}*1..{max_depth}(neighbor)
+        MATCH path = (start){pattern}(neighbor)
         WITH neighbor, relationships(path) as rels, length(path) as depth
         RETURN DISTINCT neighbor, 
-               [rel in rels | {{{{type: type(rel), properties: properties(rel)}}}}] as relationships,
+               [rel in rels | type(rel)] as relationships,
                depth
         ORDER BY depth
         LIMIT 50
