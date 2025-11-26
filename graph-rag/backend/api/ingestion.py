@@ -1,7 +1,7 @@
 """API endpoints for ingestion functionality."""
 
 import logging
-from typing import Optional
+from typing import Optional, AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class IngestionStatus(BaseModel):
     documents_total: int
 
 
-async def get_ingestion_service() -> IngestionService:
+async def get_ingestion_service() -> AsyncGenerator[IngestionService, None]:
     """Get ingestion service dependency."""
     # Initialize DXR singleton client
     DXRHttpClient.get_instance(

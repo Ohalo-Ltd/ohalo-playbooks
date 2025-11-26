@@ -3,6 +3,7 @@
 import logging
 from datetime import datetime
 from typing import Optional
+from typing import AsyncGenerator
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -58,7 +59,7 @@ class ProjectResponse(BaseModel):
     updated_at: datetime
 
 
-async def get_postgres_client() -> PostgresClient:
+async def get_postgres_client() -> AsyncGenerator[PostgresClient, None]:
     """Get Postgres client dependency."""
     client = PostgresClient()
     await client.connect()
@@ -219,6 +220,9 @@ async def create_project(
             encryption_key,
         )
 
+        if not row:
+            raise HTTPException(status_code=500, detail="Failed to create project")
+
         return ProjectResponse(
             id=str(row["id"]),
             name=row["name"],
@@ -367,6 +371,9 @@ async def update_project(
             """
 
             row = await pg_client.fetchrow(query, *values)
+
+        if not row:
+            raise HTTPException(status_code=500, detail="Failed to update project")
 
         return ProjectResponse(
             id=str(row["id"]),

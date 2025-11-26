@@ -3,7 +3,9 @@
 import pytest
 from unittest.mock import Mock, AsyncMock
 
-from agent.query_agent import build_entitlement_filter, AgentDependencies, vector_search
+from agent.models import AgentDependencies
+from agent.tools.search import vector_search
+from agent.utils import build_entitlement_filter
 from database.neo4j_client import Neo4jClient
 from ingestion.embedder import EmbeddingService
 

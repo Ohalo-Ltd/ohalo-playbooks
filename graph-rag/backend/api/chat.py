@@ -8,10 +8,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from agent.query_agent import query, query_with_steps
+from agent.orchestrator import query, query_with_steps
 from database.neo4j_client import Neo4jClient
 from database.postgres_client import PostgresClient
 from ingestion.embedder import EmbeddingService
+
+from typing import AsyncGenerator
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -62,7 +64,7 @@ class QueryResponse(BaseModel):
     conversation_id: str = ""
 
 
-async def get_neo4j_client() -> Neo4jClient:
+async def get_neo4j_client() -> AsyncGenerator[Neo4jClient, None]:
     """Get Neo4j client dependency."""
     client = Neo4jClient()
     await client.connect()
@@ -77,7 +79,7 @@ async def get_embedding_service() -> EmbeddingService:
     return EmbeddingService()
 
 
-async def get_postgres_client() -> PostgresClient:
+async def get_postgres_client() -> AsyncGenerator[PostgresClient, None]:
     """Get Postgres client dependency."""
     client = PostgresClient()
     await client.connect()
