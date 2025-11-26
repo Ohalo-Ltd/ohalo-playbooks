@@ -121,43 +121,79 @@
   }
 }
 
-.prose ol {
-  @apply mt-6 mb-6;
-  list-style-type: decimal;
-}
-.prose ol li {
-  @apply mb-1 ml-6;
-}
-.prose ol li::marker {
-  font-weight: 600;
-}
-.prose ol li p {
-  @apply mb-1 mt-4;
-}
+.prose {
+  /* Headings */
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-sans font-semibold mt-[1em];
 
-
-.prose ul {
-  list-style-type: disc;
-}
-
-.prose table {
-  @apply w-full;
-  border-collapse: collapse;
-  margin-top: 1.5em;
-  margin-bottom: 1.5em;
-
-  th, td {
-    @apply border-primary-foreground border-y p-2 text-left align-top;
-  
-    &:first-child {
-      @apply pl-0;
-    }
-
-    &:last-child {
-      @apply pr-0;
+    & + ul, & + ol {
+      @apply mt-4;
     }
   }
-  th {
-    @apply bg-muted font-medium;
+  h1 {
+    @apply text-4xl;
+  }
+  h2 {
+    @apply text-3xl;
+  }
+  h3 {
+    @apply text-2xl;
+  }
+  h4 {
+    @apply text-xl;
+  }
+
+  /* Ordered Lists */
+  ol, ul {
+    @apply mt-6 mb-6;
+    list-style-type: decimal;
+
+    li {
+      @apply mb-1 ml-6;
+
+      &::marker {
+        font-weight: 600;
+      }
+
+      p {
+        @apply mb-0;
+      }
+    }
+  }
+
+  /* Unordered Lists */
+  ul {
+    list-style-type: disc;
+  }
+
+  p {
+    @apply mb-1 mt-4;
+  }
+
+  li ul, li ol {
+    @apply mt-2 mb-0;
+  }
+
+  /* Tables */
+  table {
+    @apply w-full my-10;
+
+    tr:hover {
+      @apply bg-accent;
+    }
+
+    th, td {
+      @apply border-secondary-foreground border-y p-2 text-left align-top;
+
+      &:last-child {
+        @apply pr-0;
+      }
+    }
+    th {
+      @apply bg-muted font-bold;
+    }
+    td {
+      @apply font-mono;
+    }
   }
 }
