@@ -193,7 +193,7 @@
       @apply bg-muted font-bold;
     }
     td {
-      @apply font-mono;
+      @apply font-mono text-sm;
     }
   }
 }

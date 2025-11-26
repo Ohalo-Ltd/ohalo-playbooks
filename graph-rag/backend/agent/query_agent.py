@@ -59,20 +59,6 @@ DEFAULT_SYSTEM_PROMPT = """You are an intelligent assistant that answers questio
 - When you search, you're finding relevant chunks within documents
 - **Always cite the DOCUMENT NAME** when answering, not chunk numbers
 
-**Available Tools:**
-1. **decompose_query**: Break down complex/ambiguous questions into multiple search queries (optional)
-   - Use this when the question is broad, complex, or covers multiple topics
-   - Helps broaden the search scope
-2. **vector_search**: Semantic search over document chunks (ALWAYS AVAILABLE)
-   - Finds chunks by semantic similarity, not keyword matching
-   - Returns chunks with their parent document names
-   - Try multiple searches with different phrasings if first search returns nothing
-   - If looking for specific terms, include context: instead of "UAV", try "UAV unmanned aircraft applications"
-3. **discover_graph**: Check for extracted entities/relationships (optional)
-4. **entity_lookup**: Find entities by name (only if graph exists)
-5. **graph_neighbors**: Explore entity relationships (only if graph exists)
-6. **graph_query**: Complex graph queries (only if graph exists)
-
 **Search Strategy:**
 - **Analyze the question**: Is it complex? Does it need decomposition?
 - **Decompose if needed**: Use `decompose_query` to get better search terms for complex questions
@@ -92,11 +78,27 @@ DEFAULT_SYSTEM_PROMPT = """You are an intelligent assistant that answers questio
 - ✅ GOOD: "The MQ-1 Gray Eagle UAV is mentioned in the document 'Army RDT&E Volume 4b'..."
 - ❌ BAD: "Chunk 236 mentions UAV..."
 
+**Citing Sources:**
+- You MUST include links to documents in your answers.
+- Citations include a link to the document internal ID and name with a format `[Document Name](#/d/{document_id})`
+- Example: "According to [Document Name](#/d/ifu8fduss8371), ..."
+- Example: "In [Document Name](#/d/abc123), it states..."
+- Include a separate "Sources" section listing all documents referenced when the response structure allows. I.e. for simple short answers, include citations inline only, but for longer answers, include a "Sources" section at the end.
+
+**Formatting Guidelines:**
+- Use markdown formatting for clarity
+- Use bullet points, numbered lists, and headings where appropriate
+- Highlight key terms in **bold**
+- Use table formatting for comparisons or structured data
+- Always assume the user is a business user trying to extract actionable insights from documents. Assume your output is either a quick explanation or a report to be shared with others. Use headings, tables, lists.
+- Never nest a single bullet point list inside another bullet point list. Instead, use headings or separate sections.
+- Prefer table comparison + paragraph explanations over long bullet point lists when comparing multiple items.
+- For headings, start at H2, not H1.
+- Requests to "compare" multiple options should always result in a table + paragraph explanations, never just a bullet point list. Front-load with the table as an overview, then follow with paragraphs.
+- Do not repeat the same information in both table and paragraph form. Use the table for overview, paragraphs for details.
+
 **Important:**
-- Semantic search finds meaning, not exact words - a chunk about "drones" won't necessarily match "UAV"
 - If search returns nothing, try broader/more contextual queries
-- Graph tools are optional - vector_search always works
-- Always mention document names in your citations
 - If multiple documents contain information, list them all"""
 
 
@@ -584,7 +586,7 @@ async def graph_query(
 # Decomposition agent for breaking down complex queries
 decomposition_agent = Agent(
     "openai:gpt-4o-mini",
-    system_prompt="""Break this user question into 3 more diverse, but related sets of keywords. The context is military, defense, procurement, military doctrine + any inferred context from user question, biased towards user's question. Each set of sentence-like keywords attempts to broaden the semantic embedding search while keeping it on topic. Just output the list as a simple JSON array: ["equipment procurement for FY26", "military equipment bidding fiscal year 2026", "..."]""",
+    system_prompt="""Break this user question into more diverse, but related sets of keywords. The context is military, defense, procurement, military doctrine + any inferred context from user question, biased towards user's question. Each set of sentence-like keywords attempts to broaden the semantic embedding search while keeping it on topic. Just output the list as a simple JSON array: ["equipment procurement for FY26", "military equipment bidding fiscal year 2026", "..."]""",
 )
 
 
@@ -694,7 +696,7 @@ async def query(
     agent = query_agent
     if system_prompt:
         agent = Agent(
-            "openai:gpt-4o-mini",
+            "openai:gpt-5-mini",
             deps_type=AgentDependencies,
             system_prompt=system_prompt,
         )
@@ -733,7 +735,7 @@ async def query_with_steps(
         Agent step events (tool calls, results, final answer)
     """
     import asyncio
-    
+
     # Queue for streaming steps
     queue: asyncio.Queue[AgentStep | None] = asyncio.Queue()
 
@@ -754,7 +756,7 @@ async def query_with_steps(
     agent = query_agent
     if system_prompt:
         agent = Agent(
-            "openai:gpt-4o-mini",
+            "openai:gpt-5-mini",
             deps_type=AgentDependencies,
             system_prompt=system_prompt,
         )
@@ -779,10 +781,10 @@ async def query_with_steps(
             async with agent.run_stream(question, deps=deps, message_history=history) as result:
                 async for chunk in result.stream():
                     await queue.put(AgentStep(type="answer_chunk", content=chunk))
-                
+
                 # We can also get the full result data if needed, but chunks are enough for streaming
-                # await queue.put(AgentStep(type="answer", content=result.data)) 
-                
+                # await queue.put(AgentStep(type="answer", content=result.data))
+
         except Exception as e:
             await queue.put(AgentStep(type="error", message=str(e)))
         finally:
