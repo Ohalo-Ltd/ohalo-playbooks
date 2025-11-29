@@ -56,6 +56,7 @@ class DataXRayConfig:
     verify_ssl: bool = True
     ca_bundle_path: Optional[str] = None
     api_prefix: str = "/api"
+    debug: bool = False
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,7 @@ def load_config(env_file: Optional[str] = ".env") -> JobConfig:
         verify_ssl=_env_bool("DXR_VERIFY_SSL", default=True),
         ca_bundle_path=os.environ.get("DXR_CA_BUNDLE_PATH"),
         api_prefix=_normalize_api_prefix(os.environ.get("DXR_API_PREFIX", "/api")),
+        debug=_env_bool("DXR_DEBUG", default=False),
     )
     drop_table = _env_bool("DXR_DROP_METADATA_TABLE", default=False)
     return JobConfig(

@@ -73,7 +73,8 @@ class DataXRayClient:
     def get_job(self, job_id: str) -> dict:
         """Fetch the status of an On-Demand Classifier job."""
         response = self._session.get(
-            self._build_url(f"on-demand-classifiers/{self._config.datasource_id}/jobs/{job_id}")
+            self._build_url(f"on-demand-classifiers/{self._config.datasource_id}/jobs/{job_id}"),
+            timeout=30,
         )
         _raise_for_status(response)
         return response.json()
@@ -83,6 +84,8 @@ class DataXRayClient:
         while True:
             job = self.get_job(job_id)
             state = job.get("state")
+            if self._config.debug:
+                print(f"Job {job_id} state: {state}")
             if state in {"FINISHED", "FAILED"}:
                 return job
             time.sleep(max(poll_interval_seconds, 1))
