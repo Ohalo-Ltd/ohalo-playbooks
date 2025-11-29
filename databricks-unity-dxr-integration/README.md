@@ -39,6 +39,7 @@ Inject the following environment variables into the Databricks job task:
 | `DXR_VERIFY_SSL` | Set to `false` to allow self-signed certificates in dev/test (default `true`). |
 | `DXR_CA_BUNDLE_PATH` | Optional absolute path to a custom CA bundle for DXR TLS verification. |
 | `DXR_API_PREFIX` | Override API prefix (default `/api`). Set to empty when targeting deployments that expose endpoints at the root. |
+| `DXR_DEBUG` | Set to `true` to enable verbose debug logging (default `false`). |
 | `DXR_DROP_METADATA_TABLE` | Set to `true` to drop and recreate the metadata table on each run (useful when updating the schema). Defaults to `false`. |
 | `DXR_SECRET_SCOPE` / `DXR_SECRET_KEY` | Databricks secret scope + key that store the DXR API token. |
 | `METADATA_CATALOG`, `METADATA_SCHEMA`, `METADATA_TABLE` | Target Unity Catalog location for the managed metadata table. When omitted, catalog/schema default to the volume’s catalog/schema and the table name defaults to `<VOLUME_NAME>_metadata`. |
