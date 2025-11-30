@@ -54,8 +54,8 @@ class UnityDXRJob:
                 print(f"Polling job {job.job_id}...")
                 result = self._dxr.wait_for_completion(job.job_id, self._config.dxr.poll_interval_seconds)
                 if result.get("state") != "FINISHED":
-                    print(f"Job {job.job_id} ended in state {result.get('state')}, skipping metadata collection.")
-                    continue
+                    print(f"Job {job.job_id} ended in state {result.get('state')}, attempting metadata collection anyway.")
+
 
                 scan_id = result.get("datasourceScanId")
                 if scan_id is None:
