@@ -27,22 +27,35 @@ flowchart LR
 
 Inject the following environment variables into the Databricks job task:
 
+### Required Configuration
+
 | Variable | Description |
 | --- | --- |
-| `VOLUME_CATALOG`, `VOLUME_SCHEMA`, `VOLUME_NAME` | Unity Catalog volume to scan; optional `VOLUME_PREFIX` scopes to a subdirectory. |
-| `VOLUME_BASE_PATH` | Optional override for the base filesystem path (defaults to `/Volumes`). Helpful for local tests. |
+| `VOLUME_CATALOG` | Catalog containing the volume to scan. |
+| `VOLUME_SCHEMA` | Schema containing the volume to scan. |
+| `VOLUME_NAME` | Name of the volume to scan. |
 | `DXR_BASE_URL` | Data X-Ray API host (e.g. `https://api.ohalo.co`). |
 | `DXR_DATASOURCE_ID` | Datasource ID for the On-Demand Classifier. |
-| `DXR_POLL_INTERVAL_SECONDS` | Poll frequency in seconds (default `10`). |
-| `DXR_MAX_BYTES_PER_JOB` | Byte budget per DXR submission (default `30MB`). |
-| `DXR_MAX_FILES_PER_JOB` | Cap files per DXR submission (default `25`). Set to `1` if your DXR deployment only supports single-file uploads. |
-| `DXR_VERIFY_SSL` | Set to `false` to allow self-signed certificates in dev/test (default `true`). |
-| `DXR_CA_BUNDLE_PATH` | Optional absolute path to a custom CA bundle for DXR TLS verification. |
-| `DXR_API_PREFIX` | Override API prefix (default `/api`). Set to empty when targeting deployments that expose endpoints at the root. |
-| `DXR_DEBUG` | Set to `true` to enable verbose debug logging (default `false`). |
-| `DXR_DROP_METADATA_TABLE` | Set to `true` to drop and recreate the metadata table on each run (useful when updating the schema). Defaults to `false`. |
-| `DXR_SECRET_SCOPE` / `DXR_SECRET_KEY` | Databricks secret scope + key that store the DXR API token. |
-| `METADATA_CATALOG`, `METADATA_SCHEMA`, `METADATA_TABLE` | Target Unity Catalog location for the managed metadata table. When omitted, catalog/schema default to the volume’s catalog/schema and the table name defaults to `<VOLUME_NAME>_metadata`. |
+| `DXR_SECRET_SCOPE` | Databricks secret scope storing the DXR API token. |
+| `DXR_SECRET_KEY` | Key within the secret scope containing the DXR API token. |
+
+### Optional Configuration
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `VOLUME_PREFIX` | `None` | Subdirectory within the volume to scan. |
+| `METADATA_CATALOG` | `VOLUME_CATALOG` | Target catalog for the metadata table. |
+| `METADATA_SCHEMA` | `VOLUME_SCHEMA` | Target schema for the metadata table. |
+| `METADATA_TABLE` | `<VOLUME_NAME>_metadata` | Target table name for metadata storage. |
+| `DXR_POLL_INTERVAL_SECONDS` | `10` | Poll frequency in seconds. |
+| `DXR_MAX_BYTES_PER_JOB` | `30MB` | Byte budget per DXR submission. |
+| `DXR_MAX_FILES_PER_JOB` | `25` | Max files per DXR submission. |
+| `DXR_VERIFY_SSL` | `true` | Set to `false` to allow self-signed certs. |
+| `DXR_CA_BUNDLE_PATH` | `None` | Path to custom CA bundle. |
+| `DXR_API_PREFIX` | `/api` | API prefix override. |
+| `DXR_DEBUG` | `false` | Enable verbose debug logging. |
+| `DXR_DROP_METADATA_TABLE` | `false` | Drop and recreate metadata table on run. |
+| `VOLUME_BASE_PATH` | `/Volumes` | Base filesystem path override. |
 
 The script automatically creates the metadata table if it does not exist:
 

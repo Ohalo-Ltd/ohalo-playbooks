@@ -79,9 +79,13 @@ class DataXRayClient:
         _raise_for_status(response)
         return response.json()
 
-    def wait_for_completion(self, job_id: str, poll_interval_seconds: int) -> dict:
+    def wait_for_completion(self, job_id: str, poll_interval_seconds: int, timeout_seconds: int = 3600) -> dict:
         """Poll until the job reaches a terminal state."""
+        start_time = time.time()
         while True:
+            if time.time() - start_time > timeout_seconds:
+                 raise TimeoutError(f"Job {job_id} timed out after {timeout_seconds} seconds.")
+
             job = self.get_job(job_id)
             state = job.get("state")
             if self._config.debug:
@@ -98,34 +102,49 @@ class DataXRayClient:
     )
     def search_by_scan_id(self, scan_id: int, page_size: int = 100) -> List[Dict]:
         """Fetch files that belong to the supplied datasource scan id."""
-        payload = {
-            "mode": "DXR_JSON_QUERY",
-            "datasourceIds": [],
-            "pageNumber": 0,
-            "pageSize": page_size,
-            "filter": {
-                "query_items": [
-                    {
-                        "parameter": "dxr#datasource_scan_id",
-                        "value": scan_id,
-                        "type": "number",
-                        "match_strategy": "exact",
-                        "operator": "AND",
-                        "group_id": 0,
-                        "group_order": 0,
-                    }
-                ]
-            },
-            "sort": [{"property": "_score", "order": "DESCENDING"}],
-        }
-        response = self._session.post(
-            self._build_url("indexed-files/search"),
-            json=payload,
-            headers={"Content-Type": "application/json"},
-            timeout=60,
-        )
-        _raise_for_status(response)
-        return response.json().get("hits", {}).get("hits", [])
+        all_hits = []
+        page = 0
+        while True:
+            payload = {
+                "mode": "DXR_JSON_QUERY",
+                "datasourceIds": [],
+                "pageNumber": page,
+                "pageSize": page_size,
+                "filter": {
+                    "query_items": [
+                        {
+                            "parameter": "dxr#datasource_scan_id",
+                            "value": scan_id,
+                            "type": "number",
+                            "match_strategy": "exact",
+                            "operator": "AND",
+                            "group_id": 0,
+                            "group_order": 0,
+                        }
+                    ]
+                },
+                "sort": [{"property": "_score", "order": "DESCENDING"}],
+            }
+            response = self._session.post(
+                self._build_url("indexed-files/search"),
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=60,
+            )
+            _raise_for_status(response)
+            hits = response.json().get("hits", {}).get("hits", [])
+            if not hits:
+                break
+            all_hits.extend(hits)
+            page += 1
+            
+            # Safety break to prevent infinite loops if something goes wrong with pagination
+            if page > 10000: 
+                 if self._config.debug:
+                     print(f"Reached safety limit of 10000 pages for scan_id {scan_id}")
+                 break
+
+        return all_hits
 
     def _build_url(self, path: str) -> str:
         base = self._config.base_url.rstrip("/")
@@ -147,11 +166,4 @@ def _raise_for_status(response: Response) -> None:
             snippet = body if len(body) < 512 else f"{body[:512]}..."
             message = f"{message}; response body: {snippet}"
         raise DataXRayError(message) from exc
-    def _build_url(self, path: str) -> str:
-        base = self._config.base_url.rstrip("/")
-        prefix = self._config.api_prefix
-        segments = [base]
-        if prefix:
-            segments.append(prefix.lstrip("/"))
-        segments.append(path.lstrip("/"))
-        return "/".join(segment for segment in segments if segment)
+
