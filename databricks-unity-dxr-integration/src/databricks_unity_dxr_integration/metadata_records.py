@@ -158,11 +158,8 @@ def build_metadata_records(
     return records
 
 
-def _first_value(candidates: List[Optional[str]]) -> str:
-    for value in candidates:
-        if value:
-            return str(value)
-    return ""
+def _first_value(candidates: list[str | None]) -> str:
+    return next((v for v in candidates if v), "")
 
 
 def _match_by_basename(basename: str, files: Iterable[VolumeFile]) -> Optional[VolumeFile]:
