@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from contextlib import ExitStack
 from typing import Dict, Iterable, List
@@ -20,6 +21,8 @@ from .metadata_records import MetadataRecord, build_metadata_records
 from .metadata_store import MetadataStore
 from .volume import UnityVolumeScanner, VolumeFile
 
+logger = logging.getLogger(__name__)
+
 
 class UnityDXRJob:
     """Coordinates reading files from a Unity Catalog volume and persisting DXR metadata."""
@@ -36,7 +39,7 @@ class UnityDXRJob:
     def run(self) -> None:
         files = self._scanner.list_files()
         if not files:
-            print("No files discovered in the configured volume.")
+            logger.info("No files discovered in the configured volume.")
             return
 
         batches = plan_batches(
@@ -51,15 +54,15 @@ class UnityDXRJob:
 
         for job, batch in submissions:
             try:
-                print(f"Polling job {job.job_id}...")
+                logger.info(f"Polling job {job.job_id}...")
                 result = self._dxr.wait_for_completion(job.job_id, self._config.dxr.poll_interval_seconds)
                 if result.get("state") != "FINISHED":
-                    print(f"Job {job.job_id} ended in state {result.get('state')}, attempting metadata collection anyway.")
+                    logger.warning(f"Job {job.job_id} ended in state {result.get('state')}, attempting metadata collection anyway.")
 
 
                 scan_id = result.get("datasourceScanId")
                 if scan_id is None:
-                    print(f"Job {job.job_id} did not include a datasource scan id.")
+                    logger.warning(f"Job {job.job_id} did not include a datasource scan id.")
                     continue
 
                 metadata = self._dxr.search_by_scan_id(scan_id)
@@ -72,12 +75,11 @@ class UnityDXRJob:
                     known_files=files_by_name,
                 )
                 self._metadata_store.upsert_records(records)
-                print(f"Wrote {len(records)} metadata rows for job {job.job_id}.")
+                logger.info(f"Wrote {len(records)} metadata rows for job {job.job_id}.")
             except Exception as e:
-                print(f"Error processing job {job.job_id}: {e}")
+                logger.error(f"Error processing job {job.job_id}: {e}")
                 if self._config.dxr.debug:
-                    import traceback
-                    traceback.print_exc()
+                    logger.exception(f"Full traceback for job {job.job_id}:")
                 continue
 
     def _submit_batch(self, batch: Iterable[VolumeFile]) -> SubmittedJob:
@@ -88,7 +90,7 @@ class UnityDXRJob:
                 handle = stack.enter_context(open(file.absolute_path, "rb"))
                 uploads.append(FileUpload(filename=file.upload_name, file_handle=handle))
             job = self._dxr.submit_job(uploads)
-            print(f"Submitted {len(uploads)} files to job {job.job_id}.")
+            logger.info(f"Submitted {len(uploads)} files to job {job.job_id}.")
             return job
         finally:
             stack.close()

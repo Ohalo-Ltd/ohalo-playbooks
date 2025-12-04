@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import BinaryIO, Dict, Iterable, List, Tuple
@@ -11,6 +12,8 @@ import urllib3
 from urllib3.exceptions import InsecureRequestWarning
 
 from .config import DataXRayConfig
+
+logger = logging.getLogger(__name__)
 
 
 class DataXRayError(RuntimeError):
@@ -48,7 +51,7 @@ class DataXRayClient:
         else:
             verify_setting = config.verify_ssl
         self._session.verify = verify_setting
-        if verify_setting is False:
+        if not config.verify_ssl:
             urllib3.disable_warnings(InsecureRequestWarning)
 
     def submit_job(self, uploads: Iterable[FileUpload]) -> SubmittedJob:
@@ -84,12 +87,12 @@ class DataXRayClient:
         start_time = time.time()
         while True:
             if time.time() - start_time > timeout_seconds:
-                 raise TimeoutError(f"Job {job_id} timed out after {timeout_seconds} seconds.")
+                raise TimeoutError(f"Job {job_id} timed out after {timeout_seconds} seconds.")
 
             job = self.get_job(job_id)
             state = job.get("state")
             if self._config.debug:
-                print(f"Job {job_id} state: {state}")
+                logger.debug(f"Job {job_id} state: {state}")
             if state in {"FINISHED", "FAILED"}:
                 return job
             time.sleep(max(poll_interval_seconds, 1))
@@ -140,9 +143,9 @@ class DataXRayClient:
             
             # Safety break to prevent infinite loops if something goes wrong with pagination
             if page > 10000: 
-                 if self._config.debug:
-                     print(f"Reached safety limit of 10000 pages for scan_id {scan_id}")
-                 break
+                if self._config.debug:
+                    logger.debug(f"Reached safety limit of 10000 pages for scan_id {scan_id}")
+                break
 
         return all_hits
 

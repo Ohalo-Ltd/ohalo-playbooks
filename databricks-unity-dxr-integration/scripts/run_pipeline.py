@@ -1,3 +1,8 @@
+"""Entry point script for running the Databricks Unity DXR integration pipeline.
+
+This script handles path setup and parameter parsing before executing the main job.
+It's designed to work in both local and Databricks notebook execution contexts.
+"""
 import inspect
 import os
 import sys
@@ -38,6 +43,7 @@ def _discover_script_path() -> Path:
 
 
 def _ensure_package_importable() -> None:
+    """Add the package root to sys.path if not already importable."""
     script_path = _discover_script_path()
     for candidate in _possible_package_roots(script_path):
         package_dir = candidate / PACKAGE_NAME
@@ -48,9 +54,6 @@ def _ensure_package_importable() -> None:
         f"Unable to locate package '{PACKAGE_NAME}'. Expected to find it relative to {script_path}. "
         "Ensure the repo is synced to Databricks with the 'src' directory present."
     )
-
-
-_ensure_package_importable()
 
 
 def _parse_job_parameters(argv: list[str]) -> Dict[str, str]:
@@ -96,10 +99,16 @@ def _apply_job_parameters() -> None:
     sys.argv = sys.argv[:1]
 
 
-_apply_job_parameters()
-
-from databricks_unity_dxr_integration.job import run_job  # noqa: E402
+def main() -> None:
+    """Main entry point: setup environment and run the job."""
+    _ensure_package_importable()
+    _apply_job_parameters()
+    
+    # Import after path setup is complete
+    from databricks_unity_dxr_integration.job import run_job
+    
+    run_job()
 
 
 if __name__ == "__main__":
-    run_job()
+    main()

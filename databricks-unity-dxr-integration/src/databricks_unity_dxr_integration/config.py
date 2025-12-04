@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 try:  # pragma: no cover - optional for Databricks jobs
@@ -21,8 +22,6 @@ class VolumeConfig:
 
     @property
     def root_path(self) -> str:
-        from pathlib import Path
-
         root = Path(self.base_path) / self.catalog / self.schema / self.volume
         if self.prefix:
             root = root / self.prefix.strip("/")
