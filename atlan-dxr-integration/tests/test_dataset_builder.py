@@ -39,6 +39,11 @@ def test_dataset_builder_aggregates_files_and_samples():
     record = records[0]
 
     assert record.file_count == 1
+    assert len(record.files) == 1
+    dataset_file = record.files[0]
+    assert dataset_file.identifier == "file-1"
+    assert dataset_file.path == "/clinical/patient_data.csv"
+    assert dataset_file.labels == ["Heart Failure"]
     assert record.source_url == "https://atlan.dataxray.io/resource-search/123"
     assert record.description is not None
     assert "1 file" in record.description
@@ -64,6 +69,8 @@ def test_dataset_builder_handles_multiple_labels():
     builder.consume_file(file_payload)
     records = builder.build()
     record = records[0]
-    assert record.file_count == 2
+    assert record.file_count == 1
+    assert len(record.files) == 1
+    assert record.files[0].labels == ["Cardiology"]
     assert len(record.sample_files) == 1
     assert isinstance(record.sample_files[0], SampleFile)

@@ -1,9 +1,12 @@
-"""Utilities for writing DXR-derived tables into Atlan."""
+"""Utilities for writing DXR-derived tables and files into Atlan."""
 
 from __future__ import annotations
 
+import hashlib
 import logging
-from typing import Iterable, List, Optional
+import os
+import re
+from typing import Iterable, List, Optional, Sequence, Set
 
 from pyatlan.client.atlan import AtlanClient
 from pyatlan.errors import (
@@ -11,14 +14,18 @@ from pyatlan.errors import (
     NotFoundError,
     PermissionError as AtlanPermissionError,
 )
+from pyatlan.model.assets.core.asset import Asset
 from pyatlan.model.assets.connection import Connection
 from pyatlan.model.assets.core.database import Database
+from pyatlan.model.assets.core.file import File
 from pyatlan.model.assets.core.schema import Schema
 from pyatlan.model.assets.core.table import Table
-from pyatlan.model.enums import AtlanConnectorType
+from pyatlan.model.core import AtlanTag, AtlanTagName
+from pyatlan.model.enums import AtlanConnectorType, AtlanTagColor, FileType
+from pyatlan.model.typedef import AtlanTagDef
 
 from .config import Config
-from .dataset_builder import DatasetRecord
+from .dataset_builder import DatasetFile, DatasetRecord
 
 LOGGER = logging.getLogger(__name__)
 
@@ -43,6 +50,7 @@ class AtlanUploader:
         self._schema_qualified_name = self._ensure_schema_exists(
             self._database_qualified_name, connection_qn
         )
+        self._ensured_tags: Set[str] = set()
 
     @property
     def client(self) -> AtlanClient:
@@ -51,18 +59,31 @@ class AtlanUploader:
         return self._client
 
     def upsert(self, records: Iterable[DatasetRecord]) -> None:
-        batch: List[Table] = []
+        batch: List[Asset] = []
+        batch_limit = max(self._config.atlan_batch_size, 1)
         for record in records:
             table = self._build_table(record)
             batch.append(table)
-            if len(batch) >= self._config.atlan_batch_size:
+            if len(batch) >= batch_limit:
                 self._save_batch(batch)
                 batch = []
+            for file_asset in self._build_file_assets(record):
+                batch.append(file_asset)
+                if len(batch) >= batch_limit:
+                    self._save_batch(batch)
+                    batch = []
         if batch:
             self._save_batch(batch)
 
     def table_qualified_name(self, record: DatasetRecord) -> str:
         return f"{self._schema_qualified_name}/{self._table_name(record)}"
+
+    def file_qualified_name(
+        self, record: DatasetRecord, dataset_file: DatasetFile
+    ) -> str:
+        """Qualified name for a dataset file represented as an Atlan file asset."""
+
+        return f"{self._connection_qualified_name}/{self._file_name(record, dataset_file)}"
 
     def _build_table(self, record: DatasetRecord) -> Table:
         table_name = self._table_name(record)
@@ -84,32 +105,46 @@ class AtlanUploader:
         attrs.connector_name = self._connector_type.value
         attrs.connection_name = self._config.atlan_connection_name
 
+        table_tag_names = self._table_tag_names(record)
+        tags = self._create_tags(table_tag_names)
+        if tags:
+            table.atlan_tags = tags
+
         return table
 
-    def _save_batch(self, batch: List[Table]) -> None:
+    def _save_batch(self, batch: Sequence[Asset]) -> None:
         try:
             response = self._client.asset.save(batch)
-            created = response.assets_created(Table)
-            updated = response.assets_updated(Table)
-            partial = response.assets_partially_updated(Table)
-            mutated_count = len(created) + len(updated) + len(partial)
+            mutated_tables = (
+                len(response.assets_created(Table))
+                + len(response.assets_updated(Table))
+                + len(response.assets_partially_updated(Table))
+            )
+            mutated_objects = (
+                len(response.assets_created(File))
+                + len(response.assets_updated(File))
+                + len(response.assets_partially_updated(File))
+            )
+            mutated_count = mutated_tables + mutated_objects
             if mutated_count == 0:
-                if self._tables_exist(batch):
+                if self._assets_exist(batch):
                     LOGGER.info(
-                        "No DXR table changes detected in Atlan (request id: %s); assets already up to date.",
+                        "No DXR asset changes detected in Atlan (request id: %s); assets already up to date.",
                         getattr(response, "request_id", "unknown"),
                     )
                     return
                 message = (
                     "Atlan acknowledged the upsert request but did not mutate any "
-                    "tables. Verify the connection, connector name, and service "
+                    "assets. Verify the connection, connector name, and service "
                     "permissions."
                 )
                 LOGGER.error(message)
                 raise AtlanUploadError(message)
             LOGGER.info(
-                "Upserted %d DXR table(s) into Atlan (request id: %s)",
+                "Upserted %d DXR asset(s) into Atlan (tables=%d, objects=%d, request id: %s)",
                 mutated_count,
+                mutated_tables,
+                mutated_objects,
                 getattr(response, "request_id", "unknown"),
             )
         except AtlanPermissionError as exc:
@@ -125,20 +160,168 @@ class AtlanUploader:
             LOGGER.error("%s (original error: %s)", message, exc)
             raise AtlanUploadError(message) from exc
 
-    def _tables_exist(self, batch: Iterable[Table]) -> bool:
-        """Confirm each table in the batch exists in Atlan."""
+    def _assets_exist(self, batch: Iterable[Asset]) -> bool:
+        """Confirm each asset in the batch exists in Atlan."""
 
-        for table in batch:
-            qualified_name = table.attributes.qualified_name
+        for asset in batch:
+            qualified_name = (
+                asset.attributes.qualified_name if asset.attributes else None
+            )
+            if not qualified_name:
+                return False
             try:
                 self._client.asset.get_by_qualified_name(
                     qualified_name,
-                    Table,
+                    type(asset),
                     ignore_relationships=True,
                 )
             except AtlanError:
                 return False
         return True
+
+    def _build_file_assets(self, record: DatasetRecord) -> List[File]:
+        assets: List[File] = []
+        for dataset_file in record.files:
+            assets.append(self._create_file_asset(record, dataset_file))
+        return assets
+
+    def _create_file_asset(self, record: DatasetRecord, dataset_file: DatasetFile) -> File:
+        name = self._file_name(record, dataset_file)
+        file_type = self._resolve_file_type(dataset_file)
+        file_asset = File.creator(
+            name=name,
+            connection_qualified_name=self._connection_qualified_name,
+            file_type=file_type,
+        )
+
+        attrs = file_asset.attributes
+        attrs.qualified_name = self.file_qualified_name(record, dataset_file)
+        attrs.display_name = dataset_file.name or dataset_file.identifier or name
+        attrs.description = dataset_file.identifier
+        attrs.user_description = self._file_description(dataset_file)
+        attrs.source_url = dataset_file.link
+        attrs.file_path = dataset_file.path or dataset_file.link
+        attrs.connection_name = self._config.atlan_connection_name
+        attrs.connector_name = self._connector_type.value
+        attrs.connection_qualified_name = self._connection_qualified_name
+
+        file_tags = self._create_tags(dataset_file.labels)
+        if file_tags:
+            file_asset.atlan_tags = file_tags
+
+        return file_asset
+
+    @staticmethod
+    def _file_description(dataset_file: DatasetFile) -> Optional[str]:
+        parts: List[str] = []
+        if dataset_file.path:
+            parts.append(f"Path: {dataset_file.path}")
+        if dataset_file.identifier and dataset_file.identifier not in (
+            dataset_file.name,
+            dataset_file.path,
+        ):
+            parts.append(f"DXR identifier: {dataset_file.identifier}")
+        return "\n".join(parts) if parts else None
+
+    def _file_name(self, record: DatasetRecord, dataset_file: DatasetFile) -> str:
+        base = dataset_file.name or dataset_file.path or dataset_file.identifier or "file"
+        sanitized = self._sanitize_fragment(base) if base else "file"
+        unique_key = "|".join(
+            value
+            for value in (
+                dataset_file.identifier,
+                dataset_file.path,
+                dataset_file.name,
+                dataset_file.link,
+                record.identifier,
+            )
+            if value
+        )
+        digest = hashlib.sha1(unique_key.encode("utf-8")).hexdigest()[:8]
+        return f"{sanitized}-{digest}" if sanitized else digest
+
+    def _resolve_file_type(self, dataset_file: DatasetFile) -> FileType:
+        path = dataset_file.path or dataset_file.name
+        if path:
+            _, ext = os.path.splitext(path)
+            ext = ext.lstrip(".").lower()
+            mapping = {
+                "pdf": FileType.PDF,
+                "doc": FileType.DOC,
+                "docx": FileType.DOC,
+                "xls": FileType.XLS,
+                "xlsx": FileType.XLS,
+                "ppt": FileType.PPT,
+                "pptx": FileType.PPT,
+                "csv": FileType.CSV,
+                "txt": FileType.TXT,
+                "json": FileType.JSON,
+                "xml": FileType.XML,
+                "zip": FileType.ZIP,
+                "yxdb": FileType.YXDB,
+                "xlsm": FileType.XLSM,
+                "hyper": FileType.HYPER,
+            }
+            if ext in mapping:
+                return mapping[ext]
+        return FileType.TXT
+
+    @staticmethod
+    def _sanitize_fragment(value: str) -> str:
+        cleaned = value.strip()
+        cleaned = cleaned.replace("\\", "/")
+        cleaned = re.sub(r"[/\s]+", "_", cleaned)
+        cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", cleaned)
+        return cleaned.strip("_")
+
+    def _table_tag_names(self, record: DatasetRecord) -> List[str]:
+        names = {
+            record.name.strip() if record.name else "",
+            (record.classification_type or "").strip(),
+            (record.classification_subtype or "").strip(),
+        }
+        return [name for name in sorted(names) if name]
+
+    def _create_tags(self, tag_names: Iterable[str]) -> Optional[List[AtlanTag]]:
+        cleaned = []
+        seen = set()
+        for raw in tag_names:
+            tag_name = self._normalise_tag_name(raw)
+            if not tag_name or tag_name in seen:
+                continue
+            seen.add(tag_name)
+            self._ensure_tag_exists(tag_name)
+            cleaned.append(AtlanTag(type_name=AtlanTagName(tag_name)))
+        return cleaned or None
+
+    @staticmethod
+    def _normalise_tag_name(tag_name: str) -> str:
+        return tag_name.strip()
+
+    def _ensure_tag_exists(self, tag_name: str) -> None:
+        if tag_name in self._ensured_tags:
+            return
+
+        tag_id = self._client.atlan_tag_cache.get_id_for_name(tag_name)
+        if tag_id:
+            self._ensured_tags.add(tag_name)
+            return
+
+        typedef = AtlanTagDef.create(name=tag_name, color=AtlanTagColor.GRAY)
+        typedef.entity_types = ["Asset"]
+
+        try:
+            self._client.typedef.create(typedef)
+        except AtlanError as exc:
+            tag_id = self._client.atlan_tag_cache.get_id_for_name(tag_name)
+            if not tag_id:
+                raise AtlanUploadError(
+                    f"Failed to create Atlan tag '{tag_name}': {exc}"
+                ) from exc
+        finally:
+            tag_id = self._client.atlan_tag_cache.get_id_for_name(tag_name)
+            if tag_id:
+                self._ensured_tags.add(tag_name)
 
     def _ensure_connection_exists(self) -> tuple[AtlanConnectorType, str]:
         qualified_name = self._config.atlan_connection_qualified_name

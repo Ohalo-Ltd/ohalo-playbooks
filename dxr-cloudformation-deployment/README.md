@@ -1,7 +1,7 @@
 # DXR single-server CloudFormation wrapper
 
 This directory contains the infrastructure glue required to stand up a disposable
-Ansible control host (Rocky Linux 8, `c5.4xlarge`) and run the
+Ansible control host (RHEL 8.10, `c5.4xlarge`) and run the
 `deploy-dxr-single-server-playbook.yml` playbook that lives in
 `../dxr/ohalo-ansible`.
 
@@ -58,12 +58,12 @@ Example invocation (adjust the placeholders):
   --stack-name customer-a-dxr \
   --key-pair my-ec2-key \
   --ssh-location 203.0.113.0/24 \
-  --region us-east-1
+  --region us-east-1 \
+  --ami-id ami-0abcdef1234567890
 ```
 
-The template parameter `LatestAmiId` now accepts a direct AMI ID and defaults to
-`ami-02391db2758465a87` (Rocky Linux 8 in `us-east-2`). Override it to match the
-Region you deploy into.
+Pass the `--ami-id` flag with the RHEL 8.10 AMI that corresponds to the region
+you deploy in; this value feeds the CloudFormation `LatestAmiId` parameter.
 
 What the script does:
 1. Creates a timestamped `dxr-ansible-<timestamp>.tar.gz` from
@@ -74,7 +74,7 @@ What the script does:
    `--skip-deploy` is provided).
 
 ## Stack behaviour
-- The Rocky Linux instance installs Python 3, pip, Ansible, jq, git, tar, unzip, and the AWS CLI.
+- The RHEL 8.10 instance installs Python 3, pip, Ansible, jq, git, tar, unzip, and the AWS CLI.
 - The playbook runs directly on the EC2 host; logs are streamed into
   `/var/log/dxr-ansible.log` and also surfaced in the CloudFormation console via
   the resource signal.

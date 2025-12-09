@@ -12,6 +12,7 @@ KEY_PAIR_NAME=""
 SSH_LOCATION="0.0.0.0/0"
 AWS_REGION=""
 SKIP_DEPLOY="false"
+AMI_ID=""
 
 usage() {
   cat <<'USAGE'
@@ -22,6 +23,7 @@ Required flags:
   --inventory <path>           Inventory JSON to upload (will be patched for IPs)
   --key-pair <name>            Existing EC2 key pair name
   --stack-name <name>          CloudFormation stack name
+  --ami-id <ami>               RHEL 8.10 AMI ID for the target region
 
 Optional flags:
   --ansible-dir <path>         Override the default ../dxr/ohalo-ansible directory
@@ -63,6 +65,10 @@ while [[ $# -gt 0 ]]; do
       SSH_LOCATION="$2"
       shift 2
       ;;
+    --ami-id)
+      AMI_ID="$2"
+      shift 2
+      ;;
     --region)
       AWS_REGION="$2"
       shift 2
@@ -83,7 +89,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$ARTIFACT_BUCKET" || -z "$INVENTORY_PATH" || -z "$STACK_NAME" || -z "$KEY_PAIR_NAME" ]]; then
+if [[ -z "$ARTIFACT_BUCKET" || -z "$INVENTORY_PATH" || -z "$STACK_NAME" || -z "$KEY_PAIR_NAME" || -z "$AMI_ID" ]]; then
   echo "[ERROR] Missing required arguments" >&2
   usage
   exit 1
@@ -151,6 +157,7 @@ PARAM_OVERRIDES=(
   "AnsibleArtifactKey=${ANSIBLE_KEY}"
   "InventoryBucket=${ARTIFACT_BUCKET}"
   "InventoryKey=${INVENTORY_KEY}"
+  "LatestAmiId=${AMI_ID}"
 )
 
 "${AWS_CMD[@]}" cloudformation deploy \

@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Optional
 
 import pytest
 
 from atlan_dxr_integration import atlan_uploader
+from atlan_dxr_integration.dataset_builder import DatasetFile, DatasetRecord
+from atlan_dxr_integration.dxr_client import Classification
 from pyatlan.errors import ErrorCode, NotFoundError
 from pyatlan.model.assets.connection import Connection
 from pyatlan.model.assets.core.database import Database
+from pyatlan.model.assets.core.file import File
 from pyatlan.model.assets.core.schema import Schema
 from pyatlan.model.assets.core.table import Table
+from pyatlan.model.enums import FileType
 
 
 class _FakeMutationResponse:
@@ -31,6 +36,28 @@ class _FakeMutationResponse:
         return [asset for asset in self._partial if isinstance(asset, asset_type)]
 
 
+class _FakeTagCache:
+    def __init__(self, existing: Optional[set[str]] = None) -> None:
+        self.existing: set[str] = existing or set()
+
+    def get_id_for_name(self, name: str) -> Optional[str]:
+        return f"{name}-id" if name in self.existing else None
+
+    def refresh_cache(self) -> None:  # pragma: no cover - not needed in tests
+        return None
+
+
+class _FakeTypeDefClient:
+    def __init__(self, tag_cache: _FakeTagCache) -> None:
+        self.tag_cache = tag_cache
+        self.created: list[str] = []
+
+    def create(self, typedef):
+        self.created.append(typedef.display_name)
+        self.tag_cache.existing.add(typedef.display_name)
+        return SimpleNamespace()
+
+
 class _FailingBatchAsset:
     def __init__(self, exception: Exception) -> None:
         self._exception = exception
@@ -42,6 +69,8 @@ class _FailingBatchAsset:
 class _FailingBatchClient:
     def __init__(self, exception: Exception) -> None:
         self.asset = _FailingBatchAsset(exception)
+        self.atlan_tag_cache = _FakeTagCache()
+        self.typedef = _FakeTypeDefClient(self.atlan_tag_cache)
 
 
 class _SuccessfulBatchClient:
@@ -56,6 +85,8 @@ class _SuccessfulBatchClient:
             save=lambda batch: response,
             get_by_qualified_name=_get,
         )
+        self.atlan_tag_cache = _FakeTagCache()
+        self.typedef = _FakeTypeDefClient(self.atlan_tag_cache)
 
 
 class _FakeRoleCache:
@@ -122,7 +153,10 @@ class _FakeAssetService:
         )
         if isinstance(response, Exception):
             raise response
-        self.saved_assets.append(asset)
+        if isinstance(asset, (list, tuple)):
+            self.saved_assets.extend(asset)
+        else:
+            self.saved_assets.append(asset)
         return response
 
 
@@ -137,6 +171,8 @@ class _FakeAtlanClient:
         self.role_cache = _FakeRoleCache()
         self.user_cache = _FakeUserCache()
         self.group_cache = _FakeGroupCache()
+        self.atlan_tag_cache = _FakeTagCache()
+        self.typedef = _FakeTypeDefClient(self.atlan_tag_cache)
 
 
 class _TestConfig:
@@ -208,10 +244,23 @@ def test_save_batch_wraps_atlan_errors(monkeypatch: pytest.MonkeyPatch, exceptio
         lambda self, *__: "default/connection/dxr/labels",
     )
     monkeypatch.setattr(atlan_uploader, "AtlanClient", _fake_client_factory)
-    uploader = atlan_uploader.AtlanUploader(_build_config())
+    config = _build_config()
+    uploader = atlan_uploader.AtlanUploader(config)
+
+    table = Table.creator(
+        name="classification-1",
+        schema_qualified_name=config.schema_qualified_name,
+        schema_name=config.atlan_schema_name,
+        database_name=config.atlan_database_name,
+        database_qualified_name=config.database_qualified_name,
+        connection_qualified_name=config.atlan_connection_qualified_name,
+    )
+    table.attributes.qualified_name = (
+        f"{config.schema_qualified_name}/classification-1"
+    )
 
     with pytest.raises(atlan_uploader.AtlanUploadError) as exc_info:
-        uploader._save_batch([object()])
+        uploader._save_batch([table])
 
     message = str(exc_info.value)
     assert "Atlan" in message
@@ -299,7 +348,7 @@ def test_ensure_connection_exists_raises_on_permission_error(monkeypatch: pytest
 
 
 def test_save_batch_no_mutation_succeeds_when_assets_exist(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Uploader treats zero-mutation responses as success when tables already exist."""
+    """Uploader treats zero-mutation responses as success when assets already exist."""
 
     config = _build_config()
     qualified_name = f"{config.schema_qualified_name}/classification-1"
@@ -396,4 +445,96 @@ def test_save_batch_no_mutation_raises_when_assets_missing(monkeypatch: pytest.M
     with pytest.raises(atlan_uploader.AtlanUploadError) as exc_info:
         uploader._save_batch([table])
 
-    assert "did not mutate any tables" in str(exc_info.value)
+    assert "did not mutate any assets" in str(exc_info.value)
+
+
+def test_upsert_creates_file_assets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dataset files result in file assets alongside tables."""
+
+    config = _build_config()
+    classification = Classification(
+        identifier="classification-1",
+        name="Sensitive Data",
+        type="ANNOTATOR",
+        subtype="REGEX",
+        description="Contains sensitive DXR-labelled content",
+        link=None,
+        search_link=None,
+    )
+    record = DatasetRecord(classification=classification, file_count=0)
+    dataset_file = DatasetFile(
+        identifier="file-1",
+        name="patient-data.csv",
+        path="s3://bucket/patient-data.csv",
+        link="https://dxr.example.com/files/file-1",
+        labels=["Sensitive Data"],
+    )
+    record.add_file(dataset_file)
+
+    captured_batches: list[list[object]] = []
+
+    class _CapturingAssetClient:
+        def save(self, assets):
+            batch = list(assets)
+            captured_batches.append(batch)
+            return _FakeMutationResponse(created=batch)
+
+        def get_by_qualified_name(self, qualified_name, asset_type, **kwargs):
+            return SimpleNamespace(attributes=SimpleNamespace(qualified_name=qualified_name))
+
+    class _CapturingClient:
+        def __init__(self):
+            self.asset = _CapturingAssetClient()
+            self.atlan_tag_cache = _FakeTagCache()
+            self.typedef = _FakeTypeDefClient(self.atlan_tag_cache)
+
+    monkeypatch.setattr(
+        atlan_uploader.AtlanUploader,
+        "_ensure_connection_exists",
+        lambda self: (
+            atlan_uploader.AtlanConnectorType.CUSTOM,
+            config.atlan_connection_qualified_name,
+        ),
+    )
+    monkeypatch.setattr(
+        atlan_uploader.AtlanUploader,
+        "_ensure_database_exists",
+        lambda self, _: config.database_qualified_name,
+    )
+    monkeypatch.setattr(
+        atlan_uploader.AtlanUploader,
+        "_ensure_schema_exists",
+        lambda self, *__: config.schema_qualified_name,
+    )
+    monkeypatch.setattr(
+        atlan_uploader,
+        "AtlanClient",
+        lambda *args, **kwargs: _CapturingClient(),
+    )
+
+    uploader = atlan_uploader.AtlanUploader(config)
+    uploader.upsert([record])
+
+    assert captured_batches, "Expected at least one batch to be persisted"
+    batch = captured_batches[0]
+    tables = [asset for asset in batch if isinstance(asset, Table)]
+    files = [asset for asset in batch if isinstance(asset, File)]
+    assert len(tables) == 1
+    assert len(files) == 1
+
+    table = tables[0]
+    file_asset = files[0]
+
+    expected_table_qn = f"{config.schema_qualified_name}/classification-1"
+    assert table.attributes.qualified_name == expected_table_qn
+    table_tags = {str(tag.type_name) for tag in (table.atlan_tags or [])}
+    assert table_tags == {"Sensitive Data", "ANNOTATOR", "REGEX"}
+
+    expected_file_qn = uploader.file_qualified_name(record, dataset_file)
+    assert file_asset.attributes.qualified_name == expected_file_qn
+    assert file_asset.attributes.display_name == dataset_file.name
+    assert file_asset.attributes.connection_name == config.atlan_connection_name
+    assert file_asset.attributes.connector_name == "custom"
+    assert file_asset.attributes.file_type == FileType.CSV
+    file_tags = [str(tag.type_name) for tag in (file_asset.atlan_tags or [])]
+    assert file_tags == ["Sensitive Data"]

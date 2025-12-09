@@ -11,8 +11,9 @@ through Atlan's APIs.
 1. Authenticate against DXR using a personal access token (PAT).
 2. Fetch all classification labels (DXR "labels") and stream file metadata.
 3. Aggregate the files under each label to produce table summaries.
-4. Upsert the resulting tables into Atlan using the configured connection (a database and
-   schema are auto-created when missing).
+4. Upsert the resulting tables and individual object store assets for every referenced file
+   into Atlan using the configured connection (a database and schema are auto-created when
+   missing).
 
 Each table created in Atlan uses the following conventions:
 
@@ -76,6 +77,10 @@ connection/database/schema structure.
 - `DXR` interactions rely on the documented `/api/vbeta/classifications` and
   `/api/vbeta/files` endpoints.
 - Metadata is written to Atlan via `pyatlan`'s synchronous client (`AtlanClient.asset.save`).
+- Each DXR file becomes a dedicated `File` asset under the configured connection with the
+  same DXR labels applied as Atlan tags to make them discoverable alongside the tables.
+- DXR labels are mapped to Atlan tags on both the per-label tables and the individual
+  object assets so downstream consumers can filter by familiar DXR classifications.
 - The module is idempotent: rerunning the service overwrites tables with the same
   qualified name.
 - On startup the uploader verifies the referenced connection, database, and schema and

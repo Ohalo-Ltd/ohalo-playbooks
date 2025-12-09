@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
-  Deploy a single DXR node by creating a Rocky Linux 8 c5.4xlarge instance,
+  Deploy a single DXR node by creating a RHEL 8.10 c5.4xlarge instance,
   installing dependencies, and running the provided Ansible playbook.
 
 Metadata:
@@ -89,8 +89,7 @@ Parameters:
     Description: Object key (path) for the inventory JSON file.
   LatestAmiId:
     Type: AWS::EC2::Image::Id
-    Default: ami-02391db2758465a87
-    Description: Rocky Linux 8 AMI to use (default value is for us-east-2).
+    Description: RHEL 8.10 AMI ID to use (pass a region-specific image).
 
 Resources:
   DxrVpc:

@@ -7,6 +7,7 @@ import logging
 from typing import Iterable, List
 
 from pyatlan.errors import AtlanError
+from pyatlan.model.assets.core.file import File
 from pyatlan.model.assets.core.table import Table
 
 from .config import Config
@@ -89,28 +90,47 @@ def run(*, sample_labels: int = 1, max_files: int = 500) -> None:
 
 
 def _verify_assets(records: Iterable[DatasetRecord], uploader: AtlanUploader) -> None:
-    """Fetch each table from Atlan to confirm it exists after upsert."""
+    """Fetch each asset from Atlan to confirm it exists after upsert."""
 
     for record in records:
-        qualified_name = uploader.table_qualified_name(record)
+        table_qn = uploader.table_qualified_name(record)
         try:
             table: Table = uploader.client.asset.get_by_qualified_name(
-                qualified_name,
+                table_qn,
                 Table,
                 ignore_relationships=True,
             )
         except AtlanError as exc:
             raise SystemExit(
-                f"Failed to verify table '{qualified_name}' in Atlan: {exc}"
+                f"Failed to verify table '{table_qn}' in Atlan: {exc}"
             ) from exc
 
         attrs = table.attributes
         LOGGER.info(
             "Verified table '%s' (display_name='%s', files=%d)",
-            qualified_name,
+            table_qn,
             getattr(attrs, "name", record.name),
             record.file_count,
         )
+
+        for dataset_file in record.files:
+            object_qn = uploader.file_qualified_name(record, dataset_file)
+            try:
+                uploader.client.asset.get_by_qualified_name(
+                    object_qn,
+                    File,
+                    ignore_relationships=True,
+                )
+            except AtlanError as exc:
+                raise SystemExit(
+                    f"Failed to verify object store asset '{object_qn}' in Atlan: {exc}"
+                ) from exc
+
+            LOGGER.info(
+                "Verified object store asset '%s' for file '%s'.",
+                object_qn,
+                dataset_file.name or dataset_file.path or dataset_file.identifier,
+            )
 
 
 def main(argv: list[str] | None = None) -> None:  # pragma: no cover - CLI glue

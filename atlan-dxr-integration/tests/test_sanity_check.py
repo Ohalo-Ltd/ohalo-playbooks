@@ -9,6 +9,8 @@ import pytest
 from atlan_dxr_integration import sanity_check
 from atlan_dxr_integration.config import Config
 from atlan_dxr_integration.dxr_client import Classification
+from pyatlan.model.assets.core.file import File
+from pyatlan.model.assets.core.table import Table
 
 
 class _FakeDXR:
@@ -97,8 +99,12 @@ def test_sanity_check_runs_with_sample_data(monkeypatch: pytest.MonkeyPatch) -> 
         def table_qualified_name(self, record):
             return f"{self._schema_qualified_name}/{record.identifier}"
 
+        def file_qualified_name(self, record, dataset_file):
+            suffix = dataset_file.identifier or dataset_file.path or "file"
+            return f"default/connection/{suffix}"
+
         def _record_lookup(self, qualified_name, asset_type, **kwargs):
-            captured.setdefault("lookups", []).append(qualified_name)
+            captured.setdefault("lookups", []).append((qualified_name, asset_type))
             return SimpleNamespace(attributes=SimpleNamespace(name="Sanity Dataset"))
 
     monkeypatch.setattr(sanity_check, "AtlanUploader", _FakeUploader)
@@ -106,4 +112,12 @@ def test_sanity_check_runs_with_sample_data(monkeypatch: pytest.MonkeyPatch) -> 
     sanity_check.run(sample_labels=1, max_files=10)
 
     assert captured["upserted"] == [["classification-1"]]
-    assert captured["lookups"] == ["default/connection/dxr/labels/classification-1"]
+    lookups = captured["lookups"]
+    assert len(lookups) == 2
+    assert lookups[0] == (
+        "default/connection/dxr/labels/classification-1",
+        Table,
+    )
+    object_lookup = lookups[1]
+    assert object_lookup[0].startswith("default/connection/")
+    assert object_lookup[1] is File

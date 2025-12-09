@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 from urllib.parse import urljoin
 
 from .dxr_client import Classification
@@ -31,6 +31,38 @@ class SampleFile:
             parts.append(self.path)
         return " – ".join(parts) if parts else (self.identifier or "Unknown file")
 
+    @classmethod
+    def from_dataset_file(cls, dataset_file: "DatasetFile") -> "SampleFile":
+        """Create a sample representation from a dataset file."""
+
+        return cls(
+            identifier=dataset_file.identifier,
+            name=dataset_file.name,
+            path=dataset_file.path,
+            link=dataset_file.link,
+        )
+
+
+@dataclass
+class DatasetFile:
+    """Full-fidelity representation of a DXR file used to create object assets."""
+
+    identifier: Optional[str]
+    name: Optional[str]
+    path: Optional[str]
+    link: Optional[str]
+    labels: List[str] = field(default_factory=list)
+
+    def key(self) -> tuple[str, str, str, str]:
+        """Return a tuple used to deduplicate identical file payloads."""
+
+        return (
+            self.identifier or "",
+            self.path or "",
+            self.name or "",
+            self.link or "",
+        )
+
 
 @dataclass
 class DatasetRecord:
@@ -39,8 +71,12 @@ class DatasetRecord:
     classification: Classification
     file_count: int
     sample_files: List[SampleFile] = field(default_factory=list)
+    files: List[DatasetFile] = field(default_factory=list)
     description: Optional[str] = None
     source_url: Optional[str] = None
+    _file_keys: Set[Tuple[str, str, str, str]] = field(
+        default_factory=set, init=False, repr=False
+    )
 
     @property
     def identifier(self) -> str:
@@ -58,6 +94,17 @@ class DatasetRecord:
     def classification_subtype(self) -> Optional[str]:
         return self.classification.subtype
 
+    def add_file(self, dataset_file: DatasetFile) -> bool:
+        """Register a dataset file, returning True when it is unique."""
+
+        key = dataset_file.key()
+        if key in self._file_keys:
+            return False
+        self._file_keys.add(key)
+        self.files.append(dataset_file)
+        self.file_count += 1
+        return True
+
 
 class DatasetBuilder:
     """Build dataset records from DXR classifications and files."""
@@ -70,12 +117,18 @@ class DatasetBuilder:
         sample_file_limit: int = 5,
         dxr_base_url: Optional[str] = None,
     ) -> None:
+        classification_list = list(classifications)
         self._records: Dict[str, DatasetRecord] = {}
+        self._classifications_by_id: Dict[str, Classification] = {
+            classification.identifier: classification
+            for classification in classification_list
+            if classification.identifier
+        }
         self._allowed_types = {t.upper() for t in allowed_types} if allowed_types else None
         self._sample_file_limit = sample_file_limit
         self._dxr_base_url = _normalise_base_url(dxr_base_url) if dxr_base_url else None
 
-        for classification in classifications:
+        for classification in classification_list:
             if self._allowed_types and (
                 (classification.type or "").upper() not in self._allowed_types
             ):
@@ -98,20 +151,22 @@ class DatasetBuilder:
         if not labels:
             return
 
+        label_names = self._resolve_label_names(labels)
         for label in labels:
             record = self._records.get(label)
             if not record:
                 continue
-            record.file_count += 1
-            if len(record.sample_files) < self._sample_file_limit:
-                record.sample_files.append(
-                    SampleFile(
-                        identifier=_safe_str(payload.get("id")),
-                        name=_safe_str(payload.get("name") or payload.get("filename")),
-                        path=_safe_str(payload.get("path") or payload.get("filepath")),
-                        link=_safe_str(payload.get("link")),
-                    )
-                )
+            dataset_file = DatasetFile(
+                identifier=_safe_str(payload.get("id")),
+                name=_safe_str(payload.get("name") or payload.get("filename")),
+                path=_safe_str(payload.get("path") or payload.get("filepath")),
+                link=_safe_str(payload.get("link")),
+                labels=label_names,
+            )
+            if record.add_file(dataset_file) and (
+                len(record.sample_files) < self._sample_file_limit
+            ):
+                record.sample_files.append(SampleFile.from_dataset_file(dataset_file))
 
     def build(self) -> List[DatasetRecord]:
         """Generate final dataset records with descriptions."""
@@ -135,6 +190,14 @@ class DatasetBuilder:
             bullet_list = "\n".join(f"- {sample.render()}" for sample in record.sample_files)
             description_parts.append("Sample files:\n" + bullet_list)
         return "\n\n".join(description_parts)
+
+    def _resolve_label_names(self, label_ids: Iterable[str]) -> List[str]:
+        names: Set[str] = set()
+        for label_id in label_ids:
+            classification = self._classifications_by_id.get(label_id)
+            if classification and classification.name:
+                names.add(classification.name.strip())
+        return sorted(name for name in names if name)
 
 
 def _extract_labels(payload: Dict[str, object]) -> List[str]:
@@ -174,4 +237,4 @@ def _normalise_base_url(base_url: str) -> str:
     return cleaned
 
 
-__all__ = ["DatasetBuilder", "DatasetRecord", "SampleFile"]
+__all__ = ["DatasetBuilder", "DatasetRecord", "SampleFile", "DatasetFile"]

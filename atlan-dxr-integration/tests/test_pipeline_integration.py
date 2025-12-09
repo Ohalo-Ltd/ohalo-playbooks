@@ -10,6 +10,30 @@ import pytest
 
 from atlan_dxr_integration import atlan_uploader, pipeline
 from atlan_dxr_integration.dxr_client import Classification
+from pyatlan.model.assets.core.file import File
+from pyatlan.model.assets.core.table import Table
+
+
+class _FakeTagCache:
+    def __init__(self, existing=None):
+        self.existing = set(existing or [])
+
+    def get_id_for_name(self, name: str):
+        return f"{name}-id" if name in self.existing else None
+
+    def refresh_cache(self):  # pragma: no cover - not required for tests
+        return None
+
+
+class _FakeTypeDefClient:
+    def __init__(self, tag_cache: _FakeTagCache):
+        self.tag_cache = tag_cache
+        self.created: list[str] = []
+
+    def create(self, typedef):
+        self.created.append(typedef.display_name)
+        self.tag_cache.existing.add(typedef.display_name)
+        return SimpleNamespace()
 
 
 class _FakeMutationResponse:
@@ -145,6 +169,8 @@ def test_pipeline_runs_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
     class _FakeAtlanClient:
         def __init__(self, *args, **kwargs):
             self.asset = _FakeAssetClient()
+            self.atlan_tag_cache = _FakeTagCache()
+            self.typedef = _FakeTypeDefClient(self.atlan_tag_cache)
 
     monkeypatch.setattr(atlan_uploader, "AtlanClient", _FakeAtlanClient)
     monkeypatch.setattr(
@@ -168,9 +194,15 @@ def test_pipeline_runs_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
 
     pipeline.run()
 
-    assert captured_batches, "Expected tables to be pushed into Atlan"
-    assert len(captured_batches[0]) == 1
-    table = captured_batches[0][0]
+    assert captured_batches, "Expected assets to be pushed into Atlan"
+    batch = captured_batches[0]
+    tables = [asset for asset in batch if isinstance(asset, Table)]
+    files = [asset for asset in batch if isinstance(asset, File)]
+
+    assert len(tables) == 1
+    assert len(files) == 2
+
+    table = tables[0]
     attrs = table.attributes
     assert (
         attrs.qualified_name
@@ -184,6 +216,18 @@ def test_pipeline_runs_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "lab-results.parquet" in attrs.user_description
     assert attrs.source_url == "https://dxr.example.com/resource-search/classification-123"
     assert attrs.connector_name == "custom"
+    table_tags = {str(tag.type_name) for tag in (table.atlan_tags or [])}
+    assert table_tags == {"Heart Failure", "ANNOTATOR", "REGEX"}
+
+    qualified_prefix = "default/custom/dxr-connection/"
+    display_names = {obj.attributes.display_name for obj in files}
+    assert display_names == {"patient-data.csv", "lab-results.parquet"}
+    for obj in files:
+        assert obj.attributes.qualified_name.startswith(qualified_prefix)
+        assert obj.attributes.connection_name == "dxr-connection"
+        assert obj.attributes.connector_name == "custom"
+        object_tags = [str(tag.type_name) for tag in (obj.atlan_tags or [])]
+        assert object_tags == ["Heart Failure"]
 
 
 @pytest.mark.integration
