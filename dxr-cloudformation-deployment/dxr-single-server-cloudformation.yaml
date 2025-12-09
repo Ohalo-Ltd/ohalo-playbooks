@@ -263,7 +263,7 @@ Resources:
             aws s3 cp "s3://${AnsibleArtifactBucket}/${AnsibleArtifactKey}" /tmp/ohalo-ansible.tar.gz
             tar -xzf /tmp/ohalo-ansible.tar.gz -C "$ARTIFACT_DIR"
             aws s3 cp "s3://${InventoryBucket}/${InventoryKey}" "$ARTIFACT_DIR/inventory.json"
-            chown -R rocky:rocky "$ARTIFACT_DIR"
+            chown -R ec2-user:ec2-user "$ARTIFACT_DIR"
             cd "$ARTIFACT_DIR"
             if [ -f requirements.yml ]; then
               ansible-galaxy collection install -r requirements.yml
