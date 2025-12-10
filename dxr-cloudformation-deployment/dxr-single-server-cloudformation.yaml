@@ -1,0 +1,300 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Deploy a single DXR node by creating a RHEL 8.10 c5.4xlarge instance,
+  installing dependencies, and running the provided Ansible playbook.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Network settings
+        Parameters:
+          - VpcCidr
+          - PublicSubnetCidr
+          - SSHLocation
+      - Label:
+          default: Instance configuration
+        Parameters:
+          - KeyPairName
+          - InstanceType
+          - RootVolumeSize
+      - Label:
+          default: Artifacts
+        Parameters:
+          - AnsibleArtifactBucket
+          - AnsibleArtifactKey
+          - InventoryBucket
+          - InventoryKey
+    ParameterLabels:
+      VpcCidr:
+        default: VPC CIDR
+      PublicSubnetCidr:
+        default: Public subnet CIDR
+      SSHLocation:
+        default: SSH allowed CIDR
+      KeyPairName:
+        default: EC2 key pair
+      InstanceType:
+        default: Instance type
+      RootVolumeSize:
+        default: Root volume size (GiB)
+      AnsibleArtifactBucket:
+        default: S3 bucket for Ansible archive
+      AnsibleArtifactKey:
+        default: S3 key for Ansible archive (.tar.gz)
+      InventoryBucket:
+        default: S3 bucket for inventory
+      InventoryKey:
+        default: S3 key for inventory file
+
+Parameters:
+  VpcCidr:
+    Type: String
+    Default: 10.20.0.0/16
+    Description: CIDR block for the dedicated DXR VPC.
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.20.0.0/24
+    Description: CIDR block used by the public subnet inside the new VPC.
+  SSHLocation:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: CIDR block permitted to connect via SSH.
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Existing EC2 key pair that will be attached to the DXR host.
+  InstanceType:
+    Type: String
+    Default: c5.4xlarge
+    AllowedValues:
+      - c5.4xlarge
+    Description: EC2 instance type for the DXR host (locked to c5.4xlarge).
+  RootVolumeSize:
+    Type: Number
+    Default: 100
+    MinValue: 100
+    MaxValue: 1024
+    Description: Size of the root EBS volume in GiB.
+  AnsibleArtifactBucket:
+    Type: String
+    Description: S3 bucket that contains the packaged ohalo-ansible artifact (.tar.gz).
+  AnsibleArtifactKey:
+    Type: String
+    Description: Object key (path) for the Ansible artifact within the bucket.
+  InventoryBucket:
+    Type: String
+    Description: S3 bucket that hosts the inventory JSON file used by the playbook.
+  InventoryKey:
+    Type: String
+    Description: Object key (path) for the inventory JSON file.
+  LatestAmiId:
+    Type: AWS::EC2::Image::Id
+    Description: RHEL 8.10 AMI ID to use (pass a region-specific image).
+
+Resources:
+  DxrVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-vpc'
+
+  DxrInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-igw'
+
+  DxrGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref DxrVpc
+      InternetGatewayId: !Ref DxrInternetGateway
+
+  DxrPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DxrVpc
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ''
+      CidrBlock: !Ref PublicSubnetCidr
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-public-subnet'
+
+  DxrRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref DxrVpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-public-rt'
+
+  DxrDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: DxrGatewayAttachment
+    Properties:
+      RouteTableId: !Ref DxrRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref DxrInternetGateway
+
+  DxrRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref DxrRouteTable
+      SubnetId: !Ref DxrPublicSubnet
+
+  DxrSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH/HTTP/HTTPS access to the DXR host.
+      VpcId: !Ref DxrVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHLocation
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-security-group'
+
+  DxrInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: DxrArtifactAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${AnsibleArtifactBucket}'
+                  - !Sub 'arn:aws:s3:::${InventoryBucket}'
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub 'arn:aws:s3:::${AnsibleArtifactBucket}/${AnsibleArtifactKey}'
+                  - !Sub 'arn:aws:s3:::${InventoryBucket}/${InventoryKey}'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-instance-role'
+
+  DxrInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref DxrInstanceRole
+      InstanceProfileName: !Sub '${AWS::StackName}-dxr-instance-profile'
+
+  DxrHost:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT2H
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref LatestAmiId
+      IamInstanceProfile: !Ref DxrInstanceProfile
+      KeyName: !Ref KeyPairName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: 0
+          SubnetId: !Ref DxrPublicSubnet
+          GroupSet:
+            - !Ref DxrSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: !Ref RootVolumeSize
+            VolumeType: gp3
+            Encrypted: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-dxr-host'
+        - Key: Application
+          Value: DXR
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash
+            set -euo pipefail
+            umask 022
+            exec > >(tee /var/log/dxr-bootstrap.log) 2>&1
+            echo "[$(date --iso-8601=seconds)] Starting DXR bootstrap" 
+            dnf update -y
+            dnf install -y python3 python3-pip git jq tar gzip unzip rust cargo
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && unzip awscliv2.zip && ./aws/install
+            python3 -m pip install --user --upgrade pip setuptools
+            pip3 install boto3 botocore
+            export AWS_DEFAULT_REGION='${AWS::Region}'
+            ARTIFACT_DIR=/opt/ohalo-ansible
+            mkdir -p "$ARTIFACT_DIR"
+            aws s3 cp "s3://${AnsibleArtifactBucket}/${AnsibleArtifactKey}" /tmp/ohalo-ansible.tar.gz
+            tar -xzf /tmp/ohalo-ansible.tar.gz -C "$ARTIFACT_DIR"
+            aws s3 cp "s3://${InventoryBucket}/${InventoryKey}" "$ARTIFACT_DIR/inventory.json"
+            chown -R ec2-user:ec2-user "$ARTIFACT_DIR"
+            cd "$ARTIFACT_DIR"
+            python3 -m pip install --user -r ansible-requirements.txt
+            if [ -f requirements.yml ]; then
+              ansible-galaxy collection install -r requirements.yml
+            fi
+            PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 || true)
+            PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+            TMP_INVENTORY=$(mktemp)
+            jq --arg pub "$PUBLIC_IP" --arg priv "$PRIVATE_IP" '
+              .ohalo.hosts = ((.ohalo.hosts // {}) | with_entries(
+                .value.ansible_host = (if .value.ansible_host == "AUTO_PUBLIC_IP" then $pub else .value.ansible_host end)
+                | .value.internal_ip = (if .value.internal_ip == "AUTO_PRIVATE_IP" then $priv else .value.internal_ip end)
+              ))
+            ' inventory.json > "$TMP_INVENTORY"
+            mv "$TMP_INVENTORY" inventory.json
+            export ANSIBLE_HOST_KEY_CHECKING=False
+            export ANSIBLE_STDOUT_CALLBACK=default
+            LOG_PATH=/var/log/dxr-ansible.log
+            touch "$LOG_PATH"
+            chmod 600 "$LOG_PATH"
+            if ansible-playbook -v --connection=local -u ec2-user -i inventory.json deploy-dxr-single-server-playbook.yml | tee "$LOG_PATH"; then
+              /opt/aws/bin/cfn-signal --stack '${AWS::StackName}' --resource DxrHost --region '${AWS::Region}' --success true
+            else
+              /opt/aws/bin/cfn-signal --stack '${AWS::StackName}' --resource DxrHost --region '${AWS::Region}' --success false
+              exit 1
+            fi
+
+Outputs:
+  InstanceId:
+    Description: Instance ID of the DXR host.
+    Value: !Ref DxrHost
+  InstancePublicIp:
+    Description: Public IPv4 address of the DXR host.
+    Value: !GetAtt DxrHost.PublicIp
+  InstancePrivateIp:
+    Description: Private IPv4 address of the DXR host.
+    Value: !GetAtt DxrHost.PrivateIp
+  AnsibleLogFile:
+    Description: Location of the Ansible execution log.
+    Value: /var/log/dxr-ansible.log

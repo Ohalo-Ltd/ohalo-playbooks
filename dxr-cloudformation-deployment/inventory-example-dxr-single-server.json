@@ -1,0 +1,37 @@
+{
+  "ohalo": {
+    "hosts": {
+      "ohalo-single-server": {
+        "ansible_host": "AUTO_PUBLIC_IP",
+        "internal_ip": "AUTO_PRIVATE_IP",
+        "server_url": "ohalo-cf.dataxray.io",
+        "dxr_version": "7.21.6",
+        "ghcr_username": "ohalo-git",
+        "ghcr_token": "",
+        "mysql_root_password": "",
+        "mysql_exporter_password": "",
+        "rabbitmq_password": "",
+        "prometheus_password": "",
+        "grafana_admin_password": "",
+        "grafana_metrics_password": "",
+        "elasticsearch_elastic_password": "",
+        "blob_storage_access_key_id": "",
+        "blob_storage_secret_access_key": "",
+        "dlp_syncer_enabled": false,
+        "mysql_metadata_extractor_password": "",
+        "mongo_service_password": "",
+        "mongo_admin_password": "",
+        "xray_collibra_syncer_enabled": false,
+        "identity_azure_ad_enabled": false,
+        "identity_azure_ad_ad_iam_manager": "00000000-0000-0000-0000-000000000000",
+        "identity_azure_ad_azure_ad_tenant_id": "00000000-0000-0000-0000-000000000000",
+        "identity_azure_ad_azure_ad_client_id": "00000000-0000-0000-0000-000000000000",
+        "identity_azure_ad_azure_ad_client_secret": "changeme",
+        "identity_azure_ad_sync_job_cron_expression": "0 0 0 * * *",
+        "identity_azure_ad_sync_job_cron_timezone": "UTC",
+        "identity_saml_enabled": false,
+        "scim_enabled": false
+      }
+    }
+  }
+}
