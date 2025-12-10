@@ -18,7 +18,8 @@ Ansible control host (RHEL 8.10, `c5.4xlarge`) and run the
 2. An existing EC2 key pair in the target Region (needed for SSH access).
 3. An S3 bucket to temporarily host the packaged ohalo-ansible archive and your
    inventory JSON.
-4. Update the provided inventory example located at
+4. Download the Ohalo DXR Ansible playbook artifact, by following the instructions located [here](https://docs.ohalo.co/usage/advanced/deployments/RHEL-8)
+5. Update the provided inventory example located at
    `ohalo-ansible/inventory-example-dxr-single-server.json` with the DXR
    secrets, domain, and other environment-specific values.
 
