@@ -1,9 +1,10 @@
 # DXR single-server CloudFormation wrapper
 
-This directory contains the infrastructure glue required to stand up a disposable
-Ansible control host (RHEL 8.10, `c5.4xlarge`) and run the
-`deploy-dxr-single-server-playbook.yml` playbook that lives in
-`ohalo-ansible`.
+This directory contains the infrastructure glue required to stand up a Linux VM
+(RHEL 8.10, `c5.4xlarge`) and run the `deploy-dxr-single-server-playbook.yml`
+playbook that lives in `ohalo-ansible`, to deploy a single-server instance of
+Ohalo's Data X-Ray platform. The included shell script will deploy the environment -- 
+post-deployment, standard AWS CLI or UI methods can be used to manage the instance.
 
 ## Contents
 - `dxr-single-server-cloudformation.yaml` – full CloudFormation template that
