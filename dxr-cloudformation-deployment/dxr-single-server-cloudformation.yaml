@@ -161,10 +161,6 @@ Resources:
           ToPort: 22
           CidrIp: !Ref SSHLocation
         - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
           CidrIp: 0.0.0.0/0
@@ -254,8 +250,6 @@ Resources:
             dnf install -y python3 python3-pip git jq tar gzip unzip rust cargo
             curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && unzip awscliv2.zip && ./aws/install
             python3 -m pip install --user --upgrade pip setuptools
-            dnf -y install ansible-core
-            python3 -m pip install --user passlib bcrypt
             pip3 install boto3 botocore
             export AWS_DEFAULT_REGION='${AWS::Region}'
             ARTIFACT_DIR=/opt/ohalo-ansible
@@ -265,6 +259,7 @@ Resources:
             aws s3 cp "s3://${InventoryBucket}/${InventoryKey}" "$ARTIFACT_DIR/inventory.json"
             chown -R ec2-user:ec2-user "$ARTIFACT_DIR"
             cd "$ARTIFACT_DIR"
+            python3 -m pip install --user -r ansible-requirements.txt
             if [ -f requirements.yml ]; then
               ansible-galaxy collection install -r requirements.yml
             fi
