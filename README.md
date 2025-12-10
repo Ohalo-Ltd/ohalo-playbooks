@@ -27,6 +27,9 @@ This repository currently includes the following playbooks:
 - **[`file-records-management-in-databricks`](./file-records-management-in-databricks/)**  
   Databricks workflow that lands Data X-Ray `/api/v1/files` payloads in Delta so you can run records-management policies (duplicate remediation, ROT cleanup, retention gaps, etc.) on a consistent daily snapshot.
 
+- **[`dxr-cloudformation-deployment`](./dxr-cloudformation-deployment/)**
+  AWS CloudFormation utility to deploy DXR to an AWS c5.4xlarge instance with Ansible, on a RHEL 8.10 virtual machine. A helper shell script is included to pre-populate and execute the deployment. The [README](./dxr-cloudformation-deployment/README.md) covers prerequisites, configuration, and deployment parameters.
+
 ## Getting Started
 
 Each playbook is self-contained in its own directory and includes a dedicated `README.md` with all the information you need to configure and run it.
