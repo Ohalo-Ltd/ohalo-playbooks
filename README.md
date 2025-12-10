@@ -24,6 +24,9 @@ This repository currently includes the following playbooks:
 - **[`s3-etl-quarantine`](./s3-etl-quarantine/)**  
   Pulumi-managed guardrail that watches S3 staging zones, classifies files with Data X-Ray, and automatically quarantines risky payloads feeding unstructured ETL pipelines. The [README](./s3-etl-quarantine/README.md) covers prerequisites, deployment, and cleanup steps.
 
+- **[`databricks-unity-dxr-integration`](./databricks-unity-dxr-integration/)**  
+  Databricks Unity Catalog integration that routes files through Data X-Ray's On-Demand Classifier, persists rich metadata in Delta tables, and mirrors classified content into per-label volumes for downstream governance workflows. See the [README](./databricks-unity-dxr-integration/README.md) for architecture and implementation guidance.
+  
 - **[`file-records-management-in-databricks`](./file-records-management-in-databricks/)**  
   Databricks workflow that lands Data X-Ray `/api/v1/files` payloads in Delta so you can run records-management policies (duplicate remediation, ROT cleanup, retention gaps, etc.) on a consistent daily snapshot.
 

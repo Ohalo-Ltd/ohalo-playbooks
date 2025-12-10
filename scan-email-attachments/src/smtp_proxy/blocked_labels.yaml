@@ -5,6 +5,6 @@
 # Add more in the same format as below:
 
 blocked_labels:
-  - name: "Mission Sensitive"
-    message: "Mission-sensitive document found"
+  - name: "ITAR"
+    message: "Possible ITAR found"
   

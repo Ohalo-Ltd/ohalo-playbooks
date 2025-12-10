@@ -32,4 +32,5 @@ response.json
 python/
 .pytest_cache/
 
+# helpful docs
 docs/
