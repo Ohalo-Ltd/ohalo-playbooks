@@ -11,6 +11,7 @@ from .volume import VolumeFile
 
 @dataclass(frozen=True)
 class MetadataRecord:
+    # Core Unity Catalog fields
     file_path: str
     relative_path: str
     catalog_name: str
@@ -21,9 +22,14 @@ class MetadataRecord:
     datasource_id: str
     datasource_scan_id: Optional[int]
     job_id: str
+
+    # File identification fields (ds#* prefix)
     file_name: Optional[str]
     object_id: Optional[str]
     parent_paths: List[str]
+    folder_id: Optional[str]
+
+    # DXR processing fields (dxr#* prefix)
     mime_type: Optional[str]
     indexed_at: Optional[str]
     sha256: Optional[str]
@@ -37,34 +43,27 @@ class MetadataRecord:
     dxr_tags: List[str]
     removed_tags: List[str]
     ocr_used: Optional[bool]
-    categories: List[str]
-    annotations: Optional[str]
-    folder_id: Optional[str]
-    modified_at: Optional[str]
-    binary_hash: Optional[str]
+
+    # AI-generated fields (ai#* prefix)
+    ai_category: Optional[str]
+    ai_category_last_updated: Optional[str]
+
+    # Annotation fields (annotation.* and annotation_stats#* prefixes)
     annotation_stats_json: Optional[str]
-    raw_metadata: Dict[str, Any]
+    annotations_json: Optional[str]
+
+    # Metadata fields (metadata#* and computed.metadata#* prefixes) - stored as JSON for flexibility
+    metadata_fields_json: Optional[str]
+    metadata_fields_map: Dict[str, str]
+
+    # Extracted metadata fields (extracted_metadata#* prefix) - mapped to display names if available
     extracted_metadata_json: Optional[str]
     extracted_metadata_map: Dict[str, str]
-    # Priority 1 fields
-    scan_depth: Optional[str]
-    content_sha256: Optional[str]
-    created_at: Optional[str]
-    labels: List[str]
-    dlp_labels: List[str]
-    owner_name: Optional[str]
-    owner_email: Optional[str]
-    owner_id: Optional[str]
-    created_by_name: Optional[str]
-    created_by_email: Optional[str]
-    modified_by_name: Optional[str]
-    modified_by_email: Optional[str]
-    # Priority 2 fields
-    datasource_name: Optional[str]
-    connector_type: Optional[str]
-    connector_site_url: Optional[str]
-    annotators_json: Optional[str]
-    annotators_summary: Dict[str, int]
+
+    # Raw metadata for complete fidelity
+    raw_metadata: Dict[str, Any]
+
+    # Timestamp
     collected_at: datetime
 
     def as_row(self) -> Dict[str, Any]:
@@ -82,6 +81,7 @@ class MetadataRecord:
             "file_name": self.file_name,
             "object_id": self.object_id,
             "parent_paths": self.parent_paths,
+            "folder_id": self.folder_id,
             "mime_type": self.mime_type,
             "indexed_at": self.indexed_at,
             "sha256": self.sha256,
@@ -95,32 +95,15 @@ class MetadataRecord:
             "dxr_tags": self.dxr_tags,
             "removed_tags": self.removed_tags,
             "ocr_used": self.ocr_used,
-            "categories": self.categories,
-            "annotations": self.annotations,
-            "folder_id": self.folder_id,
-            "modified_at": self.modified_at,
-            "binary_hash": self.binary_hash,
+            "ai_category": self.ai_category,
+            "ai_category_last_updated": self.ai_category_last_updated,
             "annotation_stats_json": self.annotation_stats_json,
-            "raw_metadata": json.dumps(self.raw_metadata, separators=(",", ":")),
+            "annotations_json": self.annotations_json,
+            "metadata_fields_json": self.metadata_fields_json,
+            "metadata_fields_map": self.metadata_fields_map,
             "extracted_metadata_json": self.extracted_metadata_json,
             "extracted_metadata_map": self.extracted_metadata_map,
-            "scan_depth": self.scan_depth,
-            "content_sha256": self.content_sha256,
-            "created_at": self.created_at,
-            "labels": self.labels,
-            "dlp_labels": self.dlp_labels,
-            "owner_name": self.owner_name,
-            "owner_email": self.owner_email,
-            "owner_id": self.owner_id,
-            "created_by_name": self.created_by_name,
-            "created_by_email": self.created_by_email,
-            "modified_by_name": self.modified_by_name,
-            "modified_by_email": self.modified_by_email,
-            "datasource_name": self.datasource_name,
-            "connector_type": self.connector_type,
-            "connector_site_url": self.connector_site_url,
-            "annotators_json": self.annotators_json,
-            "annotators_summary": self.annotators_summary,
+            "raw_metadata": json.dumps(self.raw_metadata, separators=(",", ":")),
             "collected_at": self.collected_at,
         }
 
@@ -165,28 +148,19 @@ def build_metadata_records(
         if file is None:
             continue
 
+        # Extract annotation fields
         annotation_stats_json = _extract_annotation_stats(source)
+        annotations_json = _extract_annotations(source)
 
-        # Extract metadata fields directly from _source (indexed-files/search format)
-        # These appear as extracted_metadata#1, extracted_metadata#2, etc.
-        # Map to human-readable names if metadata definitions are provided
-        extracted_metadata_json, extracted_metadata_map = _extract_metadata_fields_from_source(source, metadata_defs)
+        # Extract metadata# and computed.metadata# fields
+        metadata_fields_json, metadata_fields_map = _extract_metadata_fields(source)
 
-        # Extract owner, creator, modifier info
-        owner_name, owner_email, owner_id = _extract_user_info(source.get("owner"))
-        created_by_name, created_by_email, _ = _extract_user_info(source.get("createdBy"))
-        modified_by_name, modified_by_email, _ = _extract_user_info(source.get("modifiedBy"))
+        # Extract extracted_metadata# fields and map to display names if available
+        extracted_metadata_json, extracted_metadata_map = _extract_extracted_metadata_fields(source, metadata_defs)
 
-        # Extract annotators info
-        annotators = source.get("annotators") or []
-        annotators_json, annotators_summary = _extract_annotators_info(annotators)
-
-        # Extract datasource and connector info
-        datasource = source.get("datasource") or {}
-        datasource_name = _maybe_str(datasource.get("name")) if isinstance(datasource, dict) else None
-        connector = datasource.get("connector") if isinstance(datasource, dict) else {}
-        connector_type = _maybe_str(connector.get("type")) if isinstance(connector, dict) else None
-        connector_site_url = _maybe_str(connector.get("siteUrl")) if isinstance(connector, dict) else None
+        # Extract AI category fields
+        ai_category = _maybe_str(source.get("ai#category"))
+        ai_category_last_updated = _maybe_str(source.get("ai#category_last_updated"))
 
         records.append(
             MetadataRecord(
@@ -203,6 +177,7 @@ def build_metadata_records(
                 file_name=_maybe_str(source.get("ds#file_name")),
                 object_id=_maybe_str(source.get("object_id") or source.get("dxr#file_id")),
                 parent_paths=_coerce_str_list(source.get("ds#parent_folder_paths")),
+                folder_id=_maybe_str(source.get("folder_id")),
                 mime_type=_maybe_str(source.get("dxr#mime_type")),
                 indexed_at=_maybe_str(source.get("dxr#indexed_date")),
                 sha256=_maybe_str(source.get("dxr#sha_256_hash")),
@@ -216,32 +191,15 @@ def build_metadata_records(
                 dxr_tags=_coerce_str_list(source.get("dxr#tags")),
                 removed_tags=_coerce_str_list(source.get("dxr#manually_removed_tags")),
                 ocr_used=_maybe_bool(source.get("dxr#ocr_used")),
-                categories=_coerce_str_list(source.get("ai#category")),
-                annotations=_maybe_str(source.get("annotations")),
-                folder_id=_maybe_str(source.get("folder_id")),
-                modified_at=_maybe_str(source.get("metadata#MODIFIED_DATE")),
-                binary_hash=_maybe_str(source.get("metadata#binary_hash")),
+                ai_category=ai_category,
+                ai_category_last_updated=ai_category_last_updated,
                 annotation_stats_json=annotation_stats_json,
-                raw_metadata=source,
+                annotations_json=annotations_json,
+                metadata_fields_json=metadata_fields_json,
+                metadata_fields_map=metadata_fields_map,
                 extracted_metadata_json=extracted_metadata_json,
                 extracted_metadata_map=extracted_metadata_map,
-                scan_depth=_maybe_str(source.get("scanDepth")),
-                content_sha256=_maybe_str(source.get("contentSha256")),
-                created_at=_maybe_str(source.get("createdAt")),
-                labels=_coerce_str_list(source.get("labels")),
-                dlp_labels=_coerce_str_list(source.get("dlpLabels")),
-                owner_name=owner_name,
-                owner_email=owner_email,
-                owner_id=owner_id,
-                created_by_name=created_by_name,
-                created_by_email=created_by_email,
-                modified_by_name=modified_by_name,
-                modified_by_email=modified_by_email,
-                datasource_name=datasource_name,
-                connector_type=connector_type,
-                connector_site_url=connector_site_url,
-                annotators_json=annotators_json,
-                annotators_summary=annotators_summary,
+                raw_metadata=source,
                 collected_at=datetime.now(timezone.utc),
             )
         )
@@ -305,51 +263,74 @@ def _extract_annotation_stats(source: Dict[str, Any]) -> Optional[str]:
     payload = {
         key: value
         for key, value in source.items()
-        if isinstance(key, str) and (key.startswith("annotation_stats#") or key.startswith("annotation."))
+        if isinstance(key, str) and key.startswith("annotation_stats#")
     }
     if not payload:
         return None
     return json.dumps(payload, separators=(",", ":"))
 
 
-def _extract_metadata_fields(extracted_metadata: List[Dict[str, Any]]) -> tuple[Optional[str], Dict[str, str]]:
+def _extract_annotations(source: Dict[str, Any]) -> Optional[str]:
+    payload = {
+        key: value
+        for key, value in source.items()
+        if isinstance(key, str) and key.startswith("annotation.")
+    }
+    if not payload:
+        return None
+    return json.dumps(payload, separators=(",", ":"))
+
+
+
+
+def _extract_metadata_fields(source: Dict[str, Any]) -> tuple[Optional[str], Dict[str, str]]:
     """
-    Parse extractedMetadata array into JSON string and a map.
+    Extract metadata# and computed.metadata# fields from indexed-files/search _source object.
+
+    These fields come from the data source connectors and contain file system or application metadata:
+    - metadata#CREATED_BY: User ID who created the file
+    - metadata#MODIFIED_DATE: When the file was last modified
+    - computed.metadata#OWNER: Computed owner information
+    - etc.
+
+    Args:
+        source: The _source object from indexed-files/search response
 
     Returns:
         Tuple of (json_string, map_dict) where:
-        - json_string is the full extractedMetadata array as JSON
-        - map_dict is a dictionary mapping extractor names to their values
+        - json_string is a JSON representation of all metadata fields (with original types preserved)
+        - map_dict is a dictionary of field name -> string value (for Spark compatibility)
     """
-    if not extracted_metadata or not isinstance(extracted_metadata, list):
+    if not isinstance(source, dict):
         return None, {}
 
-    # Store full JSON for complete fidelity
-    json_string = json.dumps(extracted_metadata, separators=(",", ":"))
+    # Extract all metadata# and computed.metadata# fields
+    metadata_fields_original = {}
+    metadata_fields_str = {}
 
-    # Build map of extractor name -> value
-    metadata_map = {}
-    for item in extracted_metadata:
-        if not isinstance(item, dict):
-            continue
-        name = item.get("name")
-        value = item.get("value")
-        if name and value is not None:
-            # Convert value to string and truncate if too long to avoid issues
-            str_value = str(value)
-            if len(str_value) > 10000:  # Reasonable limit for map values
-                str_value = str_value[:10000] + "...[truncated]"
-            metadata_map[name] = str_value
+    for key, value in source.items():
+        if isinstance(key, str) and (key.startswith("metadata#") or key.startswith("computed.metadata#")):
+            if value is not None:
+                # Store original value for JSON (preserves types)
+                metadata_fields_original[key] = value
+                # Convert to string for map (Spark requires string values)
+                metadata_fields_str[key] = str(value)
 
-    return json_string, metadata_map
+    if not metadata_fields_original:
+        return None, {}
+
+    # Store as JSON with original types for complete fidelity
+    json_string = json.dumps(metadata_fields_original, separators=(",", ":"), sort_keys=True)
+
+    return json_string, metadata_fields_str
 
 
-def _extract_metadata_fields_from_source(
+def _extract_extracted_metadata_fields(
     source: Dict[str, Any],
     metadata_defs: Optional[Dict[str, str]] = None
 ) -> tuple[Optional[str], Dict[str, str]]:
     """
-    Extract metadata fields directly from indexed-files/search _source object.
+    Extract extracted_metadata# fields from indexed-files/search _source object.
 
     The indexed-files/search endpoint returns extracted metadata as numbered fields:
     - extracted_metadata#1: "value1"
@@ -397,51 +378,3 @@ def _extract_metadata_fields_from_source(
     return json_string, metadata_fields
 
 
-def _extract_user_info(user_obj: Optional[Dict[str, Any]]) -> tuple[Optional[str], Optional[str], Optional[str]]:
-    """
-    Extract name, email, and id from a user object (owner, createdBy, modifiedBy).
-
-    Returns:
-        Tuple of (name, email, id)
-    """
-    if not user_obj or not isinstance(user_obj, dict):
-        return None, None, None
-
-    name = _maybe_str(user_obj.get("name"))
-    email = _maybe_str(user_obj.get("email"))
-    user_id = _maybe_str(user_obj.get("id"))
-
-    return name, email, user_id
-
-
-def _extract_annotators_info(annotators: List[Dict[str, Any]]) -> tuple[Optional[str], Dict[str, int]]:
-    """
-    Parse annotators array into JSON string and a summary map.
-
-    Returns:
-        Tuple of (json_string, summary_dict) where:
-        - json_string is the full annotators array as JSON
-        - summary_dict is a map of annotator_name -> unique_phrase_count
-    """
-    if not annotators or not isinstance(annotators, list):
-        return None, {}
-
-    # Store full JSON for complete fidelity
-    json_string = json.dumps(annotators, separators=(",", ":"))
-
-    # Build summary map of annotator name -> unique phrase count
-    summary = {}
-    for annotator in annotators:
-        if not isinstance(annotator, dict):
-            continue
-        name = annotator.get("name")
-        unique_phrases = annotator.get("uniquePhrases", 0)
-        if name:
-            # Convert to int safely
-            try:
-                count = int(unique_phrases) if unique_phrases is not None else 0
-                summary[name] = count
-            except (ValueError, TypeError):
-                summary[name] = 0
-
-    return json_string, summary
