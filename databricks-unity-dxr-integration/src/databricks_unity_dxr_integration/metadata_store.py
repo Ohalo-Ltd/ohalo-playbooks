@@ -9,6 +9,7 @@ try:  # pragma: no cover - imported at runtime on Databricks
         ArrayType,
         BooleanType,
         LongType,
+        MapType,
         StringType,
         StructField,
         StructType,
@@ -17,7 +18,7 @@ try:  # pragma: no cover - imported at runtime on Databricks
 except ImportError:  # pragma: no cover
     DataFrame = object  # type: ignore
     SparkSession = object  # type: ignore
-    ArrayType = BooleanType = LongType = StringType = StructField = StructType = TimestampType = None  # type: ignore
+    ArrayType = BooleanType = LongType = MapType = StringType = StructField = StructType = TimestampType = None  # type: ignore
 
 from .config import MetadataTableConfig
 from .metadata_records import MetadataRecord
@@ -74,6 +75,25 @@ class MetadataStore:
                 binary_hash STRING,
                 annotation_stats_json STRING,
                 raw_metadata STRING,
+                extracted_metadata_json STRING,
+                extracted_metadata_map MAP<STRING, STRING>,
+                scan_depth STRING,
+                content_sha256 STRING,
+                created_at STRING,
+                labels ARRAY<STRING>,
+                dlp_labels ARRAY<STRING>,
+                owner_name STRING,
+                owner_email STRING,
+                owner_id STRING,
+                created_by_name STRING,
+                created_by_email STRING,
+                modified_by_name STRING,
+                modified_by_email STRING,
+                datasource_name STRING,
+                connector_type STRING,
+                connector_site_url STRING,
+                annotators_json STRING,
+                annotators_summary MAP<STRING, INT>,
                 collected_at TIMESTAMP
             )
             USING DELTA
@@ -133,6 +153,25 @@ class MetadataStore:
                 binary_hash = source.binary_hash,
                 annotation_stats_json = source.annotation_stats_json,
                 raw_metadata = source.raw_metadata,
+                extracted_metadata_json = source.extracted_metadata_json,
+                extracted_metadata_map = source.extracted_metadata_map,
+                scan_depth = source.scan_depth,
+                content_sha256 = source.content_sha256,
+                created_at = source.created_at,
+                labels = source.labels,
+                dlp_labels = source.dlp_labels,
+                owner_name = source.owner_name,
+                owner_email = source.owner_email,
+                owner_id = source.owner_id,
+                created_by_name = source.created_by_name,
+                created_by_email = source.created_by_email,
+                modified_by_name = source.modified_by_name,
+                modified_by_email = source.modified_by_email,
+                datasource_name = source.datasource_name,
+                connector_type = source.connector_type,
+                connector_site_url = source.connector_site_url,
+                annotators_json = source.annotators_json,
+                annotators_summary = source.annotators_summary,
                 collected_at = source.collected_at
             WHEN NOT MATCHED THEN INSERT *
             """
@@ -178,6 +217,25 @@ def _build_schema():
             StructField("binary_hash", StringType(), nullable=True),
             StructField("annotation_stats_json", StringType(), nullable=True),
             StructField("raw_metadata", StringType(), nullable=False),
+            StructField("extracted_metadata_json", StringType(), nullable=True),
+            StructField("extracted_metadata_map", MapType(StringType(), StringType(), valueContainsNull=False), nullable=False),
+            StructField("scan_depth", StringType(), nullable=True),
+            StructField("content_sha256", StringType(), nullable=True),
+            StructField("created_at", StringType(), nullable=True),
+            StructField("labels", ArrayType(StringType(), containsNull=False), nullable=False),
+            StructField("dlp_labels", ArrayType(StringType(), containsNull=False), nullable=False),
+            StructField("owner_name", StringType(), nullable=True),
+            StructField("owner_email", StringType(), nullable=True),
+            StructField("owner_id", StringType(), nullable=True),
+            StructField("created_by_name", StringType(), nullable=True),
+            StructField("created_by_email", StringType(), nullable=True),
+            StructField("modified_by_name", StringType(), nullable=True),
+            StructField("modified_by_email", StringType(), nullable=True),
+            StructField("datasource_name", StringType(), nullable=True),
+            StructField("connector_type", StringType(), nullable=True),
+            StructField("connector_site_url", StringType(), nullable=True),
+            StructField("annotators_json", StringType(), nullable=True),
+            StructField("annotators_summary", MapType(StringType(), LongType(), valueContainsNull=False), nullable=False),
             StructField("collected_at", TimestampType(), nullable=False),
         ]
     )

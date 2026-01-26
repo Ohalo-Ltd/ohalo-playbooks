@@ -37,13 +37,48 @@ def test_submit_job_returns_job_id():
 @responses.activate
 def test_search_by_scan_id_returns_hits():
     client = build_client()
+    # First page returns results
     responses.add(
         responses.POST,
         "https://dxr.example/api/indexed-files/search",
         json={"hits": {"hits": [{"_source": {"id": "file"}}]}},
         status=200,
     )
+    # Second page returns empty to stop pagination
+    responses.add(
+        responses.POST,
+        "https://dxr.example/api/indexed-files/search",
+        json={"hits": {"hits": []}},
+        status=200,
+    )
 
     hits = client.search_by_scan_id(scan_id=99, page_size=1)
 
     assert hits == [{"_source": {"id": "file"}}]
+
+
+@responses.activate
+def test_get_file_metadata_returns_file_details():
+    client = build_client()
+    responses.add(
+        responses.GET,
+        "https://dxr.example/api/v1/files/file-123",
+        json={
+            "fileId": "file-123",
+            "fileName": "test.pdf",
+            "extractedMetadata": [
+                {"name": "Title", "value": "Test Document", "type": "TEXT"}
+            ],
+            "owner": {"name": "John Doe", "email": "john@example.com"},
+            "scanDepth": "DISCOVERY_AND_CLASSIFICATION",
+        },
+        status=200,
+    )
+
+    file_details = client.get_file_metadata("file-123")
+
+    assert file_details["fileId"] == "file-123"
+    assert file_details["fileName"] == "test.pdf"
+    assert len(file_details["extractedMetadata"]) == 1
+    assert file_details["extractedMetadata"][0]["name"] == "Title"
+    assert file_details["owner"]["email"] == "john@example.com"

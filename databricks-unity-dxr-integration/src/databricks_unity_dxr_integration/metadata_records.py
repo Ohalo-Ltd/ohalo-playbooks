@@ -44,6 +44,27 @@ class MetadataRecord:
     binary_hash: Optional[str]
     annotation_stats_json: Optional[str]
     raw_metadata: Dict[str, Any]
+    extracted_metadata_json: Optional[str]
+    extracted_metadata_map: Dict[str, str]
+    # Priority 1 fields
+    scan_depth: Optional[str]
+    content_sha256: Optional[str]
+    created_at: Optional[str]
+    labels: List[str]
+    dlp_labels: List[str]
+    owner_name: Optional[str]
+    owner_email: Optional[str]
+    owner_id: Optional[str]
+    created_by_name: Optional[str]
+    created_by_email: Optional[str]
+    modified_by_name: Optional[str]
+    modified_by_email: Optional[str]
+    # Priority 2 fields
+    datasource_name: Optional[str]
+    connector_type: Optional[str]
+    connector_site_url: Optional[str]
+    annotators_json: Optional[str]
+    annotators_summary: Dict[str, int]
     collected_at: datetime
 
     def as_row(self) -> Dict[str, Any]:
@@ -81,6 +102,25 @@ class MetadataRecord:
             "binary_hash": self.binary_hash,
             "annotation_stats_json": self.annotation_stats_json,
             "raw_metadata": json.dumps(self.raw_metadata, separators=(",", ":")),
+            "extracted_metadata_json": self.extracted_metadata_json,
+            "extracted_metadata_map": self.extracted_metadata_map,
+            "scan_depth": self.scan_depth,
+            "content_sha256": self.content_sha256,
+            "created_at": self.created_at,
+            "labels": self.labels,
+            "dlp_labels": self.dlp_labels,
+            "owner_name": self.owner_name,
+            "owner_email": self.owner_email,
+            "owner_id": self.owner_id,
+            "created_by_name": self.created_by_name,
+            "created_by_email": self.created_by_email,
+            "modified_by_name": self.modified_by_name,
+            "modified_by_email": self.modified_by_email,
+            "datasource_name": self.datasource_name,
+            "connector_type": self.connector_type,
+            "connector_site_url": self.connector_site_url,
+            "annotators_json": self.annotators_json,
+            "annotators_summary": self.annotators_summary,
             "collected_at": self.collected_at,
         }
 
@@ -117,6 +157,27 @@ def build_metadata_records(
 
         annotation_stats_json = _extract_annotation_stats(source)
 
+        # Extract metadata fields from extractedMetadata if present
+        # Check both direct field and potential nested locations
+        extracted_metadata = source.get("extractedMetadata") or source.get("dxr#extractedMetadata") or []
+        extracted_metadata_json, extracted_metadata_map = _extract_metadata_fields(extracted_metadata)
+
+        # Extract owner, creator, modifier info
+        owner_name, owner_email, owner_id = _extract_user_info(source.get("owner"))
+        created_by_name, created_by_email, _ = _extract_user_info(source.get("createdBy"))
+        modified_by_name, modified_by_email, _ = _extract_user_info(source.get("modifiedBy"))
+
+        # Extract annotators info
+        annotators = source.get("annotators") or []
+        annotators_json, annotators_summary = _extract_annotators_info(annotators)
+
+        # Extract datasource and connector info
+        datasource = source.get("datasource") or {}
+        datasource_name = _maybe_str(datasource.get("name")) if isinstance(datasource, dict) else None
+        connector = datasource.get("connector") if isinstance(datasource, dict) else {}
+        connector_type = _maybe_str(connector.get("type")) if isinstance(connector, dict) else None
+        connector_site_url = _maybe_str(connector.get("siteUrl")) if isinstance(connector, dict) else None
+
         records.append(
             MetadataRecord(
                 file_path=file.absolute_path,
@@ -152,6 +213,25 @@ def build_metadata_records(
                 binary_hash=_maybe_str(source.get("metadata#binary_hash")),
                 annotation_stats_json=annotation_stats_json,
                 raw_metadata=source,
+                extracted_metadata_json=extracted_metadata_json,
+                extracted_metadata_map=extracted_metadata_map,
+                scan_depth=_maybe_str(source.get("scanDepth")),
+                content_sha256=_maybe_str(source.get("contentSha256")),
+                created_at=_maybe_str(source.get("createdAt")),
+                labels=_coerce_str_list(source.get("labels")),
+                dlp_labels=_coerce_str_list(source.get("dlpLabels")),
+                owner_name=owner_name,
+                owner_email=owner_email,
+                owner_id=owner_id,
+                created_by_name=created_by_name,
+                created_by_email=created_by_email,
+                modified_by_name=modified_by_name,
+                modified_by_email=modified_by_email,
+                datasource_name=datasource_name,
+                connector_type=connector_type,
+                connector_site_url=connector_site_url,
+                annotators_json=annotators_json,
+                annotators_summary=annotators_summary,
                 collected_at=datetime.now(timezone.utc),
             )
         )
@@ -220,3 +300,85 @@ def _extract_annotation_stats(source: Dict[str, Any]) -> Optional[str]:
     if not payload:
         return None
     return json.dumps(payload, separators=(",", ":"))
+
+
+def _extract_metadata_fields(extracted_metadata: List[Dict[str, Any]]) -> tuple[Optional[str], Dict[str, str]]:
+    """
+    Parse extractedMetadata array into JSON string and a map.
+
+    Returns:
+        Tuple of (json_string, map_dict) where:
+        - json_string is the full extractedMetadata array as JSON
+        - map_dict is a dictionary mapping extractor names to their values
+    """
+    if not extracted_metadata or not isinstance(extracted_metadata, list):
+        return None, {}
+
+    # Store full JSON for complete fidelity
+    json_string = json.dumps(extracted_metadata, separators=(",", ":"))
+
+    # Build map of extractor name -> value
+    metadata_map = {}
+    for item in extracted_metadata:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        value = item.get("value")
+        if name and value is not None:
+            # Convert value to string and truncate if too long to avoid issues
+            str_value = str(value)
+            if len(str_value) > 10000:  # Reasonable limit for map values
+                str_value = str_value[:10000] + "...[truncated]"
+            metadata_map[name] = str_value
+
+    return json_string, metadata_map
+
+
+def _extract_user_info(user_obj: Optional[Dict[str, Any]]) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Extract name, email, and id from a user object (owner, createdBy, modifiedBy).
+
+    Returns:
+        Tuple of (name, email, id)
+    """
+    if not user_obj or not isinstance(user_obj, dict):
+        return None, None, None
+
+    name = _maybe_str(user_obj.get("name"))
+    email = _maybe_str(user_obj.get("email"))
+    user_id = _maybe_str(user_obj.get("id"))
+
+    return name, email, user_id
+
+
+def _extract_annotators_info(annotators: List[Dict[str, Any]]) -> tuple[Optional[str], Dict[str, int]]:
+    """
+    Parse annotators array into JSON string and a summary map.
+
+    Returns:
+        Tuple of (json_string, summary_dict) where:
+        - json_string is the full annotators array as JSON
+        - summary_dict is a map of annotator_name -> unique_phrase_count
+    """
+    if not annotators or not isinstance(annotators, list):
+        return None, {}
+
+    # Store full JSON for complete fidelity
+    json_string = json.dumps(annotators, separators=(",", ":"))
+
+    # Build summary map of annotator name -> unique phrase count
+    summary = {}
+    for annotator in annotators:
+        if not isinstance(annotator, dict):
+            continue
+        name = annotator.get("name")
+        unique_phrases = annotator.get("uniquePhrases", 0)
+        if name:
+            # Convert to int safely
+            try:
+                count = int(unique_phrases) if unique_phrases is not None else 0
+                summary[name] = count
+            except (ValueError, TypeError):
+                summary[name] = 0
+
+    return json_string, summary

@@ -97,6 +97,15 @@ class DataXRayClient:
                 return job
             time.sleep(max(poll_interval_seconds, 1))
 
+    def get_file_metadata(self, file_id: str) -> Dict:
+        """Fetch detailed metadata for a specific file including extractedMetadata."""
+        response = self._session.get(
+            self._build_url(f"v1/files/{file_id}"),
+            timeout=30,
+        )
+        _raise_for_status(response)
+        return response.json()
+
     @retry(
         retry=retry_if_exception_type(DataXRayError),
         wait=wait_exponential(multiplier=1, min=2, max=30),
@@ -140,9 +149,9 @@ class DataXRayClient:
                 break
             all_hits.extend(hits)
             page += 1
-            
+
             # Safety break to prevent infinite loops if something goes wrong with pagination
-            if page > 10000: 
+            if page > 10000:
                 if self._config.debug:
                     logger.debug(f"Reached safety limit of 10000 pages for scan_id {scan_id}")
                 break

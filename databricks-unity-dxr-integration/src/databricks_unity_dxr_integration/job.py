@@ -66,6 +66,10 @@ class UnityDXRJob:
                     continue
 
                 metadata = self._dxr.search_by_scan_id(scan_id)
+
+                # Enrich metadata with file details to get extractedMetadata if not present
+                metadata = self._enrich_with_file_details(metadata)
+
                 files_by_name = {file.upload_name: file for file in batch}
                 records = build_metadata_records(
                     volume_config=self._config.volume,
@@ -81,6 +85,59 @@ class UnityDXRJob:
                 if self._config.dxr.debug:
                     logger.exception(f"Full traceback for job {job.job_id}:")
                 continue
+
+    def _enrich_with_file_details(self, hits: List[Dict]) -> List[Dict]:
+        """Enrich search results with file details from the files API if extractedMetadata is missing."""
+        enriched = []
+        for hit in hits:
+            source = hit.get("_source", {}) if isinstance(hit, dict) else {}
+            if not isinstance(source, dict):
+                enriched.append(hit)
+                continue
+
+            # Check if extractedMetadata is already present
+            has_extracted_metadata = (
+                "extractedMetadata" in source
+                or "dxr#extractedMetadata" in source
+                or "extractedMetadata" in hit
+            )
+
+            if has_extracted_metadata:
+                enriched.append(hit)
+                continue
+
+            # Try to get file_id to fetch details
+            file_id = source.get("dxr#file_id") or hit.get("_id")
+            if not file_id:
+                enriched.append(hit)
+                continue
+
+            # Fetch file details from files API
+            try:
+                file_details = self._dxr.get_file_metadata(file_id)
+                # Merge additional fields from file details into source
+                fields_to_merge = [
+                    "extractedMetadata",
+                    "scanDepth",
+                    "contentSha256",
+                    "createdAt",
+                    "labels",
+                    "dlpLabels",
+                    "owner",
+                    "createdBy",
+                    "modifiedBy",
+                    "datasource",
+                    "annotators",
+                ]
+                for field in fields_to_merge:
+                    if field in file_details:
+                        source[field] = file_details[field]
+                enriched.append(hit)
+            except Exception as e:
+                logger.warning(f"Failed to enrich file {file_id} with file details: {e}")
+                enriched.append(hit)
+
+        return enriched
 
     def _submit_batch(self, batch: Iterable[VolumeFile]) -> SubmittedJob:
         uploads: List[FileUpload] = []
