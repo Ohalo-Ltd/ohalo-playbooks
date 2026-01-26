@@ -48,6 +48,7 @@ Inject the following environment variables into the Databricks job task:
 | `METADATA_SCHEMA` | `VOLUME_SCHEMA` | Target schema for the metadata table. |
 | `METADATA_TABLE` | `<VOLUME_NAME>_metadata` | Target table name for metadata storage. |
 | `DXR_POLL_INTERVAL_SECONDS` | `10` | Poll frequency in seconds. |
+| `DXR_METADATA_EXTRACTION_DELAY_SECONDS` | `10` | Delay after job completion to allow metadata extraction to finish indexing. |
 | `DXR_MAX_BYTES_PER_JOB` | `30MB` | Byte budget per DXR submission. |
 | `DXR_MAX_FILES_PER_JOB` | `25` | Max files per DXR submission. |
 | `DXR_VERIFY_SSL` | `true` | Set to `false` to allow self-signed certs. |

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from contextlib import ExitStack
 from typing import Dict, Iterable, List
 
@@ -59,6 +60,11 @@ class UnityDXRJob:
                 if result.get("state") != "FINISHED":
                     logger.warning(f"Job {job.job_id} ended in state {result.get('state')}, attempting metadata collection anyway.")
 
+                # Wait for metadata extraction child jobs to complete and index in Elasticsearch
+                delay = self._config.dxr.metadata_extraction_delay_seconds
+                if delay > 0:
+                    logger.info(f"Waiting {delay} seconds for metadata extraction to complete and index...")
+                    time.sleep(delay)
 
                 scan_id = result.get("datasourceScanId")
                 if scan_id is None:

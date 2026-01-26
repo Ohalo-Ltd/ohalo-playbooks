@@ -56,6 +56,7 @@ class DataXRayConfig:
     ca_bundle_path: Optional[str] = None
     api_prefix: str = "/api"
     debug: bool = False
+    metadata_extraction_delay_seconds: int = 10
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,7 @@ def load_config(env_file: Optional[str] = ".env") -> JobConfig:
         ca_bundle_path=os.environ.get("DXR_CA_BUNDLE_PATH"),
         api_prefix=_normalize_api_prefix(os.environ.get("DXR_API_PREFIX", "/api")),
         debug=_env_bool("DXR_DEBUG", default=False),
+        metadata_extraction_delay_seconds=int(os.environ.get("DXR_METADATA_EXTRACTION_DELAY_SECONDS", "10")),
     )
     drop_table = _env_bool("DXR_DROP_METADATA_TABLE", default=False)
     return JobConfig(

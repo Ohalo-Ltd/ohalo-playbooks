@@ -14,6 +14,7 @@ def build_client() -> DataXRayClient:
         datasource_id="123",
         poll_interval_seconds=5,
         max_bytes_per_job=1024,
+        metadata_extraction_delay_seconds=0,
     )
     return DataXRayClient(config, api_key="token")
 
