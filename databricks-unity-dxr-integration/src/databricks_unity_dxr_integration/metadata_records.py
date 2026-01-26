@@ -157,10 +157,9 @@ def build_metadata_records(
 
         annotation_stats_json = _extract_annotation_stats(source)
 
-        # Extract metadata fields from extractedMetadata if present
-        # Check both direct field and potential nested locations
-        extracted_metadata = source.get("extractedMetadata") or source.get("dxr#extractedMetadata") or []
-        extracted_metadata_json, extracted_metadata_map = _extract_metadata_fields(extracted_metadata)
+        # Extract metadata fields directly from _source (indexed-files/search format)
+        # These appear as extracted_metadata#1, extracted_metadata#2, etc.
+        extracted_metadata_json, extracted_metadata_map = _extract_metadata_fields_from_source(source)
 
         # Extract owner, creator, modifier info
         owner_name, owner_email, owner_id = _extract_user_info(source.get("owner"))
@@ -332,6 +331,43 @@ def _extract_metadata_fields(extracted_metadata: List[Dict[str, Any]]) -> tuple[
             metadata_map[name] = str_value
 
     return json_string, metadata_map
+
+
+def _extract_metadata_fields_from_source(source: Dict[str, Any]) -> tuple[Optional[str], Dict[str, str]]:
+    """
+    Extract metadata fields directly from indexed-files/search _source object.
+
+    The indexed-files/search endpoint returns extracted metadata as numbered fields:
+    - extracted_metadata#1: "value1"
+    - extracted_metadata#2: "value2"
+    - etc.
+
+    Returns:
+        Tuple of (json_string, map_dict) where:
+        - json_string is a JSON representation of the extracted metadata
+        - map_dict is a dictionary mapping field keys to their values
+    """
+    if not isinstance(source, dict):
+        return None, {}
+
+    # Extract all extracted_metadata# fields
+    metadata_fields = {}
+    for key, value in source.items():
+        if isinstance(key, str) and key.startswith("extracted_metadata#"):
+            if value is not None:
+                # Convert value to string and truncate if too long
+                str_value = str(value)
+                if len(str_value) > 10000:
+                    str_value = str_value[:10000] + "...[truncated]"
+                metadata_fields[key] = str_value
+
+    if not metadata_fields:
+        return None, {}
+
+    # Store as JSON for complete fidelity
+    json_string = json.dumps(metadata_fields, separators=(",", ":"), sort_keys=True)
+
+    return json_string, metadata_fields
 
 
 def _extract_user_info(user_obj: Optional[Dict[str, Any]]) -> tuple[Optional[str], Optional[str], Optional[str]]:

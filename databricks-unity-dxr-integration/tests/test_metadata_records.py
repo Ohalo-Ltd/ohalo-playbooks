@@ -119,6 +119,38 @@ def test_extract_metadata_fields_handles_empty():
     assert metadata_map == {}
 
 
+def test_extract_metadata_fields_from_source():
+    from databricks_unity_dxr_integration.metadata_records import _extract_metadata_fields_from_source
+
+    source = {
+        "dxr#file_id": "abc123",
+        "ds#file_name": "test.pdf",
+        "extracted_metadata#1": "LEAP-1B-72-00-0369-01A-930A-D",
+        "extracted_metadata#2": "ENGINE - GENERAL",
+        "extracted_metadata#3": "Issue 001-00 - 2022-08-22",
+        "other_field": "not metadata",
+    }
+
+    json_string, metadata_map = _extract_metadata_fields_from_source(source)
+
+    assert json_string is not None
+    assert "extracted_metadata#1" in json_string
+    assert metadata_map["extracted_metadata#1"] == "LEAP-1B-72-00-0369-01A-930A-D"
+    assert metadata_map["extracted_metadata#2"] == "ENGINE - GENERAL"
+    assert metadata_map["extracted_metadata#3"] == "Issue 001-00 - 2022-08-22"
+    assert len(metadata_map) == 3
+    assert "other_field" not in metadata_map
+
+
+def test_extract_metadata_fields_from_source_handles_empty():
+    from databricks_unity_dxr_integration.metadata_records import _extract_metadata_fields_from_source
+
+    json_string, metadata_map = _extract_metadata_fields_from_source({})
+
+    assert json_string is None
+    assert metadata_map == {}
+
+
 def test_build_metadata_records_extracts_annotators():
     from databricks_unity_dxr_integration.metadata_records import _extract_annotators_info
 
@@ -160,9 +192,8 @@ def test_build_metadata_records_with_full_metadata():
                 "dxr#datasource_scan_id": 99,
                 "dxr#file_id": "abc",
                 "ds#file_name": "file1.pdf",
-                "extractedMetadata": [
-                    {"name": "SB Number", "value": "SB-123", "type": "TEXT"}
-                ],
+                "extracted_metadata#1": "LEAP-1B-72-00-0369-01A-930A-D",
+                "extracted_metadata#2": "ENGINE - GENERAL (72-00-00)",
                 "scanDepth": "DISCOVERY_AND_CLASSIFICATION",
                 "contentSha256": "abc123",
                 "createdAt": "2024-01-01T00:00:00Z",
@@ -205,7 +236,8 @@ def test_build_metadata_records_with_full_metadata():
 
     assert len(records) == 1
     record = records[0]
-    assert record.extracted_metadata_map["SB Number"] == "SB-123"
+    assert record.extracted_metadata_map["extracted_metadata#1"] == "LEAP-1B-72-00-0369-01A-930A-D"
+    assert record.extracted_metadata_map["extracted_metadata#2"] == "ENGINE - GENERAL (72-00-00)"
     assert record.scan_depth == "DISCOVERY_AND_CLASSIFICATION"
     assert record.content_sha256 == "abc123"
     assert record.created_at == "2024-01-01T00:00:00Z"
