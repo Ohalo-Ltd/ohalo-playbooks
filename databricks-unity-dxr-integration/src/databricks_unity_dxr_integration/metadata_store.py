@@ -93,7 +93,7 @@ class MetadataStore:
                 connector_type STRING,
                 connector_site_url STRING,
                 annotators_json STRING,
-                annotators_summary MAP<STRING, INT>,
+                annotators_summary MAP<STRING, BIGINT>,
                 collected_at TIMESTAMP
             )
             USING DELTA
