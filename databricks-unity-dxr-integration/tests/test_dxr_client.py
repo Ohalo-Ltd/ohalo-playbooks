@@ -14,6 +14,7 @@ def build_client() -> DataXRayClient:
         datasource_id="123",
         poll_interval_seconds=5,
         max_bytes_per_job=1024,
+        metadata_extraction_delay_seconds=0,
     )
     return DataXRayClient(config, api_key="token")
 
@@ -37,13 +38,85 @@ def test_submit_job_returns_job_id():
 @responses.activate
 def test_search_by_scan_id_returns_hits():
     client = build_client()
+    # First page returns results
     responses.add(
         responses.POST,
         "https://dxr.example/api/indexed-files/search",
         json={"hits": {"hits": [{"_source": {"id": "file"}}]}},
         status=200,
     )
+    # Second page returns empty to stop pagination
+    responses.add(
+        responses.POST,
+        "https://dxr.example/api/indexed-files/search",
+        json={"hits": {"hits": []}},
+        status=200,
+    )
 
     hits = client.search_by_scan_id(scan_id=99, page_size=1)
 
     assert hits == [{"_source": {"id": "file"}}]
+
+
+@responses.activate
+def test_get_file_metadata_returns_file_details():
+    client = build_client()
+    responses.add(
+        responses.GET,
+        "https://dxr.example/api/v1/files/file-123",
+        json={
+            "fileId": "file-123",
+            "fileName": "test.pdf",
+            "extractedMetadata": [
+                {"name": "Title", "value": "Test Document", "type": "TEXT"}
+            ],
+            "owner": {"name": "John Doe", "email": "john@example.com"},
+            "scanDepth": "DISCOVERY_AND_CLASSIFICATION",
+        },
+        status=200,
+    )
+
+    file_details = client.get_file_metadata("file-123")
+
+    assert file_details["fileId"] == "file-123"
+    assert file_details["fileName"] == "test.pdf"
+    assert len(file_details["extractedMetadata"]) == 1
+    assert file_details["extractedMetadata"][0]["name"] == "Title"
+    assert file_details["owner"]["email"] == "john@example.com"
+
+
+@responses.activate
+def test_get_metadata_definitions_returns_definitions():
+    client = build_client()
+    responses.add(
+        responses.GET,
+        "https://dxr.example/api/datasources/ingester/elasticsearch/allmetadata",
+        json=[
+            {
+                "meta_field": "1",
+                "source": "extracted_metadata",
+                "type": "text",
+                "display_name": "Service Bulletin (SB) Number Identification"
+            },
+            {
+                "meta_field": "2",
+                "source": "extracted_metadata",
+                "type": "text",
+                "display_name": "Service Bulletin Title"
+            },
+            {
+                "meta_field": "binary_hash",
+                "source": "metadata",
+                "type": "text"
+            }
+        ],
+        status=200,
+    )
+
+    definitions = client.get_metadata_definitions()
+
+    assert len(definitions) == 3
+    assert definitions[0]["meta_field"] == "1"
+    assert definitions[0]["display_name"] == "Service Bulletin (SB) Number Identification"
+    assert definitions[1]["meta_field"] == "2"
+    assert definitions[1]["display_name"] == "Service Bulletin Title"

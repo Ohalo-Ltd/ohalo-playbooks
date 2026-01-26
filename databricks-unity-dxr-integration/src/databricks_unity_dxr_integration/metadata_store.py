@@ -9,6 +9,7 @@ try:  # pragma: no cover - imported at runtime on Databricks
         ArrayType,
         BooleanType,
         LongType,
+        MapType,
         StringType,
         StructField,
         StructType,
@@ -17,7 +18,7 @@ try:  # pragma: no cover - imported at runtime on Databricks
 except ImportError:  # pragma: no cover
     DataFrame = object  # type: ignore
     SparkSession = object  # type: ignore
-    ArrayType = BooleanType = LongType = StringType = StructField = StructType = TimestampType = None  # type: ignore
+    ArrayType = BooleanType = LongType = MapType = StringType = StructField = StructType = TimestampType = None  # type: ignore
 
 from .config import MetadataTableConfig
 from .metadata_records import MetadataRecord
@@ -32,6 +33,10 @@ class MetadataStore:
 
     def ensure_table(self, drop_existing: bool = False) -> None:
         table = self._config.identifier
+        # Ensure schema exists before any table operations
+        schema_identifier = f"{self._config.catalog}.{self._config.schema}"
+        self._spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_identifier}")
+
         if drop_existing:
             self._spark.sql(f"DROP TABLE IF EXISTS {table}")
         self._spark.sql(
@@ -50,6 +55,7 @@ class MetadataStore:
                 file_name STRING,
                 object_id STRING,
                 parent_paths ARRAY<STRING>,
+                folder_id STRING,
                 mime_type STRING,
                 indexed_at STRING,
                 sha256 STRING,
@@ -63,12 +69,14 @@ class MetadataStore:
                 dxr_tags ARRAY<STRING>,
                 removed_tags ARRAY<STRING>,
                 ocr_used BOOLEAN,
-                categories ARRAY<STRING>,
-                annotations STRING,
-                folder_id STRING,
-                modified_at STRING,
-                binary_hash STRING,
+                ai_category STRING,
+                ai_category_last_updated STRING,
                 annotation_stats_json STRING,
+                annotations_json STRING,
+                metadata_fields_json STRING,
+                metadata_fields_map MAP<STRING, STRING>,
+                extracted_metadata_json STRING,
+                extracted_metadata_map MAP<STRING, STRING>,
                 raw_metadata STRING,
                 collected_at TIMESTAMP
             )
@@ -109,6 +117,7 @@ class MetadataStore:
                 file_name = source.file_name,
                 object_id = source.object_id,
                 parent_paths = source.parent_paths,
+                folder_id = source.folder_id,
                 mime_type = source.mime_type,
                 indexed_at = source.indexed_at,
                 sha256 = source.sha256,
@@ -122,12 +131,14 @@ class MetadataStore:
                 dxr_tags = source.dxr_tags,
                 removed_tags = source.removed_tags,
                 ocr_used = source.ocr_used,
-                categories = source.categories,
-                annotations = source.annotations,
-                folder_id = source.folder_id,
-                modified_at = source.modified_at,
-                binary_hash = source.binary_hash,
+                ai_category = source.ai_category,
+                ai_category_last_updated = source.ai_category_last_updated,
                 annotation_stats_json = source.annotation_stats_json,
+                annotations_json = source.annotations_json,
+                metadata_fields_json = source.metadata_fields_json,
+                metadata_fields_map = source.metadata_fields_map,
+                extracted_metadata_json = source.extracted_metadata_json,
+                extracted_metadata_map = source.extracted_metadata_map,
                 raw_metadata = source.raw_metadata,
                 collected_at = source.collected_at
             WHEN NOT MATCHED THEN INSERT *
@@ -154,6 +165,7 @@ def _build_schema():
             StructField("file_name", StringType(), nullable=True),
             StructField("object_id", StringType(), nullable=True),
             StructField("parent_paths", ArrayType(StringType(), containsNull=False), nullable=False),
+            StructField("folder_id", StringType(), nullable=True),
             StructField("mime_type", StringType(), nullable=True),
             StructField("indexed_at", StringType(), nullable=True),
             StructField("sha256", StringType(), nullable=True),
@@ -167,12 +179,14 @@ def _build_schema():
             StructField("dxr_tags", ArrayType(StringType(), containsNull=False), nullable=False),
             StructField("removed_tags", ArrayType(StringType(), containsNull=False), nullable=False),
             StructField("ocr_used", BooleanType(), nullable=True),
-            StructField("categories", ArrayType(StringType(), containsNull=False), nullable=False),
-            StructField("annotations", StringType(), nullable=True),
-            StructField("folder_id", StringType(), nullable=True),
-            StructField("modified_at", StringType(), nullable=True),
-            StructField("binary_hash", StringType(), nullable=True),
+            StructField("ai_category", StringType(), nullable=True),
+            StructField("ai_category_last_updated", StringType(), nullable=True),
             StructField("annotation_stats_json", StringType(), nullable=True),
+            StructField("annotations_json", StringType(), nullable=True),
+            StructField("metadata_fields_json", StringType(), nullable=True),
+            StructField("metadata_fields_map", MapType(StringType(), StringType(), valueContainsNull=False), nullable=False),
+            StructField("extracted_metadata_json", StringType(), nullable=True),
+            StructField("extracted_metadata_map", MapType(StringType(), StringType(), valueContainsNull=False), nullable=False),
             StructField("raw_metadata", StringType(), nullable=False),
             StructField("collected_at", TimestampType(), nullable=False),
         ]

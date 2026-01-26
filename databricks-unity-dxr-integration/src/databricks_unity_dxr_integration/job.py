@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from contextlib import ExitStack
 from typing import Dict, Iterable, List
 
@@ -42,6 +43,19 @@ class UnityDXRJob:
             logger.info("No files discovered in the configured volume.")
             return
 
+        # Fetch metadata definitions once to map extracted metadata field IDs to display names
+        logger.info("Fetching metadata definitions...")
+        metadata_defs_list = self._dxr.get_metadata_definitions()
+        # Build mapping from field IDs to display names for extracted_metadata fields
+        metadata_defs = {}
+        for definition in metadata_defs_list:
+            if definition.get("source") == "extracted_metadata" and "meta_field" in definition:
+                field_id = str(definition["meta_field"])
+                display_name = definition.get("display_name")
+                if display_name:
+                    metadata_defs[field_id] = display_name
+        logger.info(f"Loaded {len(metadata_defs)} extracted metadata field definitions.")
+
         batches = plan_batches(
             files,
             max_bytes=self._config.dxr.max_bytes_per_job,
@@ -59,6 +73,11 @@ class UnityDXRJob:
                 if result.get("state") != "FINISHED":
                     logger.warning(f"Job {job.job_id} ended in state {result.get('state')}, attempting metadata collection anyway.")
 
+                # Wait for metadata extraction child jobs to complete and index in Elasticsearch
+                delay = self._config.dxr.metadata_extraction_delay_seconds
+                if delay > 0:
+                    logger.info(f"Waiting {delay} seconds for metadata extraction to complete and index...")
+                    time.sleep(delay)
 
                 scan_id = result.get("datasourceScanId")
                 if scan_id is None:
@@ -66,6 +85,7 @@ class UnityDXRJob:
                     continue
 
                 metadata = self._dxr.search_by_scan_id(scan_id)
+
                 files_by_name = {file.upload_name: file for file in batch}
                 records = build_metadata_records(
                     volume_config=self._config.volume,
@@ -73,6 +93,7 @@ class UnityDXRJob:
                     datasource_id=self._config.dxr.datasource_id,
                     hits=metadata,
                     known_files=files_by_name,
+                    metadata_defs=metadata_defs,
                 )
                 self._metadata_store.upsert_records(records)
                 logger.info(f"Wrote {len(records)} metadata rows for job {job.job_id}.")
