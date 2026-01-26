@@ -32,6 +32,10 @@ class MetadataStore:
 
     def ensure_table(self, drop_existing: bool = False) -> None:
         table = self._config.identifier
+        # Ensure schema exists before any table operations
+        schema_identifier = f"{self._config.catalog}.{self._config.schema}"
+        self._spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_identifier}")
+
         if drop_existing:
             self._spark.sql(f"DROP TABLE IF EXISTS {table}")
         self._spark.sql(
