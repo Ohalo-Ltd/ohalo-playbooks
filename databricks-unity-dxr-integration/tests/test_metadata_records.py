@@ -131,6 +131,7 @@ def test_extract_metadata_fields_from_source():
         "other_field": "not metadata",
     }
 
+    # Test without metadata definitions (should use raw field names)
     json_string, metadata_map = _extract_metadata_fields_from_source(source)
 
     assert json_string is not None
@@ -140,6 +141,21 @@ def test_extract_metadata_fields_from_source():
     assert metadata_map["extracted_metadata#3"] == "Issue 001-00 - 2022-08-22"
     assert len(metadata_map) == 3
     assert "other_field" not in metadata_map
+
+    # Test with metadata definitions (should use display names)
+    metadata_defs = {
+        "1": "Service Bulletin (SB) Number Identification",
+        "2": "Service Bulletin Title",
+        "3": "Service Bulletin Issue Number & Effective Date",
+    }
+    json_string, metadata_map = _extract_metadata_fields_from_source(source, metadata_defs)
+
+    assert json_string is not None
+    assert "Service Bulletin (SB) Number Identification" in metadata_map
+    assert metadata_map["Service Bulletin (SB) Number Identification"] == "LEAP-1B-72-00-0369-01A-930A-D"
+    assert metadata_map["Service Bulletin Title"] == "ENGINE - GENERAL"
+    assert metadata_map["Service Bulletin Issue Number & Effective Date"] == "Issue 001-00 - 2022-08-22"
+    assert len(metadata_map) == 3
 
 
 def test_extract_metadata_fields_from_source_handles_empty():

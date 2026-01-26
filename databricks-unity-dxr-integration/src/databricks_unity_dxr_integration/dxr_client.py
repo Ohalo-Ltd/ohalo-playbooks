@@ -106,6 +106,15 @@ class DataXRayClient:
         _raise_for_status(response)
         return response.json()
 
+    def get_metadata_definitions(self) -> List[Dict]:
+        """Fetch metadata field definitions including extracted metadata display names."""
+        response = self._session.get(
+            self._build_url("datasources/ingester/elasticsearch/allmetadata"),
+            timeout=30,
+        )
+        _raise_for_status(response)
+        return response.json()
+
     @retry(
         retry=retry_if_exception_type(DataXRayError),
         wait=wait_exponential(multiplier=1, min=2, max=30),

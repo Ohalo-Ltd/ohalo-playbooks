@@ -83,3 +83,40 @@ def test_get_file_metadata_returns_file_details():
     assert len(file_details["extractedMetadata"]) == 1
     assert file_details["extractedMetadata"][0]["name"] == "Title"
     assert file_details["owner"]["email"] == "john@example.com"
+
+
+@responses.activate
+def test_get_metadata_definitions_returns_definitions():
+    client = build_client()
+    responses.add(
+        responses.GET,
+        "https://dxr.example/api/datasources/ingester/elasticsearch/allmetadata",
+        json=[
+            {
+                "meta_field": "1",
+                "source": "extracted_metadata",
+                "type": "text",
+                "display_name": "Service Bulletin (SB) Number Identification"
+            },
+            {
+                "meta_field": "2",
+                "source": "extracted_metadata",
+                "type": "text",
+                "display_name": "Service Bulletin Title"
+            },
+            {
+                "meta_field": "binary_hash",
+                "source": "metadata",
+                "type": "text"
+            }
+        ],
+        status=200,
+    )
+
+    definitions = client.get_metadata_definitions()
+
+    assert len(definitions) == 3
+    assert definitions[0]["meta_field"] == "1"
+    assert definitions[0]["display_name"] == "Service Bulletin (SB) Number Identification"
+    assert definitions[1]["meta_field"] == "2"
+    assert definitions[1]["display_name"] == "Service Bulletin Title"

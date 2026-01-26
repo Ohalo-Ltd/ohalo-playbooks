@@ -43,6 +43,19 @@ class UnityDXRJob:
             logger.info("No files discovered in the configured volume.")
             return
 
+        # Fetch metadata definitions once to map extracted metadata field IDs to display names
+        logger.info("Fetching metadata definitions...")
+        metadata_defs_list = self._dxr.get_metadata_definitions()
+        # Build mapping from field IDs to display names for extracted_metadata fields
+        metadata_defs = {}
+        for definition in metadata_defs_list:
+            if definition.get("source") == "extracted_metadata" and "meta_field" in definition:
+                field_id = str(definition["meta_field"])
+                display_name = definition.get("display_name")
+                if display_name:
+                    metadata_defs[field_id] = display_name
+        logger.info(f"Loaded {len(metadata_defs)} extracted metadata field definitions.")
+
         batches = plan_batches(
             files,
             max_bytes=self._config.dxr.max_bytes_per_job,
@@ -80,6 +93,7 @@ class UnityDXRJob:
                     datasource_id=self._config.dxr.datasource_id,
                     hits=metadata,
                     known_files=files_by_name,
+                    metadata_defs=metadata_defs,
                 )
                 self._metadata_store.upsert_records(records)
                 logger.info(f"Wrote {len(records)} metadata rows for job {job.job_id}.")

@@ -131,8 +131,18 @@ def build_metadata_records(
     datasource_id: str,
     hits: Iterable[Dict[str, Any]],
     known_files: Dict[str, VolumeFile],
+    metadata_defs: Optional[Dict[str, str]] = None,
 ) -> List[MetadataRecord]:
-    """Match DXR metadata hits back to the originating Unity Catalog files."""
+    """Match DXR metadata hits back to the originating Unity Catalog files.
+
+    Args:
+        volume_config: Unity Catalog volume configuration
+        job_id: ODC job ID
+        datasource_id: Data X-Ray datasource ID
+        hits: Search results from indexed-files/search
+        known_files: Dictionary mapping file keys to VolumeFile objects
+        metadata_defs: Optional mapping from field IDs to display names for extracted metadata
+    """
     records: List[MetadataRecord] = []
     for index, hit in enumerate(hits):
         source = hit.get("_source", {}) if isinstance(hit, dict) else {}
@@ -159,7 +169,8 @@ def build_metadata_records(
 
         # Extract metadata fields directly from _source (indexed-files/search format)
         # These appear as extracted_metadata#1, extracted_metadata#2, etc.
-        extracted_metadata_json, extracted_metadata_map = _extract_metadata_fields_from_source(source)
+        # Map to human-readable names if metadata definitions are provided
+        extracted_metadata_json, extracted_metadata_map = _extract_metadata_fields_from_source(source, metadata_defs)
 
         # Extract owner, creator, modifier info
         owner_name, owner_email, owner_id = _extract_user_info(source.get("owner"))
@@ -333,7 +344,10 @@ def _extract_metadata_fields(extracted_metadata: List[Dict[str, Any]]) -> tuple[
     return json_string, metadata_map
 
 
-def _extract_metadata_fields_from_source(source: Dict[str, Any]) -> tuple[Optional[str], Dict[str, str]]:
+def _extract_metadata_fields_from_source(
+    source: Dict[str, Any],
+    metadata_defs: Optional[Dict[str, str]] = None
+) -> tuple[Optional[str], Dict[str, str]]:
     """
     Extract metadata fields directly from indexed-files/search _source object.
 
@@ -342,10 +356,15 @@ def _extract_metadata_fields_from_source(source: Dict[str, Any]) -> tuple[Option
     - extracted_metadata#2: "value2"
     - etc.
 
+    Args:
+        source: The _source object from indexed-files/search response
+        metadata_defs: Optional mapping from field IDs to display names
+                      (e.g., {"1": "Service Bulletin (SB) Number Identification"})
+
     Returns:
         Tuple of (json_string, map_dict) where:
         - json_string is a JSON representation of the extracted metadata
-        - map_dict is a dictionary mapping field keys to their values
+        - map_dict is a dictionary mapping display names (if available) to their values
     """
     if not isinstance(source, dict):
         return None, {}
@@ -359,7 +378,15 @@ def _extract_metadata_fields_from_source(source: Dict[str, Any]) -> tuple[Option
                 str_value = str(value)
                 if len(str_value) > 10000:
                     str_value = str_value[:10000] + "...[truncated]"
-                metadata_fields[key] = str_value
+
+                # Try to map to display name if metadata definitions provided
+                field_id = key.replace("extracted_metadata#", "")
+                if metadata_defs and field_id in metadata_defs:
+                    display_name = metadata_defs[field_id]
+                    metadata_fields[display_name] = str_value
+                else:
+                    # Fall back to raw field key if no mapping available
+                    metadata_fields[key] = str_value
 
     if not metadata_fields:
         return None, {}
