@@ -304,4 +304,3 @@ def _coerce_tag_icon(raw: str) -> AtlanIcon:
 
 
 __all__ = ["AtlanRESTClient", "AtlanRequestError"]
-from pyatlan.errors import AtlanError
