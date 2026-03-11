@@ -53,7 +53,7 @@ def test_search_assets_uses_property_count(monkeypatch: pytest.MonkeyPatch) -> N
 
     monkeypatch.setattr(
         atlan_service,
-        "get_atlan_client",
+        "AtlanClient",
         lambda base_url, api_key: stub_client,
     )
 

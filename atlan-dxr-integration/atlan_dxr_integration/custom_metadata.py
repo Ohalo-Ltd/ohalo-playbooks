@@ -7,7 +7,6 @@ import logging
 from dataclasses import dataclass
 from typing import Iterable, List, Optional, Sequence, Set
 
-from application_sdk.clients.atlan import get_client as get_atlan_client
 from pyatlan.client.atlan import AtlanClient
 from pyatlan.errors import AtlanError, NotFoundError
 from pyatlan.model.enums import (
@@ -165,7 +164,7 @@ class CustomMetadataManager:
 
     @classmethod
     def from_config(cls, config: Config) -> "CustomMetadataManager":
-        client = get_atlan_client(
+        client = AtlanClient(
             base_url=config.atlan_base_url,
             api_key=config.atlan_api_token,
         )
@@ -259,14 +258,23 @@ class CustomMetadataManager:
         applicable_assets: Optional[Set[str]] = (
             set(spec.applicable_asset_types) if spec.applicable_asset_types else None
         )
-        return AttributeDef.create(
+        # pyatlan ≥8.5 merged STRING and RICH_TEXT into the same enum value and blocks
+        # multi_valued=True for that type via AttributeDef.create(). Work around this by
+        # always passing multi_valued=False to create() (which resolves all applicable-type
+        # collections from the client), then enabling multi-value directly on the returned
+        # options object — the Options.__setattr__ hook updates cardinality and type_name.
+        attr_def = AttributeDef.create(
             client=self._client,
             display_name=spec.display_name,
             attribute_type=spec.attribute_type,
-            multi_valued=spec.multi_valued,
+            multi_valued=False,
             applicable_asset_types=applicable_assets,
             description=spec.description,
         )
+        if spec.multi_valued:
+            attr_def.options.is_rich_text = False
+            attr_def.options.multi_value_select = True
+        return attr_def
 
 
 def ensure_default_sets(config: Config) -> None:

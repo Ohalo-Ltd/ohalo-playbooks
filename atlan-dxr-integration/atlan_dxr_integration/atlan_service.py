@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from typing import Any, Dict, Iterable, List, Optional
 
 from http import HTTPStatus
 
 import pyatlan.model.assets as asset_models
-from application_sdk.clients.atlan import get_client as get_atlan_client
-from application_sdk.constants import ATLAN_API_KEY, ATLAN_BASE_URL
-from application_sdk.observability.logger_adaptor import get_logger
 from pydantic.v1 import ValidationError
 from pyatlan.client.atlan import AtlanClient
 from pyatlan.errors import AtlanError, NotFoundError
@@ -25,7 +24,7 @@ from pyatlan.model.response import AssetMutationResponse
 from pyatlan.model.search import IndexSearchRequest
 from pyatlan.model.typedef import AtlanTagDef
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class AtlanRequestError(RuntimeError):
@@ -47,13 +46,13 @@ class AtlanRESTClient:
         api_key: str | None = None,
         timeout: float = 120.0,  # noqa: ARG002 - retained for backwards compatibility
     ) -> None:
-        resolved_base_url = (base_url or ATLAN_BASE_URL or "").rstrip("/")
+        resolved_base_url = (base_url or os.getenv("ATLAN_BASE_URL", "")).rstrip("/")
         if not resolved_base_url:
             raise ValueError("ATLAN_BASE_URL must be configured to use AtlanRESTClient.")
 
-        self._client: AtlanClient = get_atlan_client(
+        self._client: AtlanClient = AtlanClient(
             base_url=resolved_base_url,
-            api_key=api_key or ATLAN_API_KEY,
+            api_key=api_key or os.getenv("ATLAN_API_KEY", ""),
         )
 
     @property
@@ -81,8 +80,16 @@ class AtlanRESTClient:
             )
         except NotFoundError:
             return None
-        except AtlanError as exc:  # pragma: no cover - defensive
+        except AtlanError as exc:
             raise _wrap_error(exc) from exc
+        except TypeError as exc:
+            # pyatlan ≥8.x can raise TypeError when the API returns a non-200 with
+            # an empty body (e.g. 503), after already logging the AtlanError.
+            raise AtlanRequestError(
+                f"Unexpected response from Atlan for {type_name} '{qualified_name}'",
+                status_code=503,
+                details=str(exc),
+            ) from exc
         return {"entity": _asset_to_dict(asset)}
 
     def search_assets(self, payload: Dict[str, Any]) -> Dict[str, Any]:
