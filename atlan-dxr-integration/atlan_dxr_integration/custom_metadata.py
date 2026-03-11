@@ -162,14 +162,6 @@ class CustomMetadataManager:
         self._client = client
         self._specs: Sequence[MetadataSetSpec] = specs or _default_metadata_specs()
 
-    @classmethod
-    def from_config(cls, config: Config) -> "CustomMetadataManager":
-        client = AtlanClient(
-            base_url=config.atlan_base_url,
-            api_key=config.atlan_api_token,
-        )
-        return cls(client)
-
     def ensure_specifications(self) -> None:
         """Ensure each configured custom metadata set exists (creating or extending as needed)."""
 
@@ -277,11 +269,10 @@ class CustomMetadataManager:
         return attr_def
 
 
-def ensure_default_sets(config: Config) -> None:
+def ensure_default_sets(client: AtlanClient) -> None:
     """Convenience helper to provision the integration's default custom metadata structures."""
 
-    manager = CustomMetadataManager.from_config(config)
-    manager.ensure_specifications()
+    CustomMetadataManager(client).ensure_specifications()
 
 
 def main(argv: Optional[List[str]] = None) -> None:  # pragma: no cover - CLI glue
@@ -310,7 +301,8 @@ def main(argv: Optional[List[str]] = None) -> None:  # pragma: no cover - CLI gl
     log_level = (args.log_level or config.log_level).upper()
     logging.basicConfig(level=log_level)
 
-    ensure_default_sets(config)
+    client = AtlanClient(base_url=config.atlan_base_url, api_key=config.atlan_api_token)
+    ensure_default_sets(client)
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI glue

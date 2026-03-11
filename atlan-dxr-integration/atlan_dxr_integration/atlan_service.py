@@ -234,6 +234,9 @@ class AtlanRESTClient:
 
     def purge_typedef(self, internal_name: str) -> None:
         try:
+            # pyatlan's typedef client does not expose a delete/purge method, so we
+            # construct the DELETE request directly using the SDK's internal HTTP helpers.
+            # Revisit if pyatlan adds AtlanClient.typedef.purge() in a future release.
             api = API(
                 f"types/typedef/name/{internal_name}",
                 HTTPMethod.DELETE,

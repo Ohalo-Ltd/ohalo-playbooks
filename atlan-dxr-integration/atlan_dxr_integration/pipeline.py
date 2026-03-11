@@ -31,7 +31,7 @@ def run(config: Optional[Config] = None) -> None:
     LOGGER.info("Starting DXR → Atlan sync")
 
     uploader = AtlanUploader(config)
-    ensure_default_sets(config)
+    ensure_default_sets(uploader.rest_client.atlan_client)
     rest_client = uploader.rest_client
     provisioner = uploader.provisioner
     tag_registry = TagRegistry(rest_client, namespace=config.atlan_tag_namespace)

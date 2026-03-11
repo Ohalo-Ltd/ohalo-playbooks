@@ -179,11 +179,11 @@ def backfill_file_metadata(
 ) -> None:
     """Migrate existing file assets to the custom metadata model."""
 
-    ensure_default_sets(config)
     rest_client = AtlanRESTClient(
         base_url=config.atlan_base_url,
         api_key=config.atlan_api_token,
     )
+    ensure_default_sets(rest_client.atlan_client)
 
     connection_namespace = config.global_connection_namespace
     offset = 0
