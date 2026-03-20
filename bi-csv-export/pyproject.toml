@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=70", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "dxr-to-csv"
+version = "0.1.0"
+description = "Export Data X-Ray /api/v1/files metadata to analysis-ready CSV tables"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+powerbi = [
+    "msal>=1.28",
+]
+dev = [
+    "pytest>=8",
+    "pytest-mock>=3",
+]
+
+[project.scripts]
+dxr-to-csv = "dxr_to_csv.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: fast, no network",
+    "integration: requires a live DXR instance",
+]
