@@ -1,0 +1,10 @@
+file_id,field_name,value,data_type
+f001,document_contains_salary,True,BOOLEAN
+f001,department,Human Resources,TEXT
+f001,record_count,247,NUMBER
+f002,document_contains_salary,False,BOOLEAN
+f002,department,Finance,TEXT
+f003,contract_type,NDA,TEXT
+f003,effective_date,2025-02-01,TEXT
+f003,counterparty,TechVendor Inc.,TEXT
+f004,document_contains_salary,False,BOOLEAN

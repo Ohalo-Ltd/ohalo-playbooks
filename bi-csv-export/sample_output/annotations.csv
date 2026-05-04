@@ -1,0 +1,13 @@
+file_id,annotator_id,annotator_name,value,start,end,confidence
+f001,21,PERSON,Alice Johnson,42,55,
+f001,21,PERSON,Bob Smith,128,137,
+f001,42,EMAIL_ADDRESS,alice.johnson@acme.com,60,82,
+f001,42,EMAIL_ADDRESS,bob.smith@acme.com,142,162,
+f001,3,PHONE_NUMBER,+1 (555) 234-5678,90,107,
+f002,18,ORGANIZATION,Acme Corp,15,24,
+f002,18,ORGANIZATION,Calibra Analytics,450,468,
+f003,21,PERSON,Carlos Mendez,210,223,
+f003,18,ORGANIZATION,TechVendor Inc.,85,100,
+f003,18,ORGANIZATION,Acme Corp,120,129,
+f003,16,POSTAL_ADDRESS,"1 Tech Park, San Jose, CA 95110",300,330,
+f004,18,ORGANIZATION,Acme Corp,5,14,

@@ -27,8 +27,11 @@ This repository currently includes the following playbooks:
 - **[`s3-etl-quarantine`](./s3-etl-quarantine/)**  
   Pulumi-managed guardrail that watches S3 staging zones, classifies files with Data X-Ray, and automatically quarantines risky payloads feeding unstructured ETL pipelines. The [README](./s3-etl-quarantine/README.md) covers prerequisites, deployment, and cleanup steps.
 
-- **[`file-records-management-in-databricks`](./file-records-management-in-databricks/)**  
+- **[`file-records-management-in-databricks`](./file-records-management-in-databricks/)**
   Databricks workflow that lands Data X-Ray `/api/v1/files` payloads in Delta so you can run records-management policies (duplicate remediation, ROT cleanup, retention gaps, etc.) on a consistent daily snapshot.
+
+- **[`bi-csv-export`](./bi-csv-export/)**
+  Zero-dependency Python script that streams Data X-Ray's `/api/v1/files` endpoint and normalises nested metadata into five flat CSV tables — files, labels, annotations, extracted metadata, and DLP labels — ready for direct import into Tableau, Power BI, Excel, or DuckDB.
 
 ## Getting Started
 

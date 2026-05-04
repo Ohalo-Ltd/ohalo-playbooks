@@ -1,0 +1,5 @@
+file_id,label_id,label_name,label_hex_color,label_type,label_description
+f001,11,PII,E74C3C,SMART,Contains personally identifiable information
+f001,15,CONFIDENTIAL,C0392B,STANDARD,Confidential document
+f002,15,CONFIDENTIAL,C0392B,STANDARD,Confidential document
+f004,20,PUBLIC,27AE60,STANDARD,Approved for public release
