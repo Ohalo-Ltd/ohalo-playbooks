@@ -85,7 +85,7 @@ The startup script will validate your configuration and launch:
 | `DATAXRAY_VERIFY_TLS` | `true` | Checks the TLS certificate of DataXray. Set it to `false` only for a test instance with a self-signed certificate. |
 | `FAIL_OPEN` | `false` | When classification fails, the proxy rejects the email with `451`, and the sending server tries again later. Set it to `true` only for a demo. Then the proxy delivers the email without a classification, and an attachment with sensitive data can go through. |
 
-The proxy keeps the SMTP connection open while DataXray classifies each attachment. The sending client waits until each On-Demand Classifier job completes.
+The proxy keeps the SMTP connection open while DataXray classifies each attachment. The sending client waits until each On-Demand Classifier job completes. The proxy sets no time limit; the timeout of the sending client applies.
 
 ### 3. Configure Your Email Client
 
