@@ -157,6 +157,24 @@ class TestEmailSecurityHandler:
         assert result == "451 Classification unavailable - please try again later"
         handler.forward_message.assert_not_called()
 
+    async def test_handle_data_rejects_with_451_when_classification_returns_no_hits(
+        self, handler, sample_emails, temp_test_files, mock_dxr_client
+    ):
+        """dxrpy returns no hits, not an exception, when the classifier job fails."""
+        mock_dxr_client.on_demand_classifier.run_job.return_value = []
+
+        email = sample_emails("Failed Job Test", temp_test_files["benign"])
+
+        envelope = Mock()
+        envelope.mail_from = "test@example.com"
+        envelope.rcpt_tos = ["recipient@example.com"]
+        envelope.content = email.as_bytes()
+
+        result = await handler.handle_DATA(Mock(), Mock(), envelope)
+
+        assert result == "451 Classification unavailable - please try again later"
+        handler.forward_message.assert_not_called()
+
     async def test_handle_data_forwards_when_classification_fails_and_fail_open_is_true(
         self, handler, mock_config, sample_emails, temp_test_files, mock_dxr_client
     ):

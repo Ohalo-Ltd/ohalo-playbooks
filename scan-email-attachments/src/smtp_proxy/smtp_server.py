@@ -186,6 +186,13 @@ class EmailSecurityHandler:
                             )
                         )
 
+                        # dxrpy returns no hits, not an exception, when the job fails.
+                        # The search by scan ID finds the file also when it has no labels.
+                        if not hits:
+                            raise RuntimeError(
+                                f"DataXray returned no classification result for {filename}"
+                            )
+
                         # Check for sensitive content
                         restricted_label = self._get_sensitive_labels(hits)
 
