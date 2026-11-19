@@ -206,7 +206,7 @@ class TestEmailSecurityHandler:
             (False, True),
         ],
     )
-    def test_init_passes_tls_setting_to_dxr_client(
+    def test_init_passes_ignore_ssl_to_dxr_client_when_verify_tls_is_set(
         self,
         mock_config,
         mock_dxr_client_class,
