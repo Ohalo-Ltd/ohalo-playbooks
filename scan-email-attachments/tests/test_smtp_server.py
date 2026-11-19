@@ -137,9 +137,8 @@ class TestEmailSecurityHandler:
         handler.forward_message.assert_not_called()
         mock_dxr_client.on_demand_classifier.run_job.assert_called_once()
 
-    async def test_handle_data_dataxray_error(self, handler, sample_emails, temp_test_files, mock_dxr_client):
-        """Test handling DataXray API errors."""
-        # Mock DataXray to raise an exception
+    async def test_handle_data_rejects_with_451_when_classification_fails(self, handler, sample_emails, temp_test_files, mock_dxr_client):
+        """Test that a DataXray error rejects the email when FAIL_OPEN is false."""
         mock_dxr_client.on_demand_classifier.run_job.side_effect = Exception("API Error")
 
         email = sample_emails("Error Test", temp_test_files["benign"])
@@ -151,9 +150,44 @@ class TestEmailSecurityHandler:
 
         result = await handler.handle_DATA(Mock(), Mock(), envelope)
 
-        # Should forward email despite classification error (fail-open behavior)
+        assert result == "451 Classification unavailable - please try again later"
+        handler.forward_message.assert_not_called()
+
+    async def test_handle_data_forwards_when_classification_fails_and_fail_open_is_true(self, handler, mock_config, sample_emails, temp_test_files, mock_dxr_client):
+        """Test that a DataXray error delivers the email when FAIL_OPEN is true."""
+        mock_config.fail_open = True
+        mock_dxr_client.on_demand_classifier.run_job.side_effect = Exception("API Error")
+
+        email = sample_emails("Error Test", temp_test_files["benign"])
+
+        envelope = Mock()
+        envelope.mail_from = "test@example.com"
+        envelope.rcpt_tos = ["recipient@example.com"]
+        envelope.content = email.as_bytes()
+
+        result = await handler.handle_DATA(Mock(), Mock(), envelope)
+
         assert result == '250 Message accepted for delivery'
         handler.forward_message.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "verify_tls, expected_ignore_ssl",
+        [
+            (True, False),
+            (False, True),
+        ],
+    )
+    def test_init_passes_tls_setting_to_dxr_client(self, mock_config, mock_dxr_client_class, blocked_labels_yaml, verify_tls, expected_ignore_ssl):
+        """Test that DATAXRAY_VERIFY_TLS controls the ignore_ssl argument of DXRClient."""
+        mock_config.dataxray_verify_tls = verify_tls
+
+        with patch("pathlib.Path.open", mock_open()):
+            with patch("yaml.safe_load", return_value=blocked_labels_yaml):
+                EmailSecurityHandler()
+
+        mock_dxr_client_class.assert_called_once_with(
+            "https://api.dataxray.com", "test-api-key", ignore_ssl=expected_ignore_ssl
+        )
 
     async def test_handle_data_invalid_email(self, handler):
         """Test handling invalid email data."""

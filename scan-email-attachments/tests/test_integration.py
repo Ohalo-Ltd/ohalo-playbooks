@@ -89,8 +89,8 @@ class TestEmailSecurityIntegration:
         handler.forward_message.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_error_handling_and_recovery(self, handler, sample_emails, temp_test_files, mock_dxr_client):
-        """Test error handling and fail-open behavior."""
+    async def test_error_handling_rejects_email_when_classification_fails(self, handler, sample_emails, temp_test_files, mock_dxr_client):
+        """Test that a DataXray error rejects the email with the default FAIL_OPEN=false."""
         # Mock DataXray to fail
         mock_dxr_client.on_demand_classifier.run_job.side_effect = Exception("API temporarily unavailable")
 
@@ -104,9 +104,8 @@ class TestEmailSecurityIntegration:
         # Process email
         result = await handler.handle_DATA(Mock(), Mock(), envelope)
 
-        # Should fail-open (deliver email despite error)
-        assert result == '250 Message accepted for delivery'
-        handler.forward_message.assert_called_once()
+        assert result == "451 Classification unavailable - please try again later"
+        handler.forward_message.assert_not_called()
 
     def test_sensitive_label_coverage(self, handler, blocked_labels_yaml):
         """Test that all required sensitive labels are covered from YAML config."""

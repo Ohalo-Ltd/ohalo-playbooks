@@ -27,7 +27,9 @@ class EmailSecurityHandler:
         self.email_processor = EmailProcessor()
         # Initialize the DataXray client directly
         self.dxr_client = DXRClient(
-            config.dataxray_base_url, config.dataxray_api_key, ignore_ssl=True
+            config.dataxray_base_url,
+            config.dataxray_api_key,
+            ignore_ssl=not config.dataxray_verify_tls,
         )
         # Mail relay configuration
         self.mailhog_host = config.mailhog_host
@@ -200,8 +202,13 @@ class EmailSecurityHandler:
                                 logger.warning(f"Failed to delete temporary file {temp_file_path}: {e}")
 
                 except Exception as e:
+                    if not config.fail_open:
+                        logger.error(
+                            f"Classification error - rejecting email: {str(e)}"
+                        )
+                        return "451 Classification unavailable - please try again later"
                     logger.warning(
-                        f"Classification error - allowing email through for demo: {str(e)}"
+                        f"Classification error - allowing email through because FAIL_OPEN is true: {str(e)}"
                     )
 
             # All attachments passed classification - forward to MailHog
