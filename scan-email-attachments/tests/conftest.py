@@ -108,7 +108,7 @@ def mock_dxr_client_class(monkeypatch):
     mock_client = Mock()
     mock_client.on_demand_classifier = Mock()
     mock_class = Mock(return_value=mock_client)
-    monkeypatch.setattr('smtp_proxy.smtp_server.DXRClient', mock_class)
+    monkeypatch.setattr("smtp_proxy.smtp_server.DXRClient", mock_class)
     return mock_class
 
 
