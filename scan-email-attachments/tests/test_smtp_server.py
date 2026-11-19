@@ -138,9 +138,10 @@ class TestEmailSecurityHandler:
         mock_dxr_client.on_demand_classifier.run_job.assert_called_once()
 
     async def test_handle_data_rejects_with_451_when_classification_fails(
-        self, handler, sample_emails, temp_test_files, mock_dxr_client
+        self, handler, mock_config, sample_emails, temp_test_files, mock_dxr_client
     ):
         """Test that a DataXray error rejects the email when FAIL_OPEN is false."""
+        mock_config.fail_open = False
         mock_dxr_client.on_demand_classifier.run_job.side_effect = Exception(
             "API Error"
         )
@@ -158,9 +159,10 @@ class TestEmailSecurityHandler:
         handler.forward_message.assert_not_called()
 
     async def test_handle_data_rejects_with_451_when_classification_returns_no_hits(
-        self, handler, sample_emails, temp_test_files, mock_dxr_client
+        self, handler, mock_config, sample_emails, temp_test_files, mock_dxr_client
     ):
         """dxrpy returns no hits, not an exception, when the classifier job fails."""
+        mock_config.fail_open = False
         mock_dxr_client.on_demand_classifier.run_job.return_value = []
 
         email = sample_emails("Failed Job Test", temp_test_files["benign"])
