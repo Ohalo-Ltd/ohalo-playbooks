@@ -215,6 +215,10 @@ class TestEmailSecurityHandler:
         expected_ignore_ssl,
     ):
         """Test that DATAXRAY_VERIFY_TLS controls the ignore_ssl argument of DXRClient."""
+        expected_base_url = "https://dataxray.example.com/api"
+        expected_api_key = "tls-test-api-key"
+        mock_config.dataxray_base_url = expected_base_url
+        mock_config.dataxray_api_key = expected_api_key
         mock_config.dataxray_verify_tls = verify_tls
 
         with patch("pathlib.Path.open", mock_open()):
@@ -222,7 +226,7 @@ class TestEmailSecurityHandler:
                 EmailSecurityHandler()
 
         mock_dxr_client_class.assert_called_once_with(
-            "https://api.dataxray.com", "test-api-key", ignore_ssl=expected_ignore_ssl
+            expected_base_url, expected_api_key, ignore_ssl=expected_ignore_ssl
         )
 
     async def test_handle_data_invalid_email(self, handler):
