@@ -18,16 +18,14 @@ def required_env(monkeypatch):
 
 
 class TestConfig:
-    def test_defaults_fail_closed_and_verify_tls_when_settings_are_unset(
-        self, required_env
-    ):
-        config = Config()
+    def test_fail_open_is_false_when_unset(self, required_env):
+        assert Config().fail_open is False
 
-        assert (config.fail_open, config.dataxray_verify_tls, config.validate()) == (
-            False,
-            True,
-            None,
-        )
+    def test_verify_tls_is_true_when_unset(self, required_env):
+        assert Config().dataxray_verify_tls is True
+
+    def test_validate_accepts_config_when_settings_are_unset(self, required_env):
+        assert Config().validate() is None
 
     @pytest.mark.parametrize(
         "value, expected",
@@ -46,7 +44,7 @@ class TestConfig:
 
         config = Config()
 
-        assert (config.fail_open, config.validate()) == (expected, None)
+        assert config.fail_open == expected
 
     @pytest.mark.parametrize(
         "value, expected",
@@ -64,7 +62,24 @@ class TestConfig:
 
         config = Config()
 
-        assert (config.dataxray_verify_tls, config.validate()) == (expected, None)
+        assert config.dataxray_verify_tls == expected
+
+    @pytest.mark.parametrize(
+        "name, value",
+        [
+            ("FAIL_OPEN", "true"),
+            ("FAIL_OPEN", "FALSE"),
+            ("DATAXRAY_VERIFY_TLS", "true"),
+            ("DATAXRAY_VERIFY_TLS", "False"),
+        ],
+    )
+    def test_validate_accepts_setting_when_value_is_true_or_false(
+        self, required_env, monkeypatch, name, value
+    ):
+        # given
+        monkeypatch.setenv(name, value)
+
+        assert Config().validate() is None
 
     @pytest.mark.parametrize(
         "name, value, expected_error",
