@@ -195,6 +195,7 @@ class TestEmailSecurityHandler:
 
         assert result == '250 Message accepted for delivery'
         handler.forward_message.assert_called_once()
+        mock_dxr_client.on_demand_classifier.run_job.assert_called_once()
 
     @pytest.mark.parametrize(
         "verify_tls, expected_ignore_ssl",
