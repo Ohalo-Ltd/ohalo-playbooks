@@ -139,7 +139,7 @@ def test_save_asset_into_purview(purview_client, test_artifacts):
 def test_connect_to_dxr_and_pull_classifications():
     env_or_skip()
     base_url = sut._normalize_base_url(os.getenv("DXR_APP_URL"))
-    path = os.getenv("DXR_CLASSIFICATIONS_PATH", "/api/vbeta/classifications")
+    path = os.getenv("DXR_CLASSIFICATIONS_PATH", "/api/v1/classifications")
     url = f"{base_url}{path}"
     headers = {"Authorization": f"Bearer {os.getenv('DXR_PAT_TOKEN')}", "Accept": "application/json", "Referer": base_url}
     verify = not str(os.getenv("DXR_VERIFY_SSL", "1")).lower() in ("0", "false", "no")

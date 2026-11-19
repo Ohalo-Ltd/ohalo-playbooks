@@ -7,7 +7,7 @@ import requests
 from .config import HTTP, HTTP_TIMEOUT_SECONDS, dxr_env, logger
 
 def get_dxr_classifications() -> List[Dict[str, Any]]:
-    """Fetch the classification catalog: GET /api/vbeta/classifications -> {"data": [...]}"""
+    """Fetch the classification catalog: GET /api/v1/classifications -> {"data": [...]}"""
     env = dxr_env()
     url = f"{env['DXR_APP_URL']}{env['DXR_CLASSIFICATIONS_PATH']}"
     verify = not str(env.get("DXR_VERIFY_SSL", "1")).lower() in ("0", "false", "no")
@@ -29,7 +29,7 @@ def get_dxr_classifications() -> List[Dict[str, Any]]:
 
 
 def list_file_datasources_for_label(label_id: str, label_name: str | None = None) -> Tuple[Dict[str, str], List[Dict[str, Any]]]:
-    """Stream JSONL from GET /api/vbeta/files with label filter and extract unique datasources.
+    """Stream JSONL from GET /api/v1/files with label filter and extract unique datasources.
     Primary filter: label.id:"{label_id}". If zero results and label_name provided, fallback to label.name:"{label_name}".
     Returns (name_map, items) where items are minimal dicts: {id,name,connectorTypeName}.
     """

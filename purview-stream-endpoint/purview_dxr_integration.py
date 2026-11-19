@@ -20,8 +20,8 @@ App registration (service principal) steps:
 Environment variables required:
   DXR_APP_URL               e.g., https://my-dxr.example.com
   DXR_PAT_TOKEN             Personal Access Token to call DXR API
-  DXR_CLASSIFICATIONS_PATH  (optional) default: /api/vbeta/classifications
-  DXR_FILES_PATH            (optional) default: /api/vbeta/files
+  DXR_CLASSIFICATIONS_PATH  (optional) default: /api/v1/classifications
+  DXR_FILES_PATH            (optional) default: /api/v1/files
 
   PURVIEW_ENDPOINT          e.g., https://<account-name>.purview.azure.com or https://api.purview-service.microsoft.com
   AZURE_TENANT_ID           Entra tenant ID
