@@ -61,9 +61,9 @@ def dxr_env() -> Dict[str, str]:
     return {
         "DXR_APP_URL": base,
         "DXR_PAT_TOKEN": os.getenv("DXR_PAT_TOKEN", ""),
-        # New vbeta endpoints
-        "DXR_CLASSIFICATIONS_PATH": os.getenv("DXR_CLASSIFICATIONS_PATH", "/api/vbeta/classifications"),
-        "DXR_FILES_PATH": os.getenv("DXR_FILES_PATH", "/api/vbeta/files"),
+        # DataXray v1 API endpoints
+        "DXR_CLASSIFICATIONS_PATH": os.getenv("DXR_CLASSIFICATIONS_PATH", "/api/v1/classifications"),
+        "DXR_FILES_PATH": os.getenv("DXR_FILES_PATH", "/api/v1/files"),
         "DXR_VERIFY_SSL": os.getenv("DXR_VERIFY_SSL", "1"),
         "DXR_TENANT": os.getenv("DXR_TENANT", "default"),
     }

@@ -86,8 +86,8 @@ Required:
  - `PURVIEW_DOMAIN_ID`: Domain referenceName (6-char) as parent for child collections
 - `PURVIEW_PARENT_COLLECTION_ID`: Parent collection referenceName; if set, takes precedence over `PURVIEW_DOMAIN_ID`
 - `UNSTRUCTURED_DATASETS_COLLECTION_NAME`: Friendly name for the single collection holding all label assets (default "Unstructured Datasets"). The referenceName is derived automatically per parent collection and no longer configurable.
-- `DXR_CLASSIFICATIONS_PATH`: Defaults to `/api/vbeta/classifications`
-- `DXR_FILES_PATH`: Defaults to `/api/vbeta/files`
+- `DXR_CLASSIFICATIONS_PATH`: Defaults to `/api/v1/classifications`
+- `DXR_FILES_PATH`: Defaults to `/api/v1/files`
 - `DXR_TENANT`: Tenant label used in qualified names (default `default`)
 - `POLL_SECONDS`: Poll interval (default `60`)
 - `RUN_ONCE`: Set to `1` to run one cycle and exit
