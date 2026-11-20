@@ -39,7 +39,6 @@ class TestConfig:
     def test_parses_fail_open_when_value_is_true_or_false(
         self, required_env, monkeypatch, value, expected
     ):
-        # given
         monkeypatch.setenv("FAIL_OPEN", value)
 
         config = Config()
@@ -57,7 +56,6 @@ class TestConfig:
     def test_parses_verify_tls_when_value_is_true_or_false(
         self, required_env, monkeypatch, value, expected
     ):
-        # given
         monkeypatch.setenv("DATAXRAY_VERIFY_TLS", value)
 
         config = Config()
@@ -76,7 +74,6 @@ class TestConfig:
     def test_validate_accepts_setting_when_value_is_true_or_false(
         self, required_env, monkeypatch, name, value
     ):
-        # given
         monkeypatch.setenv(name, value)
 
         assert Config().validate() is None
@@ -92,7 +89,6 @@ class TestConfig:
     def test_validate_rejects_setting_when_value_is_not_true_or_false(
         self, required_env, monkeypatch, name, value, expected_error
     ):
-        # given
         monkeypatch.setenv(name, value)
 
         assert Config().validate() == expected_error
