@@ -1,5 +1,5 @@
 # Data X-Ray Email Security Integration Playbook
-Data X-Ray version: **7.19.0**
+Tested with DataXray version: **8.7.1**
 
 🚀 **Quick Start**: Run `./start_playbook.sh` to launch the complete playbook environment! Configure label rules in `src/smtp_proxy/blocked_labels.yaml`.
 
@@ -76,6 +76,18 @@ The startup script will validate your configuration and launch:
 - **SMTP Security Gateway** (port 1025) - intercepts and analyzes emails
 - **MailHog Inbox** (http://localhost:8025) - shows delivered emails
 
+### Settings
+
+`DATAXRAY_BASE_URL` is the URL of your DataXray instance, for example `https://dataxray.example.com`. The proxy adds `/api` when the URL does not end in it.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `DATAXRAY_VERIFY_TLS` | `true` | Checks the TLS certificate of DataXray. Set it to `false` only for a test instance with a self-signed certificate. |
+
+When classification fails, the proxy rejects the email with the SMTP reply `451` (a temporary failure), and the sending server tries again later.
+
+The proxy keeps the SMTP connection open while DataXray classifies each attachment. The sending client waits until each On-Demand Classifier job completes. The proxy sets no time limit; the timeout of the sending client applies.
+
 ### 3. Configure Your Email Client
 
 **For Thunderbird:**
@@ -142,6 +154,7 @@ To adapt this to your organization:
 
 ### Data X-Ray API Problems
 - **Authentication failed**: Double-check your API key in `.env`
+- **Emails rejected with the SMTP reply 451**: The classification failed. Check the logs: `docker compose logs smtp-proxy`
 - **Network issues**: Verify connectivity to your Data X-Ray instance
 - **Label configuration**: Verify "Sensitive Financial Information" label exists and is case-sensitive
 

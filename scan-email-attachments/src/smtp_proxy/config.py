@@ -10,7 +10,7 @@ class Config:
     """Configuration management for SMTP proxy."""
     
     def __init__(self):
-        self.dataxray_base_url = os.getenv("DATAXRAY_BASE_URL", "https://api.dataxray.com")
+        self.dataxray_base_url = self._api_url(os.getenv("DATAXRAY_BASE_URL", ""))
         self.dataxray_api_key = os.getenv("DATAXRAY_API_KEY", "")
         self.datasource_ids = self._parse_datasource_ids(os.getenv("DATASOURCE_ID", ""))
         self.smtp_proxy_host = os.getenv("SMTP_PROXY_HOST", "0.0.0.0")
@@ -18,6 +18,20 @@ class Config:
         self.mailhog_host = os.getenv("MAILHOG_HOST", "localhost")
         self.mailhog_port = int(os.getenv("MAILHOG_PORT", "1026"))
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
+        self.dataxray_verify_tls = self._parse_bool(
+            os.getenv("DATAXRAY_VERIFY_TLS", "true")
+        )
+
+    def _api_url(self, base_url: str) -> str:
+        """Add /api, because dxrpy 0.2.x adds the endpoint paths to the URL as given."""
+        url = base_url.rstrip("/")
+        if url and not url.endswith("/api"):
+            url += "/api"
+        return url
+
+    def _parse_bool(self, value: str) -> Optional[bool]:
+        """Parse "true" or "false" (any case). Return None for other values."""
+        return {"true": True, "false": False}.get(value.strip().lower())
     
     def _parse_datasource_ids(self, datasource_id_str: str) -> List[int]:
         """Parse comma-separated datasource IDs into list of integers."""
@@ -38,6 +52,9 @@ class Config:
         
         if not self.datasource_ids:
             return "DATASOURCE_ID environment variable is required (comma-separated list of integers)"
+
+        if self.dataxray_verify_tls is None:
+            return "DATAXRAY_VERIFY_TLS must be true or false"
         
         return None
 

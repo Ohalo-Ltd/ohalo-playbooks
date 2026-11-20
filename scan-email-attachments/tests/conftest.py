@@ -103,16 +103,19 @@ def mock_dataxray_label():
 
 
 @pytest.fixture
-def mock_dxr_client(monkeypatch):
-    """Mock the DataXray client."""
+def mock_dxr_client_class(monkeypatch):
+    """Mock the DataXray client class, so that tests can check the constructor arguments."""
     mock_client = Mock()
-    mock_classifier = Mock()
-    mock_client.on_demand_classifier = mock_classifier
-    
-    # Mock the constructor
-    monkeypatch.setattr('smtp_proxy.smtp_server.DXRClient', lambda *args, **kwargs: mock_client)
-    
-    return mock_client
+    mock_client.on_demand_classifier = Mock()
+    mock_class = Mock(return_value=mock_client)
+    monkeypatch.setattr("smtp_proxy.smtp_server.DXRClient", mock_class)
+    return mock_class
+
+
+@pytest.fixture
+def mock_dxr_client(mock_dxr_client_class):
+    """Mock the DataXray client."""
+    return mock_dxr_client_class.return_value
 
 
 @pytest.fixture
@@ -126,6 +129,7 @@ def mock_config(monkeypatch):
     mock_cfg.smtp_proxy_port = 1025
     mock_cfg.mailhog_host = "localhost"
     mock_cfg.mailhog_port = 1026
+    mock_cfg.dataxray_verify_tls = True
     
     monkeypatch.setattr('smtp_proxy.smtp_server.config', mock_cfg)
     

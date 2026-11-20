@@ -137,10 +137,13 @@ class TestEmailSecurityHandler:
         handler.forward_message.assert_not_called()
         mock_dxr_client.on_demand_classifier.run_job.assert_called_once()
 
-    async def test_handle_data_dataxray_error(self, handler, sample_emails, temp_test_files, mock_dxr_client):
-        """Test handling DataXray API errors."""
-        # Mock DataXray to raise an exception
-        mock_dxr_client.on_demand_classifier.run_job.side_effect = Exception("API Error")
+    async def test_handle_data_rejects_with_451_when_classification_fails(
+        self, handler, sample_emails, temp_test_files, mock_dxr_client
+    ):
+        """Test that a DataXray error rejects the email."""
+        mock_dxr_client.on_demand_classifier.run_job.side_effect = Exception(
+            "API Error"
+        )
 
         email = sample_emails("Error Test", temp_test_files["benign"])
 
@@ -151,9 +154,56 @@ class TestEmailSecurityHandler:
 
         result = await handler.handle_DATA(Mock(), Mock(), envelope)
 
-        # Should forward email despite classification error (fail-open behavior)
-        assert result == '250 Message accepted for delivery'
-        handler.forward_message.assert_called_once()
+        assert result == "451 Classification unavailable - please try again later"
+        handler.forward_message.assert_not_called()
+
+    async def test_handle_data_rejects_with_451_when_classification_returns_no_hits(
+        self, handler, sample_emails, temp_test_files, mock_dxr_client
+    ):
+        """dxrpy returns no hits, not an exception, when the classifier job fails."""
+        mock_dxr_client.on_demand_classifier.run_job.return_value = []
+
+        email = sample_emails("Failed Job Test", temp_test_files["benign"])
+
+        envelope = Mock()
+        envelope.mail_from = "test@example.com"
+        envelope.rcpt_tos = ["recipient@example.com"]
+        envelope.content = email.as_bytes()
+
+        result = await handler.handle_DATA(Mock(), Mock(), envelope)
+
+        assert result == "451 Classification unavailable - please try again later"
+        handler.forward_message.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "verify_tls, expected_ignore_ssl",
+        [
+            (True, False),
+            (False, True),
+        ],
+    )
+    def test_init_passes_ignore_ssl_to_dxr_client_when_verify_tls_is_set(
+        self,
+        mock_config,
+        mock_dxr_client_class,
+        blocked_labels_yaml,
+        verify_tls,
+        expected_ignore_ssl,
+    ):
+        """Test that DATAXRAY_VERIFY_TLS controls the ignore_ssl argument of DXRClient."""
+        expected_base_url = "https://dataxray.example.com/api"
+        expected_api_key = "tls-test-api-key"
+        mock_config.dataxray_base_url = expected_base_url
+        mock_config.dataxray_api_key = expected_api_key
+        mock_config.dataxray_verify_tls = verify_tls
+
+        with patch("pathlib.Path.open", mock_open()):
+            with patch("yaml.safe_load", return_value=blocked_labels_yaml):
+                EmailSecurityHandler()
+
+        mock_dxr_client_class.assert_called_once_with(
+            expected_base_url, expected_api_key, ignore_ssl=expected_ignore_ssl
+        )
 
     async def test_handle_data_invalid_email(self, handler):
         """Test handling invalid email data."""
@@ -176,6 +226,18 @@ class TestEmailSecurityHandler:
             handler.blocked_labels[0]["message"]
             == "This email contains sensitive financial information that cannot be sent externally"
         )
+
+    def test_loads_readme_demo_label_when_shipped_config_is_used(
+        self, mock_config, mock_dxr_client
+    ):
+        handler = EmailSecurityHandler()
+
+        assert handler.blocked_labels == [
+            {
+                "name": "Sensitive Financial Information",
+                "message": "Sensitive financial information found",
+            }
+        ]
 
     async def test_multiple_attachments_mixed_sensitivity(self, handler, temp_test_files, mock_dxr_client, mock_dataxray_hit, mock_dataxray_label):
         """Test email with multiple attachments of mixed sensitivity."""

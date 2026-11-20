@@ -27,7 +27,9 @@ class EmailSecurityHandler:
         self.email_processor = EmailProcessor()
         # Initialize the DataXray client directly
         self.dxr_client = DXRClient(
-            config.dataxray_base_url, config.dataxray_api_key, ignore_ssl=True
+            config.dataxray_base_url,
+            config.dataxray_api_key,
+            ignore_ssl=not config.dataxray_verify_tls,
         )
         # Mail relay configuration
         self.mailhog_host = config.mailhog_host
@@ -184,6 +186,13 @@ class EmailSecurityHandler:
                             )
                         )
 
+                        # dxrpy returns no hits, not an exception, when the job fails.
+                        # The search by scan ID finds the file also when it has no labels.
+                        if not hits:
+                            raise RuntimeError(
+                                f"DataXray returned no classification result for {filename}"
+                            )
+
                         # Check for sensitive content
                         restricted_label = self._get_sensitive_labels(hits)
 
@@ -200,9 +209,8 @@ class EmailSecurityHandler:
                                 logger.warning(f"Failed to delete temporary file {temp_file_path}: {e}")
 
                 except Exception as e:
-                    logger.warning(
-                        f"Classification error - allowing email through for demo: {str(e)}"
-                    )
+                    logger.error(f"Classification error - rejecting email: {str(e)}")
+                    return "451 Classification unavailable - please try again later"
 
             # All attachments passed classification - forward to MailHog
             await self.forward_message(
