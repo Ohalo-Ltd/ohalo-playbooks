@@ -10,7 +10,7 @@ class Config:
     """Configuration management for SMTP proxy."""
     
     def __init__(self):
-        self.dataxray_base_url = os.getenv("DATAXRAY_BASE_URL", "")
+        self.dataxray_base_url = self._api_url(os.getenv("DATAXRAY_BASE_URL", ""))
         self.dataxray_api_key = os.getenv("DATAXRAY_API_KEY", "")
         self.datasource_ids = self._parse_datasource_ids(os.getenv("DATASOURCE_ID", ""))
         self.smtp_proxy_host = os.getenv("SMTP_PROXY_HOST", "0.0.0.0")
@@ -21,6 +21,13 @@ class Config:
         self.dataxray_verify_tls = self._parse_bool(
             os.getenv("DATAXRAY_VERIFY_TLS", "true")
         )
+
+    def _api_url(self, base_url: str) -> str:
+        """Add /api, because dxrpy 0.2.x adds the endpoint paths to the URL as given."""
+        url = base_url.rstrip("/")
+        if url and not url.endswith("/api"):
+            url += "/api"
+        return url
 
     def _parse_bool(self, value: str) -> Optional[bool]:
         """Parse "true" or "false" (any case). Return None for other values."""

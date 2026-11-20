@@ -57,6 +57,22 @@ class TestConfig:
 
         assert Config().validate() == "DATAXRAY_VERIFY_TLS must be true or false"
 
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "https://dataxray.example.com",
+            "https://dataxray.example.com/",
+            "https://dataxray.example.com/api",
+            "https://dataxray.example.com/api/",
+        ],
+    )
+    def test_base_url_ends_in_api_when_value_has_or_lacks_api(
+        self, required_env, monkeypatch, value
+    ):
+        monkeypatch.setenv("DATAXRAY_BASE_URL", value)
+
+        assert Config().dataxray_base_url == "https://dataxray.example.com/api"
+
     def test_validate_rejects_missing_base_url_when_unset(
         self, required_env, monkeypatch
     ):

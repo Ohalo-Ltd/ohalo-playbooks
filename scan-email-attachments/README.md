@@ -78,7 +78,7 @@ The startup script will validate your configuration and launch:
 
 ### Settings
 
-`DATAXRAY_BASE_URL` must end in `/api`, for example `https://dataxray.example.com/api`.
+`DATAXRAY_BASE_URL` is the URL of your DataXray instance, for example `https://dataxray.example.com`. The proxy adds `/api` when the URL does not end in it.
 
 | Setting | Default | What it does |
 |---|---|---|
@@ -154,7 +154,6 @@ To adapt this to your organization:
 
 ### Data X-Ray API Problems
 - **Authentication failed**: Double-check your API key in `.env`
-- **405 Method Not Allowed**: Make sure `DATAXRAY_BASE_URL` ends in `/api`
 - **Emails rejected with the SMTP reply 451**: The classification failed. Check the logs: `docker compose logs smtp-proxy`
 - **Network issues**: Verify connectivity to your Data X-Ray instance
 - **Label configuration**: Verify "Sensitive Financial Information" label exists and is case-sensitive
