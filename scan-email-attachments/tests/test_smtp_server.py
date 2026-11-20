@@ -251,6 +251,18 @@ class TestEmailSecurityHandler:
             == "This email contains sensitive financial information that cannot be sent externally"
         )
 
+    def test_loads_readme_demo_label_when_shipped_config_is_used(
+        self, mock_config, mock_dxr_client
+    ):
+        handler = EmailSecurityHandler()
+
+        assert handler.blocked_labels == [
+            {
+                "name": "Sensitive Financial Information",
+                "message": "Sensitive financial information found",
+            }
+        ]
+
     async def test_multiple_attachments_mixed_sensitivity(self, handler, temp_test_files, mock_dxr_client, mock_dataxray_hit, mock_dataxray_label):
         """Test email with multiple attachments of mixed sensitivity."""
         from email.mime.multipart import MIMEMultipart
