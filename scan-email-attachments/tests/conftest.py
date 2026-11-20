@@ -129,7 +129,6 @@ def mock_config(monkeypatch):
     mock_cfg.smtp_proxy_port = 1025
     mock_cfg.mailhog_host = "localhost"
     mock_cfg.mailhog_port = 1026
-    mock_cfg.fail_open = False
     mock_cfg.dataxray_verify_tls = True
     
     monkeypatch.setattr('smtp_proxy.smtp_server.config', mock_cfg)

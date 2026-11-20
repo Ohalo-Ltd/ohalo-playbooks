@@ -90,10 +90,9 @@ class TestEmailSecurityIntegration:
 
     @pytest.mark.asyncio
     async def test_error_handling_rejects_email_when_classification_fails(
-        self, handler, mock_config, sample_emails, temp_test_files, mock_dxr_client
+        self, handler, sample_emails, temp_test_files, mock_dxr_client
     ):
-        """Test that a DataXray error rejects the email when FAIL_OPEN is false."""
-        mock_config.fail_open = False
+        """Test that a DataXray error rejects the email."""
         # Mock DataXray to fail
         mock_dxr_client.on_demand_classifier.run_job.side_effect = Exception("API temporarily unavailable")
 

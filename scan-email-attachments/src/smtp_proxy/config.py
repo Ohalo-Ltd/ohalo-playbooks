@@ -18,7 +18,6 @@ class Config:
         self.mailhog_host = os.getenv("MAILHOG_HOST", "localhost")
         self.mailhog_port = int(os.getenv("MAILHOG_PORT", "1026"))
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
-        self.fail_open = self._parse_bool(os.getenv("FAIL_OPEN", "false"))
         self.dataxray_verify_tls = self._parse_bool(
             os.getenv("DATAXRAY_VERIFY_TLS", "true")
         )
@@ -46,9 +45,6 @@ class Config:
         
         if not self.datasource_ids:
             return "DATASOURCE_ID environment variable is required (comma-separated list of integers)"
-
-        if self.fail_open is None:
-            return "FAIL_OPEN must be true or false"
 
         if self.dataxray_verify_tls is None:
             return "DATAXRAY_VERIFY_TLS must be true or false"
